@@ -189,7 +189,7 @@ jobs:
 
       - name: Upload the ready-for-human-review publish kit
         if: always() && steps.work.outputs.required == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bsk-publish-kit-${{ github.run_number }}
           path: |
