@@ -1,0 +1,237 @@
+name: BINA SHOR KE — GPU Poll, Final Edit, QA and Telegram
+
+on:
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Poll an active job, or explicitly retry a failed/interrupted finalization"
+        required: true
+        default: "poll"
+        type: choice
+        options:
+          - "poll"
+          - "retry-finalize"
+          - "resume-checkpoint"
+          - "resolve-dispatch-running"
+          - "resolve-dispatch-not-started"
+  schedule:
+    - cron: "0 */2 * * *"
+      timezone: "Asia/Kolkata"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bina-shor-ke-studio
+  cancel-in-progress: false
+
+jobs:
+  finalize:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    env:
+      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'poll' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_WORKERS_AI_FREE_ONLY: ${{ secrets.CF_WORKERS_AI_FREE_ONLY }}
+      BSK_TEXT_PROVIDER: gemini
+      GROQ_TEXT_MODEL: openai/gpt-oss-120b
+      MISTRAL_TEXT_MODEL: ministral-8b-latest
+      CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      KAGGLE_KERNEL_SLUG: ${{ vars.KAGGLE_KERNEL_SLUG }}
+      GEMINI_TEXT_MODEL: gemini-3.8-flash
+      GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
+      TTS_VOICE: Kore
+      REQUIRE_AI_VIDEO: "1"
+      BSK_ASR_QA: "1"
+      BSK_ASR_MODEL: large-v3-turbo
+      HF_HOME: ~/.cache/huggingface
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check whether a GPU batch actually needs polling (stdlib only)
+        id: pending
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          path = Path("data/pending_gpu_job.json")
+          try:
+              state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+          except Exception:
+              state = {}
+          action = os.environ.get("POLL_ACTION", "poll")
+          poll_states = {"gpu_running", "gpu_complete"}
+          retry_states = {"finalize_failed", "finalizing", "gpu_failed"}
+          resolve_states = {"dispatch_unknown"}
+          resume_states = {"gpu_checkpoint_saved"}
+          if action == "retry-finalize":
+              allowed = retry_states
+          elif action == "resume-checkpoint":
+              allowed = resume_states
+          elif action.startswith("resolve-dispatch-"):
+              allowed = resolve_states
+          else:
+              allowed = poll_states
+          active = state.get("status") in allowed
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write("active=" + ("true" if active else "false") + "\n")
+          print(f"Pending GPU state: {state.get('status', 'none')}; work_required={active}")
+          PY
+
+      - name: Set up Python
+        if: steps.pending.outputs.active == 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Quick remote Kaggle status check (minimal CLI only)
+        id: remote
+        if: steps.pending.outputs.active == 'true' && env.POLL_ACTION == 'poll'
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check -q kaggle
+          mkdir -p "$HOME/.kaggle"
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > "$HOME/.kaggle/kaggle.json"
+          chmod 600 "$HOME/.kaggle/kaggle.json"
+          kernel_id="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG:-bina-shor-ke-studio-video}"
+          remote_status="$(kaggle kernels status "$kernel_id" 2>&1 || true)"
+          echo "$remote_status"
+          if printf '%s' "$remote_status" | grep -Eqi 'RUNNING|QUEUED|COMPILING|CREATED'; then
+            echo 'finalize_required=false' >> "$GITHUB_OUTPUT"
+          else
+            # Unknown/error states go through the full poller for safe diagnosis/recovery.
+            echo 'finalize_required=true' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether full work is required
+        id: work
+        if: steps.pending.outputs.active == 'true'
+        shell: bash
+        run: |
+          action="$POLL_ACTION"
+          if [ "$action" = 'poll' ] && [ "${{ steps.remote.outputs.finalize_required }}" != 'true' ]; then
+            echo 'required=false' >> "$GITHUB_OUTPUT"
+            echo 'finalize=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'required=true' >> "$GITHUB_OUTPUT"
+            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'poll' ]; then
+              echo 'finalize=true' >> "$GITHUB_OUTPUT"
+            else
+              echo 'finalize=false' >> "$GITHUB_OUTPUT"
+            fi
+          fi
+
+      - name: Restore verified narration WAV cache from earlier runs
+        if: steps.work.outputs.finalize == 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tts_cache
+          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            bsk-tts-${{ runner.os }}-
+
+      - name: Install FFmpeg and Devanagari fonts
+        if: steps.work.outputs.finalize == 'true'
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          ffmpeg -filters 2>/dev/null | grep -q subtitles
+
+      - name: Restore local Hindi narration ASR model cache
+        if: steps.work.outputs.finalize == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface/hub
+          key: bsk-whisper-large-v3-turbo-${{ runner.os }}-v1
+
+      - name: Install dependencies and configure private Kaggle CLI
+        if: steps.work.outputs.required == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ]; then
+            python -m pip install --disable-pip-version-check -r requirements-asr.txt
+          fi
+          python -m pip install --disable-pip-version-check kaggle
+          mkdir -p "$HOME/.kaggle"
+          printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > "$HOME/.kaggle/kaggle.json"
+          chmod 600 "$HOME/.kaggle/kaggle.json"
+
+      - name: Poll active GPU job and finalize deliverables
+        if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'poll'
+        run: python scripts/studio_pipeline.py poll-finalize
+
+      - name: Explicitly retry a failed/interrupted finalization
+        if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'retry-finalize'
+        run: python scripts/studio_pipeline.py retry-finalize
+
+      - name: Resume from saved private scene checkpoints
+        if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'resume-checkpoint'
+        run: python scripts/studio_pipeline.py resume-checkpoint
+
+      - name: Resolve an ambiguous Kaggle push — owner confirms the new run exists
+        if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'resolve-dispatch-running'
+        run: python scripts/studio_pipeline.py resolve-dispatch-running
+
+      - name: Resolve an ambiguous Kaggle push — owner confirms no new run started
+        if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'resolve-dispatch-not-started'
+        run: python scripts/studio_pipeline.py resolve-dispatch-not-started
+
+      - name: Upload the ready-for-human-review publish kit
+        if: always() && steps.work.outputs.required == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsk-publish-kit-${{ github.run_number }}
+          path: |
+            output/**/reel.mp4
+            output/**/cover.png
+            output/**/publish.txt
+            output/**/credits.txt
+            output/**/quality_report.json
+            output/**/ai_visual_prompts.txt
+            data/pending_gpu_job.json
+            data/history.json
+            data/performance_log.csv
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Detect newly generated narration cache entries
+        id: tts_cache_changed
+        if: always() && steps.work.outputs.finalize == 'true'
+        shell: bash
+        run: |
+          if [ -f data/tts_cache/.dirty ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            rm -f data/tts_cache/.dirty
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save verified narration WAV cache for retries
+        if: always() && steps.work.outputs.finalize == 'true' && steps.tts_cache_changed.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/tts_cache
+          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
+      - name: Persist delivery and performance state
+        if: always() && steps.work.outputs.required == 'true'
+        continue-on-error: true
+        run: |
+          git config user.name "bina-shor-ke-studio[bot]"
+          git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
+          git add data/pending_gpu_job.json data/history.json data/telegram_state.json data/performance_log.csv data/toolchain_lock.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Update BSK GPU delivery and QA state [skip ci]"
+            git push
+          fi

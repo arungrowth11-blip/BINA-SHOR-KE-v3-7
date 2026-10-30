@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "benchmark_id": "bsk-model-lab-v1",
+  "purpose": "Controlled offline qualification pack. Do not connect candidates to weekly production until a signed scorecard passes.",
+  "video_prompts": [
+    {
+      "id": "V01",
+      "type": "human_micro_story",
+      "prompt": "Photorealistic live-action Indian railway platform at early morning. A middle-aged tea seller notices a tired sanitation worker searching pockets for coins, silently places a cup of tea near him and turns away. One restrained action, natural body movement, documentary realism, no readable text, vertical 9:16."
+    },
+    {
+      "id": "V02",
+      "type": "hands_and_objects",
+      "prompt": "Photorealistic close medium shot of an Indian father's hands carefully repairing a small school shoe at a modest dining table at night, warm practical lamp, believable fingers and tools, subtle emotion, realistic skin and material detail, no text, vertical 9:16."
+    },
+    {
+      "id": "V03",
+      "type": "two_person_continuity",
+      "prompt": "Photorealistic Indian mother and adult daughter standing in a modest kitchen after a disagreement, one folds a dish towel and quietly leaves the other a glass of water, subtle eye movement, consistent faces and clothing, natural motion, no melodrama, no text, vertical 9:16."
+    },
+    {
+      "id": "V04",
+      "type": "walking_motion",
+      "prompt": "Photorealistic Indian man in simple office clothes walking slowly through a quiet residential lane after rain, notices a child’s dropped drawing and returns it, natural gait, realistic fabric movement, stable anatomy, no text, vertical 9:16."
+    },
+    {
+      "id": "V05",
+      "type": "low_light",
+      "prompt": "Photorealistic small Indian home during a power cut, a grandmother lights a candle and notices her grandson pretending not to be afraid, intimate low-light exposure, believable candlelight and shadows, natural micro-expressions, no text, vertical 9:16."
+    },
+    {
+      "id": "V06",
+      "type": "outdoor_motion",
+      "prompt": "Photorealistic Indian bus stop in light monsoon rain, a young woman shifts her umbrella to cover an elderly stranger while keeping her own bag dry, physically plausible rain and umbrella movement, natural expressions, no text, vertical 9:16."
+    },
+    {
+      "id": "V07",
+      "type": "facial_micro_expression",
+      "prompt": "Photorealistic close-up of an Indian shopkeeper reading a short handwritten note, expression changes subtly from irritation to recognition, realistic eye movement and facial anatomy, soft window light, no legible writing, no text, vertical 9:16."
+    },
+    {
+      "id": "V08",
+      "type": "crowd_and_occlusion",
+      "prompt": "Photorealistic Indian neighbourhood market lane with a few pedestrians passing naturally in foreground while a delivery worker patiently waits for a child to cross, stable subject identity through occlusion, realistic crowd motion, no text, vertical 9:16."
+    },
+    {
+      "id": "V09",
+      "type": "vehicle_and_reflection",
+      "prompt": "Photorealistic Indian city street at dusk viewed beside a parked auto-rickshaw, a driver notices a passenger has left a small lunchbox and carefully steps back to return it, realistic reflections and vehicle geometry, no readable signs, vertical 9:16."
+    },
+    {
+      "id": "V10",
+      "type": "emotional_payoff",
+      "prompt": "Photorealistic Indian office corridor at closing time, a junior employee quietly puts a corrected printed page on a colleague’s desk instead of taking credit, restrained body language and practical fluorescent lighting, believable hands and paper, no readable text, vertical 9:16."
+    }
+  ],
+  "image_prompts": [
+    {
+      "id": "I01",
+      "type": "portrait",
+      "prompt": "Photorealistic Indian male lifestyle portrait, natural proportions, candid expression, soft window light, authentic skin texture, uncluttered background, editorial photography, no text."
+    },
+    {
+      "id": "I02",
+      "type": "cinematic_cover",
+      "prompt": "Photorealistic cinematic still of a small Indian home at monsoon dusk, one warm practical light, visual negative space on the upper third for a title to be added later, no text, no watermark."
+    },
+    {
+      "id": "I03",
+      "type": "hands_detail",
+      "prompt": "Photorealistic cinematic macro photograph of Indian hands repairing a worn school shoe, tactile material detail, natural imperfect skin, controlled depth of field, no text."
+    },
+    {
+      "id": "I04",
+      "type": "environment",
+      "prompt": "Photorealistic Indian railway platform before sunrise, believable signage blurred and unreadable, atmospheric depth, natural practical lighting, no text or logo."
+    },
+    {
+      "id": "I05",
+      "type": "two_person",
+      "prompt": "Photorealistic Indian mother and adult daughter in a modest kitchen after a disagreement, one leaves a glass of water, natural expressions, consistent age cues, no text."
+    },
+    {
+      "id": "I06",
+      "type": "low_light",
+      "prompt": "Photorealistic small Indian home during a power cut, grandmother lights a candle, believable shadow falloff and warm color temperature, no text."
+    },
+    {
+      "id": "I07",
+      "type": "monsoon",
+      "prompt": "Photorealistic Indian bus stop in monsoon rain, elderly stranger and young woman sharing umbrella, realistic rain and fabric, editorial composition, no text."
+    },
+    {
+      "id": "I08",
+      "type": "market",
+      "prompt": "Photorealistic Indian neighbourhood market at dusk, layered depth, authentic shop materials with unreadable signs, human-scale framing, no text."
+    },
+    {
+      "id": "I09",
+      "type": "office",
+      "prompt": "Photorealistic Indian office corridor at closing time, junior employee leaves a corrected page on colleague's desk, restrained emotion, no readable text."
+    },
+    {
+      "id": "I10",
+      "type": "food_object",
+      "prompt": "Photorealistic close still life of a steel tiffin box on an old Indian dining table beside a handwritten note with no legible words, natural light, tactile detail, no text."
+    }
+  ],
+  "tts_lines": [
+    {
+      "id": "T01",
+      "text": "कभी-कभी मदद करने के लिए बड़े शब्द नहीं, बस एक छोटा-सा कदम काफी होता है।"
+    },
+    {
+      "id": "T02",
+      "text": "उसने सच तो बता दिया, लेकिन पहली बार उसे अपनी गलती भी समझ आई।"
+    },
+    {
+      "id": "T03",
+      "text": "आज घर लौटते समय उसने वही रास्ता चुना, जहाँ कल कोई उसका इंतज़ार कर रहा था।"
+    },
+    {
+      "id": "T04",
+      "text": "माँ ने कुछ नहीं कहा; बस मेरी पसंद की चाय बनाकर मेज़ पर रख दी।"
+    },
+    {
+      "id": "T05",
+      "text": "₹1,250 की रसीद, 17 तारीख़ और सुबह 8 बजकर 15 मिनट—इन तीन बातों को साफ़ बोलना है।"
+    },
+    {
+      "id": "T06",
+      "text": "कभी-कभी इंसान नाराज़ नहीं होता, वह बस चाहता है कि कोई उसकी बात पूरी सुन ले।"
+    },
+    {
+      "id": "T07",
+      "text": "उसने कहा, ‘कोई बात नहीं’, मगर उसकी चुप्पी में पूरी कहानी छिपी थी।"
+    },
+    {
+      "id": "T08",
+      "text": "पहले धीरे बोलो, फिर इसी वाक्य को हल्की मुस्कान और उम्मीद के साथ दोहराओ।"
+    },
+    {
+      "id": "T09",
+      "text": "दिल्ली से पलवल जाने वाली आख़िरी बस निकल चुकी थी, फिर भी वह वहीं खड़ा रहा।"
+    },
+    {
+      "id": "T10",
+      "text": "किसी की छोटी-सी मदद को एहसान मत बनाओ; कभी तुम्हें भी किसी की ज़रूरत पड़ सकती है।"
+    }
+  ]
+}

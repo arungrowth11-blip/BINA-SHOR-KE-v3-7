@@ -1,0 +1,15 @@
+# Never check in generated large media or API keys.
+output/
+.env
+*.key
+__pycache__/
+*.pyc
+
+data/tts_cache/
+.env.*
+*.pem
+*.p12
+.kaggle/
+.cache/
+Thumbs.db
+.DS_Store

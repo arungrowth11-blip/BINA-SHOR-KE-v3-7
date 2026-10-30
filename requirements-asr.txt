@@ -1,0 +1,2 @@
+# Local, open-weight multilingual transcription QA. No hosted API or per-request fee.
+faster-whisper==1.2.1

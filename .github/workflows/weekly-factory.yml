@@ -1,0 +1,111 @@
+name: BINA SHOR KE — Director and AI Reel Dispatch
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "Run offline preflight, queue one test Reel, or plan a 3-Reel batch"
+        required: true
+        default: "preflight"
+        type: choice
+        options:
+          - "preflight"
+          - "plan-one"
+          - "plan-week"
+  schedule:
+    - cron: "37 7 * * 6"
+      timezone: "Asia/Kolkata"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: bina-shor-ke-studio
+  cancel-in-progress: false
+
+jobs:
+  director:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'plan-week' }}
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_WORKERS_AI_FREE_ONLY: ${{ secrets.CF_WORKERS_AI_FREE_ONLY }}
+      BSK_TEXT_PROVIDER: gemini
+      GROQ_TEXT_MODEL: openai/gpt-oss-120b
+      MISTRAL_TEXT_MODEL: ministral-8b-latest
+      CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
+      KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
+      GEMINI_TEXT_MODEL: gemini-3.8-flash
+      GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
+      TTS_VOICE: Kore
+    steps:
+      - name: Checkout private repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install FFmpeg and Devanagari fonts
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          ffmpeg -filters 2>/dev/null | grep -q subtitles
+          fc-match "Noto Sans Devanagari"
+
+      - name: Install free workflow dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install --disable-pip-version-check kaggle
+
+      - name: Run logic tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Offline preflight — no network, API, or GPU use
+        if: env.RUN_MODE == 'preflight'
+        run: |
+          python scripts/producer.py --self-test
+          python scripts/studio_pipeline.py preflight
+
+      - name: Editorial director — plan a one-Reel test or weekly AI-video batch
+        if: env.RUN_MODE == 'plan-one' || env.RUN_MODE == 'plan-week'
+        run: |
+          if [[ "$RUN_MODE" == "plan-one" ]]; then
+            python scripts/studio_pipeline.py plan-one
+          else
+            python scripts/studio_pipeline.py plan
+          fi
+
+      - name: Upload non-secret diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bsk-director-${{ github.run_number }}
+          path: |
+            data/pending_gpu_job.json
+            kaggle_kernel/studio_kaggle.py
+            kaggle_kernel/kernel-metadata.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Persist anti-repeat history and job state
+        if: always() && (env.RUN_MODE == 'plan-week' || env.RUN_MODE == 'plan-one')
+        continue-on-error: true
+        run: |
+          git config user.name "bina-shor-ke-studio[bot]"
+          git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
+          git add data/history.json data/telegram_state.json data/pending_gpu_job.json
+          if ! git diff --cached --quiet; then
+            git commit -m "Record BSK plan and GPU dispatch state [skip ci]"
+            git push
+          fi

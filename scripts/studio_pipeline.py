@@ -1,0 +1,966 @@
+#!/usr/bin/env python3
+"""Orchestrate BINA SHOR KE: editorial planning -> Kaggle Wan GPU -> final QA -> Telegram.
+No Facebook publishing; paid fallbacks are intentionally disabled.
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import json
+import statistics
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+import time
+from datetime import datetime
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+ROOT = Path(__file__).resolve().parents[1]
+DATA = ROOT / 'data'
+OUT = ROOT / 'output'
+PENDING = DATA / 'pending_gpu_job.json'
+TOOLCHAIN_LOCK = DATA / 'toolchain_lock.json'
+TZ = ZoneInfo('Asia/Kolkata')
+sys.path.insert(0, str(ROOT / 'scripts'))
+import producer  # noqa: E402
+
+DEFAULT_KAGGLE_SLUG = 'bina-shor-ke-studio-video'
+
+def configured_kaggle_slug(value=None) -> str:
+    raw = os.getenv('KAGGLE_KERNEL_SLUG') if value is None else value
+    return str(raw or '').strip().lower() or DEFAULT_KAGGLE_SLUG
+
+KAGGLE_SLUG = configured_kaggle_slug()
+
+ACTIVE_GPU_STATES = {
+    'dispatching', 'dispatch_unknown', 'gpu_running', 'gpu_complete',
+    'finalizing', 'finalize_failed', 'gpu_checkpoint_saved',
+}
+
+
+def log(msg: str):
+    print(f"[{datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}] {msg}", flush=True)
+
+
+def write_json(path: Path, obj):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + '.tmp')
+    temp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding='utf-8')
+    temp.replace(path)
+
+
+def load_json(path: Path, default=None):
+    if not path.exists():
+        return default
+    return json.loads(path.read_text(encoding='utf-8'))
+
+
+def kaggle_kernel_id():
+    username = os.getenv('KAGGLE_USERNAME', '').strip()
+    key = os.getenv('KAGGLE_KEY', '').strip()
+    if not username or not key:
+        raise RuntimeError('Required GitHub Secrets missing: KAGGLE_USERNAME and/or KAGGLE_KEY. No cloud GPU job was started.')
+    return f"{username}/{KAGGLE_SLUG}"
+
+
+def configure_kaggle_cli():
+    if not os.getenv('KAGGLE_USERNAME') or not os.getenv('KAGGLE_KEY'):
+        raise RuntimeError('KAGGLE_USERNAME/KAGGLE_KEY are required for the GPU dispatch/poll stage.')
+    home = Path.home() / '.kaggle'
+    home.mkdir(parents=True, exist_ok=True)
+    (home / 'kaggle.json').write_text(json.dumps({
+        'username': os.environ['KAGGLE_USERNAME'], 'key': os.environ['KAGGLE_KEY']
+    }), encoding='utf-8')
+    try:
+        (home / 'kaggle.json').chmod(0o600)
+    except OSError:
+        pass
+
+
+def alert_failure(message: str):
+    try:
+        producer.failure_alert(message[:2500])
+    except Exception as exc:
+        log(f'Failure alert could not be sent (check Telegram /start and secrets): {exc}')
+
+
+def build_kaggle_kernel(manifest: dict):
+    kernel_dir = ROOT / 'kaggle_kernel'
+    if kernel_dir.exists():
+        shutil.rmtree(kernel_dir)
+    kernel_dir.mkdir(parents=True, exist_ok=True)
+    template = (ROOT / 'scripts' / 'kaggle_gpu_runner.py').read_text(encoding='utf-8')
+    # Encode the manifest exactly once as JSON text, then parse it in the worker.
+    # The previous double-encoding produced a Python str, not the dict the worker expects.
+    manifest_json = json.dumps(manifest, ensure_ascii=False, separators=(',', ':'))
+    manifest_literal = f"json.loads({manifest_json!r})"
+    # The source template contains exactly one placeholder, and no API secrets are embedded.
+    if template.count('__MANIFEST_JSON__') != 1:
+        raise RuntimeError('Kaggle worker manifest placeholder is missing or duplicated.')
+    script = template.replace('__MANIFEST_JSON__', manifest_literal)
+    (kernel_dir / 'studio_kaggle.py').write_text(script, encoding='utf-8')
+    username = os.environ['KAGGLE_USERNAME'].strip()
+    meta = {
+        'id': f'{username}/{KAGGLE_SLUG}',
+        'title': 'BINA SHOR KE — Private Cinematic Scene Worker',
+        'code_file': 'studio_kaggle.py',
+        'language': 'python',
+        'kernel_type': 'script',
+        'is_private': True,
+        'enable_gpu': True,
+        'enable_internet': True,
+        'dataset_sources': [manifest['resume_dataset_id']] if manifest.get('resume_dataset_id') else [],
+        'competition_sources': [],
+        'kernel_sources': [],
+    }
+    write_json(kernel_dir / 'kernel-metadata.json', meta)
+    # Quick syntax check before sending to Kaggle.
+    check = subprocess.run([sys.executable, '-m', 'py_compile', str(kernel_dir / 'studio_kaggle.py')], text=True, capture_output=True)
+    if check.returncode:
+        raise RuntimeError('Generated Kaggle worker failed syntax check: ' + check.stderr[-2000:])
+    return kernel_dir
+
+
+def ensure_reel_qa_passed(build: dict) -> None:
+    technical = build.get('technical', {}) if isinstance(build, dict) else {}
+    if not isinstance(technical, dict) or technical.get('technical_checks_passed') is not True:
+        raise RuntimeError('Final Reel technical QA did not pass; refusing Telegram delivery and weekly qualification.')
+    visual = technical.get('rendered_frame_visual_qa', {})
+    if isinstance(visual, dict) and visual.get('status') == 'warning':
+        raise RuntimeError('Rendered-frame visual QA reported a critical warning; refusing Telegram delivery and weekly qualification.')
+
+def ensure_complete_telegram_delivery(steps: dict) -> None:
+    required = ('video', 'cover', 'message', 'publish_kit')
+    if not isinstance(steps, dict) or not all(steps.get(step) is True for step in required):
+        missing = [step for step in required if not isinstance(steps, dict) or steps.get(step) is not True]
+        raise RuntimeError('Telegram delivery is incomplete; missing successful step(s): ' + ', '.join(missing))
+
+def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
+    """Require an actually delivered, QA-passed, owner-approved one-Reel pilot."""
+    qualification = history.get('one_reel_qualification') if isinstance(history, dict) else None
+    required = (
+        isinstance(qualification, dict)
+        and qualification.get('status') == 'qualified'
+        and qualification.get('qa_passed') is True
+        and qualification.get('telegram_delivered') is True
+        and qualification.get('owner_approved') is True
+        and bool(qualification.get('reel_id'))
+        and bool(qualification.get('approved_at_ist'))
+    )
+    if not required:
+        raise RuntimeError(
+            'Weekly 3-Reel production is locked. First complete one plan-one Reel, pass final QA, '
+            'deliver the video/cover/review message/publish kit to Telegram, and send '
+            '/approve title=Exact Reel Title. Then run Telegram Feedback Sync and retry plan-week.'
+        )
+    benchmark = saved_lock.get('gpu_benchmark') if isinstance(saved_lock, dict) else None
+    if not isinstance(benchmark, dict) or benchmark.get('qualified') is not True:
+        raise RuntimeError(
+            'Weekly 3-Reel production is also locked until the one-Reel GPU benchmark qualifies. '
+            'Owner approval alone cannot replace the measured GPU runtime check.'
+        )
+    estimated_hours = float(benchmark.get('estimated_3_reel_hours', 999))
+    if estimated_hours > 8.0:
+        raise RuntimeError(
+            f'Weekly batch is not qualified for the Kaggle 12-hour session: conservative estimate is '
+            f'{estimated_hours:.1f} hours. Keep one-Reel jobs only; no paid fallback will be used.'
+        )
+
+def plan_week(reel_count: int = 3) -> int:
+    if reel_count not in (1, 3):
+        raise ValueError('This zero-spend workflow supports a one-Reel test or a 3-Reel weekly batch only.')
+    producer.require_env()
+    configure_kaggle_cli()
+    prior = load_json(PENDING, {}) or {}
+    if prior.get('status') in ACTIVE_GPU_STATES:
+        raise RuntimeError(f"There is already an unfinished GPU batch ({prior.get('job_id')}, status={prior.get('status')}). The system will not queue a duplicate batch; run poll-finalize or inspect the previous Kaggle job first.")
+
+    saved_lock = load_json(TOOLCHAIN_LOCK, {}) or {}
+    toolchain_lock = {}
+    if saved_lock.get('status') == 'locked':
+        toolchain_lock = {
+            key: saved_lock[key] for key in ('comfyui_commit', 'comfyui_gguf_commit', 'model_revisions')
+            if saved_lock.get(key)
+        }
+        if len(toolchain_lock) != 3:
+            raise RuntimeError('Saved toolchain lock is incomplete. Do not run the weekly batch; use the no-code guide to reset the lock and pass a one-Reel requalification first.')
+
+    history = producer.load_history()
+    # Ingest owner-provided performance notes if Telegram has already been connected.
+    try:
+        accepted = producer.process_telegram_feedback(history)
+        # Reload regardless of accepted-insight count: /approve updates history but is not an insight.
+        history = producer.load_history()
+        if accepted:
+            log(f'Incorporated {accepted} owner-submitted performance insight(s) into next-week planning.')
+    except Exception as exc:
+        log(f'Feedback sync skipped; planning still uses saved history: {exc}')
+
+    if reel_count == 3:
+        require_weekly_qualification(history, saved_lock)
+
+    rotation = int(history.get('generated_count', 0)) // 3
+    slots = producer.next_post_slots(reel_count, rotation=rotation, history=history)
+    planned: list[dict] = []
+    local_history = json.loads(json.dumps(history, ensure_ascii=False))
+    job_id = datetime.now(TZ).strftime('%Y%m%d_%H%M%S')
+    for i, slot in enumerate(slots):
+        pillar = producer.choose_pillar(local_history, 0)
+        log(f'Planning Reel {i+1}/{reel_count}, pillar={pillar}, proposed slot={slot.isoformat()}')
+        concept, review = producer.acquire_approved_concept(local_history, pillar, slot, i)
+        reel_id = f"reel_{i+1:02d}_{job_id[-6:]}"
+        concept['reel_id'] = reel_id
+        concept['editorial_review'] = concept.get('editorial_review') or {
+            'scores': review.get('scores', {}), 'approved': review.get('approved', False)
+        }
+        beats = concept.get('beats', [])
+        for j, beat in enumerate(beats, start=1):
+            # Model text rendering is unreliable. On-screen Hindi text is always added by FFmpeg after generation.
+            prompt = str(beat.get('video_prompt', '')).strip()
+            if len(prompt) < 45:
+                raise RuntimeError(f"Reel {i+1}, scene {j}: missing a useful cinematic video prompt. No GPU run was queued.")
+            beat['scene_index'] = j
+        planned.append({
+            'reel_id': reel_id,
+            'title': concept['title'],
+            'pillar': pillar,
+            'theme': concept['theme'],
+            'planned_publish_at': slot.isoformat(),
+            'planned_publish_label': slot.strftime('%a %d %b, %I:%M %p IST'),
+            'concept': concept,
+            'beats': [{'video_prompt': b['video_prompt'], 'visual_direction': b['visual_direction'], 'scene_index': b['scene_index']} for b in beats],
+            'delivery_status': 'planned',
+        })
+        local_history.setdefault('topics', []).append({
+            'title': concept['title'], 'theme': concept['theme'], 'pillar': pillar,
+            'narrative_engine': concept.get('narrative_engine', ''),
+            'emotional_aftertaste': concept.get('emotional_aftertaste', ''),
+            'human_detail': concept.get('human_detail', ''),
+            'character_contradiction': concept.get('character_contradiction', ''),
+            'cost_of_choice': concept.get('cost_of_choice', ''),
+            'generated_at': datetime.now(TZ).isoformat(timespec='seconds'),
+            'planned_publish_at': slot.isoformat(), 'status': 'planned_not_published',
+        })
+        # Advance local anti-repeat/adaptation context only; persisted history updates after final delivery.
+        local_history['generated_count'] = int(local_history.get('generated_count', 0)) + 1
+        time.sleep(2)
+
+    manifest = {
+        'job_id': job_id,
+        'created_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'status': 'dispatching',
+        'toolchain_lock': toolchain_lock,
+        'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader',
+        'reels': [{
+            'reel_id': r['reel_id'], 'title': r['title'], 'pillar': r['pillar'],
+            'visual_bible': r['concept'].get('visual_bible', ''), 'beats': r['beats']
+        } for r in planned],
+    }
+    write_json(PENDING, {
+        'job_id': job_id, 'created_at_ist': manifest['created_at_ist'], 'status': 'dispatching',
+        'kaggle_kernel_id': kaggle_kernel_id(), 'manifest': manifest, 'reels': planned,
+        'policy': {'paid_fallback': False, 'auto_facebook_publish': False, 'max_reels': reel_count},
+    })
+    push_started = False
+    try:
+        kernel_dir = build_kaggle_kernel(manifest)
+        configure_kaggle_cli()
+        push_started = True
+        result = subprocess.run(['kaggle', 'kernels', 'push', '-p', str(kernel_dir)], text=True, capture_output=True, timeout=900)
+        console = (result.stdout or '') + '\n' + (result.stderr or '')
+        if result.returncode:
+            raise RuntimeError('Kaggle kernel push returned a non-zero exit code: ' + console[-3000:])
+    except Exception as exc:
+        pending = load_json(PENDING, {}) or {}
+        pending['dispatch_error'] = f'{type(exc).__name__}: {exc}'[-5000:]
+        pending['dispatch_failed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        remote_status, remote_output = ('NOT_CHECKED', '')
+        if push_started:
+            try:
+                remote_status, remote_output = kaggle_status(pending.get('kaggle_kernel_id', ''))
+            except Exception as status_exc:
+                remote_status, remote_output = ('UNKNOWN', f'{type(status_exc).__name__}: {status_exc}')
+        pending['dispatch_remote_status'] = remote_status
+        if push_started and remote_status in {'RUNNING', 'QUEUED', 'COMPILING', 'CREATED'}:
+            # A push can reach Kaggle even when the CLI connection drops. Treat it as active
+            # rather than issuing a second job and wasting quota.
+            pending['status'] = 'gpu_running'
+            pending['dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            pending['dispatch_output'] = (remote_output or pending['dispatch_error'])[-2000:]
+            write_json(PENDING, pending)
+            alert_failure('Kaggle accepted or is compiling the BINA SHOR KE job despite a CLI error. The factory has locked this batch to prevent a duplicate GPU run. It will poll the existing job. Details: ' + pending['dispatch_error'][-800:])
+            log('Kaggle reports an active job after push error; preserving the existing job instead of dispatching again.')
+            return 0
+        if push_started:
+            # COMPLETE can refer to a previous version of the fixed Kaggle kernel slug.
+            # Without a matching job manifest, do not guess whether the new version started.
+            pending['status'] = 'dispatch_unknown'
+            pending['dispatch_remote_output'] = (remote_output or '')[-2000:]
+            write_json(PENDING, pending)
+            alert_failure('BINA SHOR KE dispatch status is ambiguous. No second GPU job will be started automatically. Inspect the Kaggle kernel version/history; then set pending status to gpu_running if this run exists, or dispatch_failed only after confirming it did not start. Details: ' + pending['dispatch_error'][-800:])
+        else:
+            pending['status'] = 'dispatch_failed'
+            write_json(PENDING, pending)
+            alert_failure('BINA SHOR KE free GPU dispatch failed before any Kaggle push was attempted. No paid fallback was used. Details: ' + pending['dispatch_error'][-1200:])
+        raise
+    pending = load_json(PENDING, {})
+    pending['status'] = 'gpu_running'
+    pending['dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    pending['dispatch_output'] = console[-2000:]
+    write_json(PENDING, pending)
+    log('Kaggle GPU batch dispatched. It will not post to Facebook; the completion poller will fetch clips, finalize, QA and message Telegram.')
+    return 0
+
+
+def kaggle_status(kernel_id: str) -> tuple[str, str]:
+    configure_kaggle_cli()
+    p = subprocess.run(['kaggle', 'kernels', 'status', kernel_id], text=True, capture_output=True, timeout=180)
+    output = (p.stdout or '') + '\n' + (p.stderr or '')
+    if p.returncode:
+        lower = output.lower()
+        if any(word in lower for word in ('not found', '404', 'does not exist')):
+            return 'ERROR', output
+        return 'UNKNOWN', output
+    upper = output.upper()
+    # Parse explicit enum/status tokens first so INCOMPLETE cannot be mistaken for COMPLETE.
+    match = re.search(r"KERNELWORKERSTATUS\.([A-Z_]+)|\bSTATUS\s*[:=]\s*([A-Z_]+)\b", upper)
+    token = next((group for group in match.groups() if group), '') if match else ''
+    if token:
+        aliases = {'COMPLETED': 'COMPLETE', 'CANCELED': 'CANCELLED', 'FAILED': 'ERROR'}
+        token = aliases.get(token, token)
+        if token in {'COMPLETE', 'ERROR', 'CANCELLED', 'RUNNING', 'QUEUED', 'COMPILING', 'CREATED'}:
+            return token, output
+    # Fallback uses line-level word boundaries and explicitly excludes INCOMPLETE.
+    for line in upper.splitlines():
+        if 'INCOMPLETE' in line:
+            continue
+        for status in ('CANCELLED', 'CANCELED', 'ERROR', 'RUNNING', 'QUEUED', 'COMPILING', 'COMPLETE', 'CREATED'):
+            if re.search(rf'\b{status}\b', line):
+                return ('CANCELLED' if status == 'CANCELED' else 'COMPLETE' if status == 'COMPLETED' else status), output
+    return 'UNKNOWN', output
+
+
+def locate_output_root(root: Path) -> Path | None:
+    direct = root / 'bsk_output'
+    if direct.exists():
+        return direct
+    for marker in ('gpu_output_manifest.json', 'gpu_checkpoint_manifest.json', 'GPU_JOB_ERROR.json'):
+        for p in root.rglob(marker):
+            return p.parent
+    # Kaggle may flatten the output folder while preserving individual scene files.
+    if any(root.rglob('scene_*.mp4')):
+        return root
+    return None
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
+    """Find valid scene files from a possibly failed Kaggle output bundle."""
+    checkpoint_path = root / 'gpu_checkpoint_manifest.json'
+    saved = load_json(checkpoint_path, {}) if checkpoint_path.exists() else {}
+    saved_items = {
+        (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
+        for x in saved.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
+    }
+    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) if (root / 'gpu_output_manifest.json').exists() else {}
+    worker_items = {
+        (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
+        for x in worker_manifest.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
+    }
+    collected = []
+    for reel in pending.get('reels', []):
+        reel_id = str(reel.get('reel_id', ''))
+        if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', reel_id):
+            continue
+        for index in range(1, len(reel.get('beats', [])) + 1):
+            candidates = [root / reel_id / f'scene_{index:02d}.mp4']
+            candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.mp4'))
+            candidates.extend(x for x in root.rglob(f'scene_{index:02d}.mp4') if reel_id in str(x))
+            source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
+            if source is None:
+                continue
+            try:
+                duration = producer.probe_duration(source)
+            except Exception:
+                continue
+            if not 2.5 <= duration <= 8.0:
+                continue
+            key = (reel_id, index)
+            old = saved_items.get(key, worker_items.get(key, {}))
+            collected.append({
+                'reel_id': reel_id, 'scene_index': index, 'file': f'{reel_id}__scene_{index:02d}.mp4',
+                'source_path': str(source), 'bytes': source.stat().st_size, 'sha256': _sha256(source),
+                'duration_seconds': round(duration, 3),
+                'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
+                'prompt_id': old.get('prompt_id'),
+            })
+    # One scene may appear in the direct location and a flattened CLI output; retain one row per key.
+    deduped = {}
+    for item in collected:
+        deduped[(item['reel_id'], item['scene_index'])] = item
+    return list(deduped.values())
+
+
+def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
+    expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
+    present = {(x['reel_id'], x['scene_index']) for x in scenes}
+    missing = max(0, expected - len(present))
+    if missing == 0:
+        return 1.5  # ComfyUI/model bootstrap can still consume substantial time
+    times = [float(x.get('generation_elapsed_seconds', 0)) for x in scenes if float(x.get('generation_elapsed_seconds', 0)) > 0]
+    if not times:
+        lock = load_json(TOOLCHAIN_LOCK, {}) or {}
+        benchmark = lock.get('gpu_benchmark') if isinstance(lock, dict) else {}
+        average = float((benchmark or {}).get('sample_scene_mean_seconds', 0) or 0)
+    else:
+        average = statistics.median(times)
+    if average <= 0:
+        return 999.0
+    # 2x generation-time safety plus 60 minutes for model bootstrap and dataset restoration.
+    return round((missing * average * 2.0 + 3600) / 3600, 2)
+
+
+def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
+    """Upload only verified MP4 scene checkpoints to a private Kaggle dataset."""
+    scenes = collect_checkpoint_clips(root, pending)
+    if not scenes:
+        return None
+    username = os.getenv('KAGGLE_USERNAME', '').strip()
+    if not username:
+        raise RuntimeError('Cannot save recovery clips: KAGGLE_USERNAME is missing.')
+    job_token = re.sub(r'[^a-z0-9]', '', str(pending.get('job_id', '')).lower())[-18:] or str(int(time.time()))
+    dataset_slug = str((pending.get('resume_dataset_id') or '').split('/')[-1] or f'bsk-resume-{job_token}')
+    dataset_id = f'{username}/{dataset_slug}'
+    expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
+    with tempfile.TemporaryDirectory(prefix='bsk-private-checkpoint-') as folder:
+        stage = Path(folder)
+        total_bytes = 0
+        scene_rows = []
+        for item in scenes:
+            source = Path(item['source_path'])
+            dest = stage / item['file']
+            shutil.copy2(source, dest)
+            # Verify the copy before asking Kaggle to store it.
+            if dest.stat().st_size != item['bytes'] or _sha256(dest) != item['sha256']:
+                raise RuntimeError(f'Checkpoint copy verification failed for {item["file"]}.')
+            total_bytes += dest.stat().st_size
+            scene_rows.append({key: value for key, value in item.items() if key != 'source_path'})
+        if total_bytes > 8 * 1024**3:
+            raise RuntimeError('Recovered clips exceed the 8 GiB safety cap; refusing to upload a large checkpoint dataset.')
+        write_json(stage / 'checkpoint_manifest.json', {
+            'schema_version': 1, 'job_id': pending.get('job_id'), 'expected_scenes': expected,
+            'completed_scenes': len(scene_rows), 'scenes': scene_rows,
+            'privacy': 'Kaggle dataset created without --public; intended to remain private.',
+        })
+        metadata = {
+            'title': f'BINA SHOR KE private scene checkpoint {job_token}',
+            'id': dataset_id,
+            'licenses': [{'name': 'other'}],
+            'keywords': ['bina-shor-ke', 'private-checkpoint', 'video-scenes'],
+        }
+        write_json(stage / 'dataset-metadata.json', metadata)
+        existing = bool(pending.get('resume_dataset_id'))
+        if existing:
+            command = ['kaggle', 'datasets', 'version', '-p', str(stage), '-m', 'BINA SHOR KE resumable scene checkpoint update', '-q', '-r', 'skip']
+        else:
+            command = ['kaggle', 'datasets', 'create', '-p', str(stage), '-q', '-r', 'skip']
+        response = subprocess.run(command, text=True, capture_output=True, timeout=1800)
+        output = (response.stdout or '') + '\n' + (response.stderr or '')
+        if response.returncode:
+            raise RuntimeError('Kaggle private checkpoint dataset upload failed: ' + output[-2500:])
+    missing = max(0, expected - len(scene_rows))
+    return {
+        'resume_dataset_id': dataset_id, 'resume_scene_count': len(scene_rows),
+        'resume_missing_scene_count': missing, 'resume_estimated_hours': estimate_resume_hours(pending, scenes),
+        'resume_dataset_updated_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'resume_checkpoint_sha256': hashlib.sha256(json.dumps(scene_rows, sort_keys=True).encode()).hexdigest(),
+    }
+
+
+def dispatch_checkpoint_resume(pending: dict, automatic: bool) -> int:
+    """Dispatch one bounded resume run from the last private scene checkpoint."""
+    dataset_id = str(pending.get('resume_dataset_id', '')).strip()
+    if not dataset_id:
+        raise RuntimeError('No private Kaggle checkpoint dataset is saved; there is nothing to resume.')
+    if int(pending.get('resume_attempts', 0)) >= 2:
+        raise RuntimeError('The maximum of two bounded resume attempts has been used. A new production plan is required.')
+    estimate = float(pending.get('resume_estimated_hours', 999) or 999)
+    limit = 4.0 if automatic else 8.0
+    if estimate > limit:
+        raise RuntimeError(f'Remaining-scene estimate is {estimate:.1f} hours, above the {limit:.1f}-hour resume safety limit. Keep the private checkpoint; do not risk another free GPU session.')
+    manifest = dict(pending.get('manifest') or {})
+    manifest['resume_dataset_id'] = dataset_id
+    kernel_dir = build_kaggle_kernel(manifest)
+    try:
+        result = subprocess.run(['kaggle', 'kernels', 'push', '-p', str(kernel_dir)], text=True, capture_output=True, timeout=900)
+        console = (result.stdout or '') + '\n' + (result.stderr or '')
+        push_failed = bool(result.returncode)
+    except Exception as push_exc:
+        # A timeout/network reset can happen after Kaggle accepted the kernel version.
+        # Treat this exactly like a non-zero result and require owner confirmation.
+        console = f'{type(push_exc).__name__}: {push_exc}'
+        push_failed = True
+    if push_failed:
+        try:
+            status, remote = kaggle_status(pending.get('kaggle_kernel_id', ''))
+        except Exception as status_exc:
+            status, remote = 'UNKNOWN', f'{type(status_exc).__name__}: {status_exc}'
+        # Any non-zero/timeout response is ambiguous: Kaggle may have accepted the request.
+        # Do not trust a possibly stale kernel status or send another job.
+        pending['status'] = 'dispatch_unknown'
+        pending['resume_dispatch_attempt_pending'] = True
+        pending['resume_dispatch_error'] = console[-2500:]
+        pending['resume_dispatch_remote_status'] = status
+        pending['resume_dispatch_remote_output'] = remote[-1500:]
+        write_json(PENDING, pending)
+        alert_failure('BINA SHOR KE checkpoint resume dispatch returned an unclear result. No duplicate GPU job was sent. Inspect the existing Kaggle kernel run/version before taking further action.')
+        return 1
+    pending['manifest'] = manifest
+    pending['resume_attempts'] = int(pending.get('resume_attempts', 0)) + 1
+    pending['resume_dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    pending['resume_dispatch_mode'] = 'automatic' if automatic else 'owner_requested'
+    pending['status'] = 'gpu_running'
+    pending['dispatched_at_ist'] = pending['resume_dispatched_at_ist']
+    pending['dispatch_output'] = console[-2000:]
+    write_json(PENDING, pending)
+    log(f'Resumed {pending.get("resume_scene_count", 0)} verified scene checkpoints; Kaggle will render only the missing scenes.')
+    return 0
+
+
+def cleanup_resume_dataset(dataset_id: str | None):
+    if not dataset_id or not re.fullmatch(r'[A-Za-z0-9_-]{1,50}/bsk-resume-[A-Za-z0-9_-]{1,50}', dataset_id):
+        return
+    try:
+        subprocess.run(['kaggle', 'datasets', 'delete', dataset_id, '-y'], text=True, capture_output=True, timeout=180)
+    except Exception as exc:
+        log(f'Private checkpoint cleanup skipped; dataset remains private: {exc}')
+
+
+def handle_gpu_failure(root: Path | None, pending: dict, reason: str) -> bool:
+    """Save recoverable scenes and start at most one safe resume. Returns True if resumed."""
+    if root is None:
+        pending['status'] = 'gpu_failed'
+        pending['gpu_error'] = reason[:5000]
+        write_json(PENDING, pending)
+        alert_failure('BINA SHOR KE GPU job failed and Kaggle exposed no output bundle to recover. No paid fallback or duplicate GPU job was started. ' + reason[:1200])
+        return False
+    try:
+        checkpoint = persist_private_resume_dataset(root, pending)
+    except Exception as exc:
+        pending['status'] = 'gpu_failed'
+        pending['gpu_error'] = reason[:3500]
+        pending['checkpoint_save_error'] = f'{type(exc).__name__}: {exc}'[:2500]
+        write_json(PENDING, pending)
+        alert_failure('BINA SHOR KE GPU job failed. Automatic checkpoint upload could not be completed; no partial Reel was sent and no paid fallback was used. ' + pending['checkpoint_save_error'][:1100])
+        return False
+    if not checkpoint:
+        pending['status'] = 'gpu_failed'
+        pending['gpu_error'] = reason[:5000]
+        write_json(PENDING, pending)
+        alert_failure('BINA SHOR KE GPU job failed; no complete scene MP4 passed recovery validation. No partial Reel was delivered and no duplicate job was started. ' + reason[:1200])
+        return False
+    pending.update(checkpoint)
+    pending['gpu_error'] = reason[:5000]
+    write_json(PENDING, pending)
+    if int(pending.get('resume_attempts', 0)) < 1 and float(pending.get('resume_estimated_hours', 999)) <= 4.0:
+        alert_failure(f'Kaggle job stopped. Saved {pending["resume_scene_count"]} verified scenes to a private Kaggle checkpoint; estimated remaining render is {pending["resume_estimated_hours"]:.1f}h. Starting the one bounded auto-resume now.')
+        return dispatch_checkpoint_resume(pending, automatic=True) == 0
+    pending['status'] = 'gpu_checkpoint_saved'
+    write_json(PENDING, pending)
+    remaining_attempts = max(0, 2 - int(pending.get('resume_attempts', 0)))
+    if remaining_attempts:
+        alert_failure(f'Kaggle job stopped. Saved {pending["resume_scene_count"]} verified scenes to a private Kaggle checkpoint. Estimated remaining time: {pending["resume_estimated_hours"]:.1f}h. Automatic resume was withheld to protect free GPU quota; one owner-triggered resume can be started from workflow action=resume-checkpoint if the estimate is within 8h.')
+    else:
+        alert_failure(f'Resume attempt limit reached. Saved {pending["resume_scene_count"]} verified scenes in a private Kaggle checkpoint for diagnosis; no further GPU run was started. Create a fresh plan when ready.')
+    return False
+
+
+def verify_or_lock_toolchain(gpu_manifest: dict, job_id: str | None = None) -> dict:
+    """Pin the first successful GPU toolchain; refuse silent upstream drift later."""
+    observed = {
+        'comfyui_commit': str(gpu_manifest.get('comfyui_commit', '')).strip(),
+        'comfyui_gguf_commit': str(gpu_manifest.get('comfyui_gguf_commit', '')).strip(),
+        'model_revisions': gpu_manifest.get('model_revisions'),
+        'runtime_packages': gpu_manifest.get('runtime_packages') if isinstance(gpu_manifest.get('runtime_packages'), dict) else {},
+    }
+    if not observed['comfyui_commit'] or not observed['comfyui_gguf_commit']:
+        raise RuntimeError('GPU manifest is missing source commit SHAs; cannot establish a reproducible toolchain lock.')
+    if not isinstance(observed['model_revisions'], dict) or not all(observed['model_revisions'].get(k) for k in ('unet', 'clip', 'vae')):
+        raise RuntimeError('GPU manifest is missing one or more model revision SHAs; cannot establish a reproducible model lock.')
+
+    existing = load_json(TOOLCHAIN_LOCK, {}) or {}
+    if existing.get('status') == 'locked':
+        for key in ('comfyui_commit', 'comfyui_gguf_commit'):
+            if existing.get(key) != observed[key]:
+                raise RuntimeError(f'Toolchain drift detected for {key}; refusing to silently change the proven version.')
+        for key in ('unet', 'clip', 'vae'):
+            if (existing.get('model_revisions') or {}).get(key) != observed['model_revisions'].get(key):
+                raise RuntimeError(f'Model revision drift detected for {key}; refusing to silently change the proven model weights.')
+        if existing.get('runtime_packages'):
+            if existing.get('runtime_packages') != observed['runtime_packages']:
+                changed = sorted(set(existing['runtime_packages']) | set(observed['runtime_packages']))
+                changed = [name for name in changed if existing['runtime_packages'].get(name) != observed['runtime_packages'].get(name)]
+                raise RuntimeError('GPU runtime dependency drift detected; refusing to silently continue with changed package versions: ' + ', '.join(changed))
+        elif observed['runtime_packages']:
+            existing['runtime_packages'] = observed['runtime_packages']
+            existing['runtime_packages_locked_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            write_json(TOOLCHAIN_LOCK, existing)
+        scene_times = [float(x.get('generation_elapsed_seconds', 0)) for x in gpu_manifest.get('scenes', []) if float(x.get('generation_elapsed_seconds', 0)) > 0]
+        if not existing.get('gpu_benchmark') and scene_times and len(scene_times) >= 5:
+            startup = max(0.0, float(gpu_manifest.get('total_elapsed_seconds', 0)) - sum(scene_times))
+            estimate = (startup + sum(scene_times) * 3) * 1.5 / 3600.0
+            existing['gpu_benchmark'] = {'qualified': estimate <= 8.0, 'sample_scene_count': len(scene_times), 'sample_scene_mean_seconds': round(sum(scene_times)/len(scene_times), 2), 'first_run_startup_seconds': round(startup, 2), 'estimated_3_reel_hours': round(estimate, 2), 'safety_factor': 1.5, 'note': 'One-Reel benchmark; not a runtime guarantee.'}
+            write_json(TOOLCHAIN_LOCK, existing)
+        return existing
+
+    scene_times = [float(x.get('generation_elapsed_seconds', 0)) for x in gpu_manifest.get('scenes', []) if float(x.get('generation_elapsed_seconds', 0)) > 0]
+    benchmark = None
+    if scene_times and len(scene_times) >= 5:
+        startup = max(0.0, float(gpu_manifest.get('total_elapsed_seconds', 0)) - sum(scene_times))
+        estimated_3_reel_hours = (startup + sum(scene_times) * 3) * 1.5 / 3600.0
+        benchmark = {
+            'qualified': estimated_3_reel_hours <= 8.0,
+            'sample_scene_count': len(scene_times),
+            'sample_scene_mean_seconds': round(sum(scene_times) / len(scene_times), 2),
+            'first_run_startup_seconds': round(startup, 2),
+            'estimated_3_reel_hours': round(estimated_3_reel_hours, 2),
+            'safety_factor': 1.5,
+            'note': 'Estimate based on one successful Reel; re-check actual Kaggle session/quota before batch. Not a runtime guarantee.'
+        }
+    locked = {
+        'status': 'locked',
+        'gpu_benchmark': benchmark,
+        'comfyui_commit': observed['comfyui_commit'],
+        'comfyui_gguf_commit': observed['comfyui_gguf_commit'],
+        'model_revisions': observed['model_revisions'],
+        'runtime_packages': observed['runtime_packages'],
+        'locked_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'source_job_id': job_id or gpu_manifest.get('job_id'),
+        'note': 'First complete GPU generation; future jobs reuse these exact source/model revisions until deliberate requalification.',
+    }
+    write_json(TOOLCHAIN_LOCK, locked)
+    log('Locked the first successful ComfyUI/GGUF/model revisions for reproducible future runs.')
+    return locked
+
+
+def _poll_and_finalize_impl() -> int:
+    producer.require_env()
+    pending = load_json(PENDING, {})
+    if not pending or pending.get('status') not in {'gpu_running', 'gpu_complete'}:
+        log(f'No active batch to poll (status={pending.get("status") if pending else "none"}).')
+        return 0
+    kernel_id = pending['kaggle_kernel_id']
+    status, raw = kaggle_status(kernel_id)
+    log(f'Kaggle status: {status}; {raw.strip()[:300]}')
+    if status in {'RUNNING', 'QUEUED', 'COMPILING', 'CREATED', 'UNKNOWN'}:
+        dispatched = pending.get('dispatched_at_ist') or pending.get('created_at_ist')
+        if dispatched and not pending.get('long_run_alert_sent'):
+            try:
+                age_hours = (datetime.now(TZ) - datetime.fromisoformat(dispatched)).total_seconds() / 3600
+            except (TypeError, ValueError):
+                age_hours = 0
+            if age_hours >= 8:
+                pending['long_run_alert_sent'] = True
+                pending['last_seen_gpu_status'] = status
+                write_json(PENDING, pending)
+                alert_failure(f'BINA SHOR KE GPU batch is still {status} after about {age_hours:.1f} hours. Free Kaggle queue/session limits may be involved. No duplicate job or paid fallback was started; inspect Kaggle status before retrying.')
+        return 0
+
+    with tempfile.TemporaryDirectory(prefix='bsk-kaggle-output-') as td:
+        dest = Path(td) / 'downloaded'
+        dest.mkdir(parents=True, exist_ok=True)
+        configure_kaggle_cli()
+        p = subprocess.run(['kaggle', 'kernels', 'output', kernel_id, '-p', str(dest)], text=True, capture_output=True, timeout=1800)
+        dl_output = (p.stdout or '') + '\n' + (p.stderr or '')
+        root = locate_output_root(dest)
+        err_file = None
+        if root:
+            err_file = root / 'GPU_JOB_ERROR.json'
+        if status in {'ERROR', 'CANCELLED', 'CANCELED'} or p.returncode:
+            reason = dl_output[-2000:]
+            if err_file and err_file.exists():
+                reason = err_file.read_text(encoding='utf-8')[-4000:]
+            resumed = handle_gpu_failure(root, pending, reason)
+            return 0 if resumed else 1
+        if not root:
+            pending['status'] = 'gpu_failed'
+            pending['gpu_error'] = 'Kaggle run completed but no bsk_output manifest/folder was returned. ' + dl_output[-2000:]
+            write_json(PENDING, pending)
+            alert_failure('BINA SHOR KE GPU output is missing or incomplete. No partial Reel was delivered. Check Kaggle kernel outputs.')
+            return 1
+        manifest_path = root / 'gpu_output_manifest.json'
+        gpu_manifest = load_json(manifest_path, {}) if manifest_path.exists() else {}
+        if err_file and err_file.exists() or gpu_manifest.get('status') != 'complete':
+            reason = load_json(err_file, {}) if err_file and err_file.exists() else gpu_manifest
+            resumed = handle_gpu_failure(root, pending, json.dumps(reason, ensure_ascii=False))
+            return 0 if resumed else 1
+
+        expected = sum(len(r['beats']) for r in pending.get('reels', []))
+        existing = list(root.rglob('scene_*.mp4'))
+        if len(existing) < expected:
+            resumed = handle_gpu_failure(root, pending, f'Expected {expected} AI scene clips, received {len(existing)}.')
+            return 0 if resumed else 1
+        verify_or_lock_toolchain(gpu_manifest, pending.get('job_id'))
+        pending['status'] = 'finalizing'
+        write_json(PENDING, pending)
+        clips_by_path = {str(p.relative_to(root)): p for p in existing}
+        all_missing = []
+        stamp_prefix = datetime.now(TZ).strftime('%Y%m%d_%H%M')
+        for ordinal, reel in enumerate(pending['reels'], start=1):
+            if reel.get('delivery_status') == 'delivered':
+                continue
+            concept = reel['concept']
+            slug = re.sub(r'[^a-z0-9]+', '-', concept['title'].lower()).strip('-') or f'reel-{ordinal}'
+            pending['active_finalizing_reel_id'] = reel['reel_id']
+            write_json(PENDING, pending)
+            if reel.get('output_directory'):
+                reel_dir = ROOT / reel['output_directory']
+            else:
+                reel_dir = OUT / f'{stamp_prefix}_{ordinal}_{slug}'
+                reel['output_directory'] = str(reel_dir.relative_to(ROOT))
+                write_json(PENDING, pending)
+            ai_dir = reel_dir / 'ai_clips'
+            ai_dir.mkdir(parents=True, exist_ok=True)
+            needed = len(concept['beats'])
+            missing = []
+            for i in range(1, needed + 1):
+                candidates = [p for p in existing if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}.mp4']
+                if not candidates:
+                    # Kaggle can flatten output folders in some CLI versions; identify scenes by parent manifest name plus scene number.
+                    candidates = [p for p in existing if p.name == f'scene_{i:02d}.mp4' and reel['reel_id'] in str(p)]
+                if not candidates:
+                    missing.append(i)
+                    continue
+                shutil.copy2(candidates[0], ai_dir / f'scene_{i:02d}.mp4')
+            if missing:
+                all_missing.append(f"{reel['reel_id']}: scenes {missing}")
+                continue
+            (reel_dir / 'concept.json').write_text(json.dumps(concept, ensure_ascii=False, indent=2), encoding='utf-8')
+            os.environ['REQUIRE_AI_VIDEO'] = '1'
+            build = producer.render_reel(concept, reel_dir, set(), set())
+            slot = datetime.fromisoformat(reel['planned_publish_at'])
+            quality = producer.write_pack(concept, build, reel_dir, slot)
+            ensure_reel_qa_passed(build)
+            quality['video_generation'] = {
+                'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
+                'scene_count': needed,
+                'paid_generation_api_used': False,
+                'visual_quality_claim': 'AI-generated; photoreal appearance varies by prompt/seed; manual review required; not a guarantee of human indistinguishability.',
+                'human_review_before_publish': True,
+            }
+            write_json(reel_dir / 'quality_report.json', quality)
+            # Explicitly preserve original prompt bundle and one-screen review checklist.
+            (reel_dir / 'ai_visual_prompts.txt').write_text('\n\n'.join(
+                f"SCENE {i+1}\nPurpose: {b['visual_direction']}\nPrompt: {b['video_prompt']}" for i, b in enumerate(concept['beats'])
+            ) + '\n', encoding='utf-8')
+            def save_delivery_progress(steps):
+                reel['delivery_steps'] = steps
+                write_json(PENDING, pending)
+            reel['delivery_steps'] = producer.send_to_telegram(
+                concept, build, reel_dir, slot, ordinal, len(pending['reels']),
+                progress=reel.get('delivery_steps', {}), on_progress=save_delivery_progress,
+            )
+            ensure_complete_telegram_delivery(reel['delivery_steps'])
+            reel['delivery_status'] = 'delivered'
+            reel['delivery_completed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            history = producer.load_history()
+            history.setdefault('topics', []).append({
+                'title': concept['title'], 'theme': concept['theme'], 'pillar': concept['pillar'],
+                'narrative_engine': concept.get('narrative_engine', ''),
+                'emotional_aftertaste': concept.get('emotional_aftertaste', ''),
+                'human_detail': concept.get('human_detail', ''),
+                'character_contradiction': concept.get('character_contradiction', ''),
+                'cost_of_choice': concept.get('cost_of_choice', ''),
+                'generated_at': pending['created_at_ist'], 'planned_publish_at': reel['planned_publish_at'],
+                'status': 'ready_for_manual_publish_not_confirmed_published',
+                'reel_id': reel['reel_id'], 'job_id': pending.get('job_id'),
+                # render_reel returns only after its hard technical and visual QA gates pass.
+                'qa_passed': bool(build.get('technical', {}).get('technical_checks_passed') is True),
+                'telegram_delivered': all(reel['delivery_steps'].get(step) is True for step in ('video', 'cover', 'message', 'publish_kit')),
+                'qa_completed_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+            })
+            history['generated_count'] = int(history.get('generated_count', 0)) + 1
+            producer.save_history(history)
+            write_json(PENDING, pending)
+            log(f"Delivered ready-for-review Reel {ordinal}/{len(pending['reels'])}: {concept['title']}")
+            time.sleep(3)
+
+        if all_missing:
+            pending['status'] = 'gpu_failed'
+            pending['gpu_error'] = '; '.join(all_missing)
+            write_json(PENDING, pending)
+            alert_failure('BINA SHOR KE output could not be mapped to all Reel scenes. No missing-scene Reel was sent. ' + '; '.join(all_missing))
+            return 1
+        pending['status'] = 'delivered'
+        pending['completed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        write_json(PENDING, pending)
+        cleanup_resume_dataset(pending.get('resume_dataset_id'))
+        log('Weekly batch delivered to Telegram for manual review. Nothing was published to Facebook automatically.')
+        return 0
+
+
+
+def poll_and_finalize() -> int:
+    """Run a single poll/finalize attempt; persist failure and require explicit retry."""
+    try:
+        return _poll_and_finalize_impl()
+    except Exception as exc:
+        pending = load_json(PENDING, {}) or {}
+        error_text = f'{type(exc).__name__}: {exc}'[:5000]
+        if pending.get('status') in {'gpu_running', 'gpu_complete', 'finalizing'}:
+            # A hard visual/rhythm defect is not a transient API error. Mark it rejected so the owner
+            # can create a fresh concept/batch; retry-finalize would only reuse the same bad pixels.
+            if any(marker in error_text.lower() for marker in ('critical visual defect', 'excessive speed change', 'too short')):
+                pending['status'] = 'qa_rejected'
+                pending['qa_rejection_reason'] = error_text
+                pending['qa_rejected_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                history = producer.load_history()
+                failed_reel_id = pending.get('active_finalizing_reel_id')
+                for reel in pending.get('reels', []):
+                    if reel.get('delivery_status') != 'delivered':
+                        is_failed_reel = reel.get('reel_id') == failed_reel_id
+                        history.setdefault('topics', []).append({
+                            'title': reel.get('title', ''), 'theme': reel.get('theme', ''), 'pillar': reel.get('pillar', ''),
+                            'generated_at': pending.get('created_at_ist'), 'planned_publish_at': reel.get('planned_publish_at'),
+                            'status': 'qa_rejected_not_published' if is_failed_reel else 'batch_aborted_not_rendered',
+                            'rejection_reason': error_text[:700] if is_failed_reel else 'Batch stopped before this Reel finished production.',
+                        })
+                producer.save_history(history)
+            else:
+                pending['status'] = 'finalize_failed'
+                pending['finalize_error'] = error_text
+                pending['finalize_failed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            write_json(PENDING, pending)
+        if pending.get('status') == 'qa_rejected':
+            instruction = 'The reel was rejected for a hard visual/rhythm QA issue. Do NOT publish it and do NOT use retry-finalize (that would reuse the same scenes). After checking the report, run plan-one for a fresh concept or plan-week for a new batch.'
+        else:
+            instruction = 'Fix the transient/API issue, then manually run the workflow with action=retry-finalize. Previously delivered Telegram items are checkpointed to prevent duplicate delivery.'
+        alert_failure('BINA SHOR KE finalization stopped safely. No paid fallback was used and nothing was auto-published. ' + instruction + ' Details: ' + error_text[:1300])
+        raise
+
+
+def resolve_dispatch_unknown(confirm_running: bool) -> int:
+    """Resolve an ambiguous Kaggle push only after the owner checks Kaggle's run history."""
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'dispatch_unknown':
+        raise RuntimeError(f"There is no ambiguous dispatch to resolve (status={pending.get('status', 'none')}).")
+    pending['dispatch_resolution_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    pending['dispatch_resolution_source'] = 'owner_confirmed_from_kaggle_ui'
+    if confirm_running:
+        pending['status'] = 'gpu_running'
+        pending['dispatch_resolution'] = 'owner_confirmed_new_run_exists'
+        if pending.pop('resume_dispatch_attempt_pending', False):
+            pending['resume_attempts'] = int(pending.get('resume_attempts', 0)) + 1
+        pending.setdefault('dispatched_at_ist', pending.get('created_at_ist'))
+        write_json(PENDING, pending)
+        log('Owner confirmed the new Kaggle run exists. Polling will continue without dispatching another GPU job.')
+    else:
+        pending['status'] = 'gpu_checkpoint_saved' if pending.get('resume_dispatch_attempt_pending') else 'dispatch_failed'
+        pending.pop('resume_dispatch_attempt_pending', None)
+        pending['dispatch_resolution'] = 'owner_confirmed_new_run_did_not_start'
+        write_json(PENDING, pending)
+        log('Owner confirmed no new Kaggle run started. A fresh plan can now be requested; no automatic re-dispatch occurred.')
+    return 0
+
+
+def resume_saved_checkpoint() -> int:
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'gpu_checkpoint_saved':
+        raise RuntimeError(f"No saved, non-running checkpoint is available (status={pending.get('status', 'none')}).")
+    return dispatch_checkpoint_resume(pending, automatic=False)
+
+
+def retry_finalize() -> int:
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
+        raise RuntimeError(f"There is no failed or interrupted finalization to retry (status={pending.get('status', 'none')}).")
+    # A GPU output failure itself cannot be repaired by re-running the finalizer. Only retry when Kaggle completed.
+    status, raw = kaggle_status(pending.get('kaggle_kernel_id', ''))
+    if status != 'COMPLETE':
+        raise RuntimeError(f"Kaggle kernel is not COMPLETE (status={status}). Inspect the GPU worker and use plan-week only after resolving the prior batch. {raw[-800:]}")
+    pending['status'] = 'gpu_running'
+    pending['retry_finalization_count'] = int(pending.get('retry_finalization_count', 0)) + 1
+    pending['retry_requested_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    pending.pop('finalize_error', None)
+    write_json(PENDING, pending)
+    log('Explicit manual finalization retry requested. Previously delivered Reels will be skipped.')
+    return poll_and_finalize()
+
+def self_test() -> int:
+    # Offline checks for dispatch manifest integrity and API graph fields without GPU/API calls.
+    import importlib.util
+    runner_path = ROOT / 'scripts' / 'kaggle_gpu_runner.py'
+    runner_source = runner_path.read_text(encoding='utf-8').replace('__MANIFEST_JSON__', "json.loads('{}')")
+    tmp_runner = ROOT / 'scripts' / '_kaggle_gpu_runner_test_import.py'
+    tmp_runner.write_text(runner_source, encoding='utf-8')
+    try:
+        spec = importlib.util.spec_from_file_location('bsk_kaggle_runner_test', tmp_runner)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+    finally:
+        tmp_runner.unlink(missing_ok=True)
+    build_api_workflow = module.build_api_workflow
+    mock_object_info = {}
+    schema = {
+        'UnetLoaderGGUF': ['unet_name'],
+        'CLIPLoader': ['clip_name', 'type', 'device'], 'VAELoader': ['vae_name'],
+        'ModelSamplingSD3': ['model', 'shift'], 'CLIPTextEncode': ['text', 'clip'],
+        'Wan22ImageToVideoLatent': ['width', 'height', 'length', 'batch_size', 'vae', 'start_image'],
+        'KSampler': ['seed', 'control_after_generate', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+        'VAEDecode': ['samples', 'vae'], 'CreateVideo': ['images', 'fps'],
+        'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
+    }
+    for node, keys in schema.items():
+        required_keys = [k for k in keys if not (node == 'Wan22ImageToVideoLatent' and k == 'start_image')]
+        optional_keys = ['start_image'] if node == 'Wan22ImageToVideoLatent' else []
+        mock_object_info[node] = {'input': {'required': {k: [] for k in required_keys}, 'optional': {k: [] for k in optional_keys}}}
+    demo = {'reel_id': 'reel_01_test', 'visual_bible': 'Natural practical light, consistent charcoal jacket, anonymous partial profile.', 'beats': []}
+    beat = {'video_prompt': 'Photoreal vertical close-up of a phone placed on a scratched wooden desk, hand slowly turns it face down, warm practical lamp light, subtle handheld movement, realistic texture, no readable text or logos.'}
+    graph = build_api_workflow(mock_object_info, beat, demo, 1, 'bsk/reel_01_test/scene_01')
+    if len(graph) != 11 or graph['55']['inputs']['length'] != 81 or graph['55']['inputs']['width'] != 704 or graph['55']['inputs']['height'] != 1280:
+        raise RuntimeError('Offline GPU graph validation failed.')
+    pending = load_json(PENDING, {})
+    if pending and pending.get('status') in {'dispatching', 'gpu_running'} and not pending.get('manifest', {}).get('reels'):
+        raise RuntimeError('Pending state exists without a Reel manifest.')
+    log('OFFLINE STUDIO PREFLIGHT PASSED: graph schema, 720p portrait dimensions, 81-frame (~3.4s) clip, pending state shape. No API keys/network/GPU used.')
+    return 0
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    args = parser.parse_args()
+    try:
+        if args.command == 'preflight':
+            return self_test()
+        if args.command == 'plan':
+            return plan_week(3)
+        if args.command == 'plan-one':
+            return plan_week(1)
+        if args.command == 'retry-finalize':
+            return retry_finalize()
+        if args.command == 'resume-checkpoint':
+            return resume_saved_checkpoint()
+        if args.command == 'resolve-dispatch-running':
+            return resolve_dispatch_unknown(confirm_running=True)
+        if args.command == 'resolve-dispatch-not-started':
+            return resolve_dispatch_unknown(confirm_running=False)
+        return poll_and_finalize()
+    except Exception as exc:
+        log(f'ERROR: {type(exc).__name__}: {exc}')
+        alert_failure(f'BINA SHOR KE Studio pipeline error ({args.command}): {type(exc).__name__}: {exc}')
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
