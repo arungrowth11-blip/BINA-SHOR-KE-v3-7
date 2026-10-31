@@ -154,7 +154,11 @@ def _gemini_json_request(system: str, user_prompt: str, temperature: float = 0.8
     }
     response = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=timeout)
     if response.status_code >= 400:
-        raise RuntimeError(f"Gemini HTTP {response.status_code}: {response.text[:300]}")
+        # Preserve the response object so retry logic can honour Retry-After.
+        raise requests.HTTPError(
+            f"Gemini HTTP {response.status_code}: {response.text[:300]}",
+            response=response,
+        )
     body = response.json()
     candidates = body.get("candidates") or []
     if not candidates:
@@ -185,7 +189,9 @@ def gemini_json(system: str, user_prompt: str, temperature: float = 0.8, timeout
                         retry_after = int(float(exc.response.headers.get("Retry-After", "0")))
                     except (TypeError, ValueError):
                         retry_after = 0
-                time.sleep(max(retry_after, min(20, 4 * (2 ** attempt))))
+                # Bounded backoff: respect provider Retry-After, otherwise wait 8s then 16s.
+                # A hard 90s cap prevents an upstream header from holding a GitHub runner forever.
+                time.sleep(max(min(retry_after, 90), 8 * (2 ** attempt)))
     raise RuntimeError(f"Gemini text request failed after bounded retries: {last_error}")
 
 
@@ -557,7 +563,9 @@ def human_detail_is_too_similar(detail: str, past_topics: list[dict[str, Any]], 
     return False
 
 
-def generate_concept(history: dict[str, Any], pillar: str, slot: datetime, index: int) -> dict[str, Any]:
+def generate_concept(
+    history: dict[str, Any], pillar: str, slot: datetime, index: int, correction_feedback: str = ""
+) -> dict[str, Any]:
     recent_topics = history.get("topics", [])[-35:]
     recent_titles = [x.get("title", "") for x in recent_topics]
     recent_themes = [x.get("theme", "") for x in recent_topics]
@@ -579,7 +587,9 @@ Brand promise: 'कम शब्द। साफ़ कहानी। ऐसा
 NARRATIVE ENGINE TO EXPLORE (do not use it as a formula): {narrative_engine}. If this feels forced for the pillar, use a fresh variation but avoid the recent engines {json.dumps(recent_engines, ensure_ascii=False)}.
 Human-depth test: name a small human_detail (an observable gesture, object, unfinished task, habit or sensory detail) that feels lived-in; state the character_contradiction (what they want versus what they do or cannot say); identify the cost_of_choice (a small, believable consequence); let the audience infer emotion from behaviour; let the final line change the meaning of an earlier detail. Do not end with a generic moral. Avoid repeating recent story anchors {json.dumps(recent_story_anchors, ensure_ascii=False)}. One brief line of natural direct speech is allowed only when a real person would say it; do not turn every beat into a quote.
 Target audience hypothesis: Hindi-understanding adults across genders, regions and life stages who enjoy grounded stories about everyday decisions, relationships, work, trust, digital life and useful habits. Do not write only for men or only for romance audiences.
-Duration target: 22–32 seconds, 5–6 beats. Aim for approximately 45–72 spoken Hindi words total. Make each beat short enough to breathe naturally.
+Duration target: 22–32 seconds. Use exactly 6 beats. CRITICAL SPOKEN-LINE LIMIT: every beat's voiceover must contain 7–12 whitespace-separated Hindi words; aim for 8–10. Count each beat before returning JSON. Never put two long sentences into one beat and never exceed 12 words. Across all six beats, target 48–60 spoken Hindi words (the overall hard range is 45–72). If a line is too long, rewrite it shorter while preserving the story meaning. These are hard structural limits, not suggestions.
+
+PREVIOUS STRUCTURAL FEEDBACK (must be corrected in this candidate): {correction_feedback or 'No previous candidate feedback.'}
 
 OBSERVED PAGE PERFORMANCE (may be empty; use only as weak evidence, not causal truth): {json.dumps(observed_performance, ensure_ascii=False)}
 If there are fewer than 5 valid metric-bearing posts per pillar, continue the baseline mix. Missing metrics are unknown, not zero. Even with five or more observations, treat the signal as weak and test a distinct variation rather than blindly repeating a past winner.
@@ -736,9 +746,13 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
     concept = None
     draft_failures: list[str] = []
     # Two bounded candidate attempts handle malformed/duplicate model output without looping forever.
+    previous_feedback = ""
     for candidate_attempt in range(2):
         try:
-            candidate = generate_concept(history, pillar, slot, index + candidate_attempt * 7)
+            candidate = generate_concept(
+                history, pillar, slot, index + candidate_attempt * 7,
+                correction_feedback=previous_feedback,
+            )
             if topic_is_too_similar(str(candidate.get("title", "")), str(candidate.get("theme", "")), history.get("topics", [])):
                 raise ValueError("Recent title/theme similarity detected; choose a genuinely different story angle.")
             if human_detail_is_too_similar(str(candidate.get("human_detail", "")), history.get("topics", [])):
@@ -749,9 +763,20 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
             message = str(exc)
             draft_failures.append(message[:400])
             log(f"Draft candidate {candidate_attempt + 1}/2 rejected: {message[:400]}")
-            # Do not hammer a free API project that has explicitly hit a quota/rate limit.
-            if any(marker in message.lower() for marker in ("http 429", "quota exceeded", "rate limit")):
-                raise RuntimeError("Configured free AI providers exhausted quota/rate limits; no paid fallback was attempted. " + message[:500])
+            previous_feedback = message[:700]
+            lowered = message.lower()
+            # Once all configured free providers have failed with quota/transient errors,
+            # a second candidate cannot help. Stop here instead of making a redundant call.
+            provider_unavailable = any(marker in lowered for marker in (
+                "http 429", "http 500", "http 502", "http 503", "http 504",
+                "quota exceeded", "rate limit", "temporarily unavailable",
+                "timed out", "timeout", "connection error",
+            ))
+            if provider_unavailable:
+                raise RuntimeError(
+                    "Configured free AI providers are temporarily unavailable or rate-limited; "
+                    "no paid fallback was attempted. Retry later. " + message[:700]
+                )
     if concept is None:
         raise RuntimeError("No valid non-duplicate Reel draft passed the structural gate. Nothing was delivered. " + " | ".join(draft_failures))
 

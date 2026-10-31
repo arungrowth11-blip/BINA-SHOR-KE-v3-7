@@ -101,6 +101,43 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(payload["model"], "@cf/meta/llama-3.1-8b-instruct")
         self.assertTrue(payload["options"]["rejectIfBusy"])
 
+
+    def test_gemini_retry_honours_retry_after_header(self):
+        response = Mock()
+        response.headers = {"Retry-After": "12"}
+        error = producer.requests.HTTPError("Gemini HTTP 503: high demand", response=response)
+        with patch.object(producer, "_gemini_json_request", side_effect=[error, {"ok": True}]), \
+             patch.object(producer.time, "sleep") as sleep:
+            result = producer.gemini_json("system", "prompt")
+        self.assertTrue(result["ok"])
+        sleep.assert_called_once_with(12)
+
+    def test_second_draft_prompt_includes_previous_structural_feedback(self):
+        concept = self.sample_concept()
+        feedback = "Beat 1 narration has 18 words; use 7-12 words."
+        with patch.object(producer, "text_json", return_value=concept) as mocked:
+            result = producer.generate_concept(
+                {"topics": [], "generated_count": 0, "performance": []},
+                "micro_story", producer.datetime.now(producer.TZ), 0,
+                correction_feedback=feedback,
+            )
+        self.assertEqual(len(result["beats"]), 6)
+        self.assertIn("exactly 6 beats", mocked.call_args.args[1])
+        self.assertIn(feedback, mocked.call_args.args[1])
+
+    def test_transient_provider_outage_stops_redundant_second_candidate(self):
+        failure = RuntimeError(
+            "All configured free text providers failed; no paid fallback was attempted. "
+            "gemini: Gemini HTTP 503: This model is currently experiencing high demand"
+        )
+        with patch.object(producer, "generate_concept", side_effect=failure) as generate:
+            with self.assertRaisesRegex(RuntimeError, "temporarily unavailable"):
+                producer.acquire_approved_concept(
+                    {"topics": [], "generated_count": 0, "performance": []},
+                    "micro_story", producer.datetime.now(producer.TZ), 0,
+                )
+        generate.assert_called_once()
+
     def test_text_router_falls_back_from_gemini_to_groq(self):
         with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", return_value={"writer": "groq"}) as groq:
             result = producer.text_json("system", "prompt")
