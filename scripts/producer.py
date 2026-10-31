@@ -621,7 +621,7 @@ Return one JSON object with exactly these fields:
   "posting_note": "one sentence explaining the test hypothesis for this reel"
 }}
 
-Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Prefer 5–6 beats, target 22–32 seconds, 45–72 spoken Hindi words; don't stretch the story to hit a duration. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately. Return JSON only."""
+Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 beats, target 22–32 seconds and 45–72 spoken Hindi words; don't stretch the story to hit a duration. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately. Return JSON only."""
 
     concept = text_json(system, user, temperature=0.85)
     # Normalize stable required fields, then locally validate shape.
@@ -632,7 +632,110 @@ Rules: first frame delivers a specific curiosity gap within 1 second, with no lo
     if isinstance(concept.get("beats"), list) and concept["beats"] and concept.get("hook"):
         # The opening frame must display the promised hook; do not rely on a vague intro scene.
         concept["beats"][0]["screen_text"] = str(concept["hook"]).strip()
+    concept = repair_concept_structure(concept)
     validate_concept_shape(concept)
+    return concept
+
+
+def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
+    """Apply safe local fixes, then make one constrained AI repair for narration length only.
+
+    Overlay type is a presentation enum, so an unknown value can safely fall back to
+    the neutral `keyword` style. Spoken narration is semantic content and is never
+    truncated locally; out-of-range lines receive one targeted rewrite request.
+    """
+    if not isinstance(concept, dict):
+        raise ValueError("Generated Reel must be a JSON object.")
+    beats = concept.get("beats")
+    if not isinstance(beats, list):
+        return concept  # The main validator emits the canonical schema error.
+
+    allowed_overlay_types = {"message", "note", "step", "contrast", "keyword"}
+    overlay_aliases = {
+        "label": "keyword", "tag": "keyword", "text": "keyword",
+        "quote": "message", "dialogue": "message",
+        "fact": "note", "tip": "note", "context": "note",
+        "number": "step", "comparison": "contrast", "compare": "contrast",
+    }
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        raw_type = beat.get("overlay_type", "")
+        overlay_type = raw_type.strip().lower() if isinstance(raw_type, str) else ""
+        if overlay_type not in allowed_overlay_types:
+            fallback = overlay_aliases.get(overlay_type, "keyword")
+            beat["overlay_type"] = fallback
+            log(f"Structural repair: Beat {i+1} overlay_type normalized to {fallback}.")
+        else:
+            beat["overlay_type"] = overlay_type
+
+    invalid_lines = []
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        voiceover = beat.get("voiceover")
+        if not isinstance(voiceover, str):
+            continue  # Main validator reports missing/invalid required fields.
+        word_count = len(voiceover.split())
+        if not 7 <= word_count <= 12:
+            invalid_lines.append({
+                "beat": i + 1,
+                "voiceover": voiceover,
+                "previous_line": beats[i - 1].get("voiceover", "") if i > 0 and isinstance(beats[i - 1], dict) else "",
+                "next_line": beats[i + 1].get("voiceover", "") if i + 1 < len(beats) and isinstance(beats[i + 1], dict) else "",
+                "word_count": word_count,
+            })
+
+    if invalid_lines:
+        repair_system = (
+            "You are a Hindi dialogue editor for short cinematic stories. "
+            "Rewrite only the specified narration lines. Preserve meaning, causal continuity "
+            "and natural spoken Hindi. Return valid JSON only."
+        )
+        repair_prompt = f"""Some narration lines failed a strict production timing check.
+
+Story title: {concept.get('title', '')}
+Story theme: {concept.get('theme', '')}
+Human detail: {concept.get('human_detail', '')}
+Character contradiction: {concept.get('character_contradiction', '')}
+
+Lines requiring repair (beat numbers are one-based):
+{json.dumps(invalid_lines, ensure_ascii=False)}
+
+For EVERY listed beat, return exactly one replacement line with 7–12 whitespace-separated Hindi words (aim for 8–10). Preserve the same event and emotional meaning. Do not add facts, change the plot, use a moral slogan, or combine two sentences. Do not rewrite any other beat.
+Return exactly this JSON shape:
+{{"replacements":[{{"beat":1,"voiceover":"short natural Hindi line"}}]}}
+The replacements array must contain every requested beat exactly once and no other beat numbers."""
+        repaired = text_json(repair_system, repair_prompt, temperature=0.2)
+        replacements = repaired.get("replacements") if isinstance(repaired, dict) else None
+        expected = {int(item["beat"]) for item in invalid_lines}
+        if not isinstance(replacements, list):
+            raise ValueError("Targeted narration repair returned no replacements array.")
+        received: dict[int, str] = {}
+        for item in replacements:
+            if not isinstance(item, dict):
+                raise ValueError("Targeted narration repair returned a malformed replacement.")
+            beat_number = item.get("beat")
+            line = item.get("voiceover")
+            if isinstance(beat_number, bool) or not isinstance(beat_number, int) or not isinstance(line, str):
+                raise ValueError("Targeted narration repair returned an invalid beat number or line.")
+            if beat_number not in expected or beat_number in received:
+                raise ValueError("Targeted narration repair returned an unexpected or duplicate beat.")
+            line = line.strip()
+            repaired_word_count = len(line.split())
+            if not 7 <= repaired_word_count <= 12:
+                raise ValueError(
+                    f"Targeted narration repair left Beat {beat_number} at {repaired_word_count} words; "
+                    "the allowed range is 7–12."
+                )
+            received[beat_number] = line
+        if set(received) != expected:
+            missing = sorted(expected - set(received))
+            raise ValueError("Targeted narration repair omitted beat(s): " + ", ".join(map(str, missing)))
+        for beat_number, line in received.items():
+            beats[beat_number - 1]["voiceover"] = line
+            log(f"Structural repair: Beat {beat_number} narration shortened and revalidated.")
+
     return concept
 
 
@@ -641,8 +744,8 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
     missing = [k for k in required if not concept.get(k)]
     if missing:
         raise ValueError("Generated concept misses required fields: " + ", ".join(missing))
-    if not isinstance(concept["beats"], list) or not 5 <= len(concept["beats"]) <= 6:
-        raise ValueError("Reel must contain 5–6 beats (one cinematic shot per beat; weekly GPU budget is 18 shots max).")
+    if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
+        raise ValueError("Reel must contain exactly 6 beats (one cinematic shot per beat; weekly GPU budget is 18 shots max).")
     allowed_overlay_types = {"message", "note", "step", "contrast", "keyword"}
     for i, beat in enumerate(concept["beats"]):
         beat.setdefault("voice_direction", "Natural, calm Hindi narration; restrained and conversational.")
@@ -686,10 +789,8 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
         concept["hashtags"] = concept["hashtags"][:5]
     concept["hashtags"] = [str(t).strip().replace(" ", "") for t in concept["hashtags"]]
     total_words = len(" ".join(b.get("voiceover", "") for b in concept["beats"]).split())
-    if total_words > 78:
-        raise ValueError(f"Voice-over is too long ({total_words} words); target approximately 45–72 natural spoken words.")
-    if total_words < 40:
-        raise ValueError(f"Voice-over is too short ({total_words} words); add enough specific progression to earn the ending.")
+    if not 45 <= total_words <= 72:
+        raise ValueError(f"Voice-over has {total_words} words; the production range is 45–72 natural spoken words (target 48–60).")
     hook_word_count = len(str(concept["hook"]).split())
     if len(concept["hook"]) > 70 or not 3 <= hook_word_count <= 10:
         raise ValueError("Hook must be a clear 3–10-word first-screen line and under 70 characters.")
@@ -722,7 +823,7 @@ Approve only if average >=4.2, human_specificity >=4, emotional_resonance >=4, o
 
 def revise_concept(concept: dict[str, Any], review: dict[str, Any], history: dict[str, Any], slot: datetime) -> dict[str, Any]:
     notes = review.get("revision_notes", []) if isinstance(review, dict) else []
-    prompt = f"""Revise this Reel using the specific editorial critique. Do not merely paraphrase it. Preserve the useful core only if original enough; replace the angle completely if needed. Return the full production JSON schema including share_reason, visual_bible, narrative_engine, emotional_aftertaste, human_detail, character_contradiction, cost_of_choice and every beat's voice_direction, video_prompt, overlay_type and overlay_text. Choose exactly one overlay_type from message, note, step, contrast, keyword. Every overlay adds context and must not repeat narration. Stay within approximately 45–72 spoken Hindi words and 5–6 beats. Each video_prompt must be one physically plausible photoreal vertical shot with a single action, practical light, camera/lens language, natural imperfect texture, no generated text/logo/watermark, and continuity with visual_bible.
+    prompt = f"""Revise this Reel using the specific editorial critique. Do not merely paraphrase it. Preserve the useful core only if original enough; replace the angle completely if needed. Return the full production JSON schema including share_reason, visual_bible, narrative_engine, emotional_aftertaste, human_detail, character_contradiction, cost_of_choice and every beat's voice_direction, video_prompt, overlay_type and overlay_text. Choose exactly one overlay_type from message, note, step, contrast, keyword. Every overlay adds context and must not repeat narration. Use exactly 6 beats; keep every voiceover line to 7–12 whitespace-separated Hindi words and the total narration to 45–72 words. Each video_prompt must be one physically plausible photoreal vertical shot with a single action, practical light, camera/lens language, natural imperfect texture, no generated text/logo/watermark, and continuity with visual_bible.
 CURRENT DRAFT: {json.dumps(concept, ensure_ascii=False)}
 REVIEW NOTES: {json.dumps(notes, ensure_ascii=False)}
 PRIMARY RISK: {str(review.get('main_risk',''))[:500]}
@@ -733,6 +834,7 @@ Return one valid JSON object only."""
     revised["series_name"] = SERIES_BY_PILLAR[concept["pillar"]]
     revised["planned_publish_at"] = slot.isoformat()
     revised["planned_publish_label"] = slot.strftime("%a %d %b, %I:%M %p IST")
+    revised = repair_concept_structure(revised)
     validate_concept_shape(revised)
     if topic_is_too_similar(str(revised.get("title", "")), str(revised.get("theme", "")), history.get("topics", [])):
         raise ValueError("Revised concept is too similar to recent title/theme history.")

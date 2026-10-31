@@ -168,6 +168,39 @@ class FactoryLogicTests(unittest.TestCase):
         concept = self.sample_concept()
         producer.validate_concept_shape(concept)
 
+    def test_structural_repair_normalizes_unknown_overlay_without_extra_ai_call(self):
+        concept = self.sample_concept()
+        concept["beats"][0]["overlay_type"] = "headline_overlay"
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["beats"][0]["overlay_type"], "keyword")
+        mocked.assert_not_called()
+
+    def test_structural_repair_shortens_only_invalid_narration_lines(self):
+        concept = self.sample_concept()
+        concept["beats"][1]["voiceover"] = "आज सुबह उसने अपने पुराने दोस्त को बिना बताए बहुत देर तक स्टेशन के बाहर अकेले इंतजार करते देखा था।"
+        replacement = "आज उसने दोस्त को स्टेशन पर चुपचाप इंतजार करते देखा।"
+        with patch.object(producer, "text_json", return_value={"replacements": [{"beat": 2, "voiceover": replacement}]}) as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["beats"][1]["voiceover"], replacement)
+        self.assertEqual(repaired["beats"][0]["voiceover"], self.sample_concept()["beats"][0]["voiceover"])
+        self.assertTrue(7 <= len(replacement.split()) <= 12)
+        mocked.assert_called_once()
+
+    def test_structural_repair_rejects_a_still_overlong_ai_rewrite(self):
+        concept = self.sample_concept()
+        concept["beats"][1]["voiceover"] = "आज सुबह उसने अपने पुराने दोस्त को बिना बताए बहुत देर तक स्टेशन के बाहर अकेले इंतजार करते देखा था।"
+        too_long = "आज सुबह उसने अपने पुराने दोस्त को स्टेशन के बाहर बहुत देर तक अकेले इंतजार करते हुए देखा था।"
+        with patch.object(producer, "text_json", return_value={"replacements": [{"beat": 2, "voiceover": too_long}]}):
+            with self.assertRaisesRegex(ValueError, "left Beat 2 at"):
+                producer.repair_concept_structure(concept)
+
+    def test_concept_validation_requires_exactly_six_beats(self):
+        concept = self.sample_concept()
+        concept["beats"] = concept["beats"][:5]
+        with self.assertRaisesRegex(ValueError, "exactly 6 beats"):
+            producer.validate_concept_shape(concept)
+
     def test_repeated_lived_in_detail_is_rejected(self):
         history = [{"human_detail": "A half-filled notebook left open beside a cooling cup of tea"}]
         self.assertTrue(producer.human_detail_is_too_similar("A half filled notebook left open beside a cooling cup of tea", history))
