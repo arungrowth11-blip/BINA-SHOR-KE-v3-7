@@ -1,0 +1,52 @@
+name: BINA SHOR KE — AI Provider Smoke Test
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_free_mode:
+        description: "Confirm Mistral remains on Free mode and Pay-as-you-go/billing is OFF"
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bina-shor-ke-provider-smoke-test
+  cancel-in-progress: false
+
+jobs:
+  provider-smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+      MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      GEMINI_TEXT_MODEL: gemini-3.8-flash
+      GROQ_TEXT_MODEL: openai/gpt-oss-120b
+      MISTRAL_TEXT_MODEL: ministral-8b-latest
+    steps:
+      - name: Require free-mode billing confirmation
+        env:
+          FREE_MODE_ACK: ${{ inputs.confirm_free_mode }}
+        run: |
+          if [[ "$FREE_MODE_ACK" != "true" ]]; then
+            echo "Stopped safely. Confirm Mistral is on Free mode and Pay-as-you-go/billing is OFF, then rerun and tick the confirmation box."
+            exit 1
+          fi
+
+      - name: Checkout private repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+
+      - name: Install lightweight workflow dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Test each configured provider once
+        run: python scripts/provider_smoke_test.py
