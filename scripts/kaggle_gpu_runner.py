@@ -330,8 +330,11 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     g['55'] = node_prompt(objects, 'Wan22ImageToVideoLatent', {
         'width': 704, 'height': 1280, 'length': 81, 'batch_size': 1, 'vae': ['39', 0]
     })
+    # The ComfyUI API KSampler schema exposes `seed` but not the UI-only
+    # `control_after_generate` widget value. Determinism is already guaranteed by
+    # the explicit per-scene seed computed above.
     g['3'] = node_prompt(objects, 'KSampler', {
-        'seed': seed, 'control_after_generate': 'fixed', 'steps': 20, 'cfg': 5,
+        'seed': seed, 'steps': 20, 'cfg': 5,
         'sampler_name': 'uni_pc', 'scheduler': 'simple', 'denoise': 1,
         'model': ['48', 0], 'positive': ['6', 0], 'negative': ['7', 0], 'latent_image': ['55', 0]
     })

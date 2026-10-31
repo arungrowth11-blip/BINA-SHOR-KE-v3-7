@@ -861,15 +861,91 @@ def resolve_dispatch_unknown(confirm_running: bool) -> int:
         pending['dispatch_resolution'] = 'owner_confirmed_new_run_exists'
         if pending.pop('resume_dispatch_attempt_pending', False):
             pending['resume_attempts'] = int(pending.get('resume_attempts', 0)) + 1
+        if pending.pop('gpu_retry_dispatch_attempt_pending', False):
+            pending['gpu_retry_attempts'] = int(pending.get('gpu_retry_attempts', 0)) + 1
+            pending['gpu_retry_dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
         pending.setdefault('dispatched_at_ist', pending.get('created_at_ist'))
         write_json(PENDING, pending)
         log('Owner confirmed the new Kaggle run exists. Polling will continue without dispatching another GPU job.')
     else:
-        pending['status'] = 'gpu_checkpoint_saved' if pending.get('resume_dispatch_attempt_pending') else 'dispatch_failed'
-        pending.pop('resume_dispatch_attempt_pending', None)
+        if pending.pop('resume_dispatch_attempt_pending', False):
+            pending['status'] = 'gpu_checkpoint_saved'
+        elif pending.pop('gpu_retry_dispatch_attempt_pending', False):
+            pending['status'] = 'gpu_failed'
+        else:
+            pending['status'] = 'dispatch_failed'
         pending['dispatch_resolution'] = 'owner_confirmed_new_run_did_not_start'
         write_json(PENDING, pending)
         log('Owner confirmed no new Kaggle run started. A fresh plan can now be requested; no automatic re-dispatch occurred.')
+    return 0
+
+
+def retry_failed_gpu() -> int:
+    """Retry the same manifest once after the known ComfyUI KSampler schema failure."""
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'gpu_failed':
+        raise RuntimeError(f"GPU retry requires status=gpu_failed (current={pending.get('status', 'none')}). Run poll once first if the old Kaggle job has not yet been collected.")
+    if int(pending.get('gpu_retry_attempts', 0)) >= 1:
+        raise RuntimeError('The one allowed KSampler compatibility retry has already been used; inspect Kaggle logs before any further GPU run.')
+    if pending.get('resume_dataset_id') or int(pending.get('resume_scene_count', 0) or 0) > 0:
+        raise RuntimeError('Verified scene checkpoints exist. Use resume-checkpoint instead of retry-gpu so completed scenes are reused.')
+    if pending.get('checkpoint_save_error'):
+        raise RuntimeError('Checkpoint persistence failed. Do not retry the GPU blindly; inspect the saved Kaggle output and checkpoint error first.')
+    failure_text = json.dumps(pending.get('gpu_error', ''), ensure_ascii=False).lower()
+    if 'ksampler schema changed' not in failure_text and 'control_after_generate' not in failure_text:
+        raise RuntimeError('This retry is restricted to the observed KSampler schema incompatibility. The saved GPU error does not match that failure.')
+    manifest = pending.get('manifest')
+    if not isinstance(manifest, dict) or manifest.get('job_id') != pending.get('job_id') or not manifest.get('reels'):
+        raise RuntimeError('Saved manifest is incomplete or does not match the pending job. Refusing to create a different Reel.')
+    if any(reel.get('delivery_status') == 'delivered' for reel in pending.get('reels', [])):
+        raise RuntimeError('At least one Reel from this manifest is already delivered. Refusing to retry the whole GPU manifest.')
+
+    configure_kaggle_cli()
+    recorded_kernel_id = str(pending.get('kaggle_kernel_id', '')).strip()
+    expected_kernel_id = kaggle_kernel_id()
+    if not recorded_kernel_id or recorded_kernel_id != expected_kernel_id:
+        raise RuntimeError(f"Kaggle kernel identity mismatch: pending={recorded_kernel_id or 'missing'}, configured={expected_kernel_id}. Correct the account/slug before retrying.")
+    remote_status, remote_output = kaggle_status(recorded_kernel_id)
+    if remote_status not in {'ERROR', 'CANCELLED'}:
+        raise RuntimeError(f"The previous Kaggle run is not confirmed terminal (status={remote_status}). No new GPU run was dispatched. {remote_output[-600:]}")
+
+    kernel_dir = build_kaggle_kernel(manifest)
+    try:
+        result = subprocess.run(
+            ['kaggle', 'kernels', 'push', '-p', str(kernel_dir)],
+            text=True, capture_output=True, timeout=900,
+        )
+        console = (result.stdout or '') + '\n' + (result.stderr or '')
+        push_failed = bool(result.returncode)
+    except Exception as push_exc:
+        console = f'{type(push_exc).__name__}: {push_exc}'
+        push_failed = True
+
+    if push_failed:
+        try:
+            after_status, after_output = kaggle_status(recorded_kernel_id)
+        except Exception as status_exc:
+            after_status, after_output = 'UNKNOWN', f'{type(status_exc).__name__}: {status_exc}'
+        if after_status in {'RUNNING', 'QUEUED', 'COMPILING', 'CREATED'}:
+            console = (console + '\n' + after_output)[-2500:]
+            log('Kaggle shows the corrected retry is active despite a CLI error; preserving the existing Reel and polling it.')
+        else:
+            pending['status'] = 'dispatch_unknown'
+            pending['gpu_retry_dispatch_attempt_pending'] = True
+            pending['gpu_retry_dispatch_error'] = console[-2500:]
+            pending['gpu_retry_remote_status'] = after_status
+            write_json(PENDING, pending)
+            alert_failure('BINA SHOR KE corrected GPU retry returned an ambiguous result. No second retry was sent. Inspect Kaggle run history, then use resolve-dispatch-running or resolve-dispatch-not-started.')
+            return 1
+
+    pending['gpu_retry_attempts'] = int(pending.get('gpu_retry_attempts', 0)) + 1
+    pending['gpu_retry_dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    pending['gpu_retry_reason'] = 'ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.'
+    pending['status'] = 'gpu_running'
+    pending['dispatched_at_ist'] = pending['gpu_retry_dispatched_at_ist']
+    pending['dispatch_output'] = console[-2000:]
+    write_json(PENDING, pending)
+    log(f"Dispatched one corrected GPU retry for the same Reel manifest {pending.get('job_id')}; no new story was planned.")
     return 0
 
 
@@ -916,7 +992,7 @@ def self_test() -> int:
         'CLIPLoader': ['clip_name', 'type', 'device'], 'VAELoader': ['vae_name'],
         'ModelSamplingSD3': ['model', 'shift'], 'CLIPTextEncode': ['text', 'clip'],
         'Wan22ImageToVideoLatent': ['width', 'height', 'length', 'batch_size', 'vae', 'start_image'],
-        'KSampler': ['seed', 'control_after_generate', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+        'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
         'VAEDecode': ['samples', 'vae'], 'CreateVideo': ['images', 'fps'],
         'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
     }
@@ -938,7 +1014,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -949,6 +1025,8 @@ def main():
             return plan_week(1)
         if args.command == 'retry-finalize':
             return retry_finalize()
+        if args.command == 'retry-gpu':
+            return retry_failed_gpu()
         if args.command == 'resume-checkpoint':
             return resume_saved_checkpoint()
         if args.command == 'resolve-dispatch-running':

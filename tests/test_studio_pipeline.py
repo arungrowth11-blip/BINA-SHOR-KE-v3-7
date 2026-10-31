@@ -51,6 +51,22 @@ class StudioPipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "unsupported inputs"):
             runner.node_prompt(objects, "ExampleNode", {"required_field": "ok", "removed_field": "bad"})
 
+    def test_kaggle_api_sampler_graph_omits_ui_only_control_after_generate(self):
+        runner = load_runner_module()
+        schema = {
+            'seed': [], 'steps': [], 'cfg': [], 'sampler_name': [], 'scheduler': [],
+            'denoise': [], 'model': [], 'positive': [], 'negative': [], 'latent_image': [],
+        }
+        objects = {'KSampler': {'input': {'required': {k: [] for k in schema}, 'optional': {}}}}
+        inputs = {
+            'seed': 123, 'steps': 20, 'cfg': 5, 'sampler_name': 'uni_pc',
+            'scheduler': 'simple', 'denoise': 1, 'model': ['48', 0],
+            'positive': ['6', 0], 'negative': ['7', 0], 'latent_image': ['55', 0],
+        }
+        prompt = runner.node_prompt(objects, 'KSampler', inputs)
+        self.assertNotIn('control_after_generate', prompt['inputs'])
+        self.assertEqual(prompt['inputs']['seed'], 123)
+
     def test_kaggle_incomplete_does_not_match_complete(self):
         with patch.object(studio_pipeline, "configure_kaggle_cli"), patch.object(
             studio_pipeline.subprocess, "run", return_value=Mock(returncode=0, stdout="KernelWorkerStatus.INCOMPLETE", stderr="")
@@ -106,6 +122,74 @@ class StudioPipelineTests(unittest.TestCase):
                 self.assertEqual(studio_pipeline.load_json(studio_pipeline.PENDING)['status'], 'dispatch_failed')
                 with self.assertRaisesRegex(RuntimeError, 'no ambiguous dispatch'):
                     studio_pipeline.resolve_dispatch_unknown(confirm_running=False)
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_retry_gpu_reuses_same_manifest_after_confirmed_kaggle_error(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            manifest = {'job_id': 'job-1', 'reels': [{'reel_id': 'reel-1', 'beats': [{'video_prompt': 'x'}]}]}
+            state = {
+                'job_id': 'job-1', 'status': 'gpu_failed', 'kaggle_kernel_id': 'owner/worker',
+                'manifest': manifest, 'reels': [{'reel_id': 'reel-1', 'delivery_status': 'planned'}],
+                'gpu_error': 'KSampler schema changed: unsupported control_after_generate',
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('ERROR', 'KernelWorkerStatus.ERROR')), \
+                     patch.object(studio_pipeline, 'build_kaggle_kernel', return_value=Path(folder) / 'kernel'), \
+                     patch.object(studio_pipeline.subprocess, 'run', return_value=Mock(returncode=0, stdout='pushed', stderr='')) as push:
+                    (Path(folder) / 'kernel').mkdir()
+                    self.assertEqual(studio_pipeline.retry_failed_gpu(), 0)
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'gpu_running')
+                self.assertEqual(updated['job_id'], 'job-1')
+                self.assertEqual(updated['manifest'], manifest)
+                self.assertEqual(updated['gpu_retry_attempts'], 1)
+                self.assertIn('kernels', push.call_args.args[0])
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_retry_gpu_refuses_nonterminal_kaggle_status(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                'job_id': 'job-1', 'status': 'gpu_failed', 'kaggle_kernel_id': 'owner/worker',
+                'manifest': {'job_id': 'job-1', 'reels': [{'reel_id': 'r', 'beats': [{}]}]},
+                'reels': [{'reel_id': 'r', 'delivery_status': 'planned'}],
+                'gpu_error': 'KSampler schema changed: unsupported control_after_generate',
+            })
+            try:
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('RUNNING', 'KernelWorkerStatus.RUNNING')), \
+                     patch.object(studio_pipeline, 'build_kaggle_kernel') as build:
+                    with self.assertRaisesRegex(RuntimeError, 'not confirmed terminal'):
+                        studio_pipeline.retry_failed_gpu()
+                    build.assert_not_called()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_retry_gpu_refuses_existing_checkpoints(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                'job_id': 'job-1', 'status': 'gpu_failed', 'kaggle_kernel_id': 'owner/worker',
+                'manifest': {'job_id': 'job-1', 'reels': [{'reel_id': 'r', 'beats': [{}]}]},
+                'reels': [{'reel_id': 'r', 'delivery_status': 'planned'}],
+                'gpu_error': 'KSampler schema changed: unsupported control_after_generate',
+                'resume_scene_count': 1, 'resume_dataset_id': 'owner/bsk-resume-job1',
+            })
+            try:
+                with self.assertRaisesRegex(RuntimeError, 'Use resume-checkpoint'):
+                    studio_pipeline.retry_failed_gpu()
             finally:
                 studio_pipeline.PENDING = old_pending
 

@@ -19,6 +19,15 @@ class WorkflowConfigTests(unittest.TestCase):
             self.assertIn('CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"', body)
 
 
+    def test_gpu_workflow_has_guarded_same_reel_retry_action(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('retry-gpu', body)
+        self.assertIn('Retry the same Reel after the KSampler schema fix', body)
+        self.assertIn('refusing to silently skip GPU work', body)
+        pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
+        self.assertIn('def retry_failed_gpu()', pipeline)
+        self.assertIn('control_after_generate', pipeline)
+
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */6 * * *"', body)

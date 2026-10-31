@@ -11,6 +11,7 @@ on:
         options:
           - "poll"
           - "retry-finalize"
+          - "retry-gpu"
           - "resume-checkpoint"
           - "resolve-dispatch-running"
           - "resolve-dispatch-not-started"
@@ -66,17 +67,33 @@ jobs:
           import json, os
           from pathlib import Path
           path = Path("data/pending_gpu_job.json")
-          try:
-              state = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
-          except Exception:
+          if path.exists():
+              try:
+                  state = json.loads(path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  raise SystemExit(f"pending_gpu_job.json is invalid JSON; refusing to silently skip GPU work: {exc}")
+          else:
               state = {}
+          if not isinstance(state, dict):
+              raise SystemExit("pending_gpu_job.json must contain a JSON object; refusing to continue")
           action = os.environ.get("POLL_ACTION", "poll")
           poll_states = {"gpu_running", "gpu_complete"}
           retry_states = {"finalize_failed", "finalizing", "gpu_failed"}
+          gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
+          known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
+                                    or "control_after_generate" in gpu_error_text)
+          retry_gpu_ok = (state.get("status") == "gpu_failed"
+                          and known_ksampler_failure
+                          and not state.get("resume_dataset_id")
+                          and int(state.get("resume_scene_count", 0) or 0) == 0
+                          and not state.get("checkpoint_save_error")
+                          and int(state.get("gpu_retry_attempts", 0) or 0) < 1)
           resolve_states = {"dispatch_unknown"}
           resume_states = {"gpu_checkpoint_saved"}
           if action == "retry-finalize":
               allowed = retry_states
+          elif action == "retry-gpu":
+              allowed = {"gpu_failed"} if retry_gpu_ok else set()
           elif action == "resume-checkpoint":
               allowed = resume_states
           elif action.startswith("resolve-dispatch-"):
@@ -174,6 +191,10 @@ jobs:
       - name: Explicitly retry a failed/interrupted finalization
         if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'retry-finalize'
         run: python scripts/studio_pipeline.py retry-finalize
+
+      - name: Retry the same Reel after the KSampler schema fix
+        if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'retry-gpu'
+        run: python scripts/studio_pipeline.py retry-gpu
 
       - name: Resume from saved private scene checkpoints
         if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'resume-checkpoint'
