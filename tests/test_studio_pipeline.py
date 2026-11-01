@@ -221,6 +221,83 @@ class StudioPipelineTests(unittest.TestCase):
                 studio_pipeline.PENDING = old_pending
                 studio_pipeline.os.environ.pop('BSK_ALLOW_TINY_VO_TEMPO_FIT', None)
 
+    def test_scene5_voiceover_repair_changes_only_voiceover_and_reuses_completed_gpu_scenes(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            original = 'सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।'
+            replacement = 'सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।'
+            concept = {
+                'title': 'सूखी छतरी',
+                'beats': [
+                    {'scene_index': i, 'voiceover': f'मूल पंक्ति संख्या {i} सुरक्षित रखी गई है।', 'voice_direction': f'direction {i}', 'video_prompt': f'video {i}'}
+                    for i in range(1, 7)
+                ],
+            }
+            concept['beats'][4]['voiceover'] = original
+            state = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker',
+                'active_finalizing_reel_id': 'reel_01_115742',
+                'qa_rejection_reason': 'RuntimeError: AI scene 5 would require excessive speed change (1.67x); it is outside the bounded voice-timing repair window.',
+                'rhythm_repair_attempts': 1,
+                'rhythm_repair': {'status': 'in_progress', 'scene_index': 1},
+                'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': concept}],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                def fake_finalize():
+                    latest = studio_pipeline.load_json(studio_pipeline.PENDING)
+                    self.assertEqual(latest['status'], 'gpu_complete')
+                    self.assertEqual(latest['reels'][0]['concept']['beats'][4]['voiceover'], replacement)
+                    self.assertEqual(latest['reels'][0]['concept']['beats'][4]['video_prompt'], 'video 5')
+                    self.assertEqual(latest['reels'][0]['concept']['beats'][4]['voice_direction'], 'direction 5')
+                    self.assertEqual(latest['reels'][0]['concept']['beats'][0]['voiceover'], 'मूल पंक्ति संख्या 1 सुरक्षित रखी गई है।')
+                    latest['status'] = 'delivered'
+                    studio_pipeline.write_json(studio_pipeline.PENDING, latest)
+                    return 0
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('COMPLETE', 'KernelWorkerStatus.COMPLETE')), \
+                     patch.object(studio_pipeline, 'poll_and_finalize', side_effect=fake_finalize) as finalize:
+                    self.assertEqual(studio_pipeline.repair_scene_5_voiceover_finalize(), 0)
+                    self.assertEqual(studio_pipeline.os.environ.get('BSK_ALLOW_TINY_VO_TEMPO_FIT'), '1')
+                    finalize.assert_called_once()
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'delivered')
+                self.assertEqual(updated['scene_voiceover_repair_attempts'], 1)
+                self.assertEqual(updated['scene_voiceover_repair']['status'], 'completed')
+                self.assertFalse(updated['scene_voiceover_repair']['new_kaggle_gpu_dispatch'])
+                self.assertEqual(len(replacement.split()), 8)
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_scene5_voiceover_repair_refuses_wrong_scene_or_repeated_attempt(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            base = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker', 'active_finalizing_reel_id': 'reel_01_115742',
+                'qa_rejection_reason': 'AI scene 4 would require excessive speed change (1.67x)',
+                'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': {
+                    'title': 'सूखी छतरी', 'beats': [{'scene_index': i, 'voiceover': 'x'} for i in range(1, 7)]
+                }}],
+            }
+            try:
+                studio_pipeline.write_json(studio_pipeline.PENDING, base)
+                with self.assertRaisesRegex(RuntimeError, 'restricted to the recorded Scene 5'):
+                    studio_pipeline.repair_scene_5_voiceover_finalize()
+                repeated = dict(base)
+                repeated['qa_rejection_reason'] = 'AI scene 5 would require excessive speed change (1.67x)'
+                repeated['scene_voiceover_repair_attempts'] = 1
+                studio_pipeline.write_json(studio_pipeline.PENDING, repeated)
+                with self.assertRaisesRegex(RuntimeError, 'already been used'):
+                    studio_pipeline.repair_scene_5_voiceover_finalize()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
     def test_rhythm_repair_refuses_visual_qa_rejection(self):
         old_pending = studio_pipeline.PENDING
         with tempfile.TemporaryDirectory() as folder:

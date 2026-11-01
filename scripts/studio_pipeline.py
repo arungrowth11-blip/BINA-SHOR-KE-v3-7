@@ -1020,6 +1020,112 @@ def repair_rhythm_finalize() -> int:
     return result
 
 
+
+def repair_scene_5_voiceover_finalize() -> int:
+    """Replace only Scene 5 narration for the known 1.67x rejection and re-finalize existing MP4s.
+
+    This guarded recovery does not dispatch Kaggle GPU, does not rewrite the story arc, and
+    preserves the six existing video clips. The replacement is intentionally 8 words to
+    retain the producer's 7–12 word structural rule while shortening the recorded line.
+    """
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'qa_rejected':
+        raise RuntimeError(
+            f'Scene 5 voiceover repair requires qa_rejected state (current={pending.get("status", "none")}).'
+        )
+    reason = str(pending.get('qa_rejection_reason', ''))
+    match = re.search(
+        r'AI scene\s+5\s+would require excessive speed change\s*\(([0-9.]+)x\)',
+        reason,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise RuntimeError('This action is restricted to the recorded Scene 5 excessive-speed QA rejection.')
+    reported_ratio = float(match.group(1))
+    if not 1.50 <= reported_ratio <= 1.80:
+        raise RuntimeError(f'Scene 5 ratio {reported_ratio:.2f}x is outside this targeted repair case.')
+    if int(pending.get('scene_voiceover_repair_attempts', 0) or 0) >= 1:
+        raise RuntimeError('The one allowed Scene 5 voiceover rewrite attempt has already been used.')
+
+    reel_id = pending.get('active_finalizing_reel_id')
+    if reel_id != 'reel_01_115742':
+        raise RuntimeError('This one-time voiceover repair is restricted to Reel reel_01_115742.')
+    reels = pending.get('reels') if isinstance(pending.get('reels'), list) else []
+    reel = next((item for item in reels if item.get('reel_id') == reel_id), None)
+    if not reel or reel.get('delivery_status') == 'delivered':
+        raise RuntimeError('Could not uniquely identify an undelivered Reel for Scene 5 voiceover repair.')
+    concept = reel.get('concept') if isinstance(reel.get('concept'), dict) else {}
+    beats = concept.get('beats') if isinstance(concept.get('beats'), list) else []
+    if concept.get('title') != 'सूखी छतरी' or len(beats) != 6:
+        raise RuntimeError('Saved Reel concept does not match the expected six-scene सूखी छतरी manifest.')
+    beat = beats[4]
+    if int(beat.get('scene_index', 5)) != 5:
+        raise RuntimeError('The fifth concept beat is not marked as scene_index 5.')
+    original_line = 'सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।'
+    replacement_line = 'सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।'
+    if beat.get('voiceover') != original_line:
+        raise RuntimeError('Scene 5 voiceover no longer matches the reviewed source line; refusing an unexpected overwrite.')
+    replacement_words = len(replacement_line.split())
+    if not 7 <= replacement_words <= 12:
+        raise RuntimeError('The Scene 5 replacement must satisfy the factory 7–12 spoken-word rule.')
+
+    expected_kernel_id = kaggle_kernel_id()
+    recorded_kernel_id = str(pending.get('kaggle_kernel_id', '')).strip()
+    if not recorded_kernel_id or recorded_kernel_id != expected_kernel_id:
+        raise RuntimeError('Kaggle kernel identity mismatch. Correct the account/slug before voiceover repair.')
+    configure_kaggle_cli()
+    remote_status, remote_output = kaggle_status(recorded_kernel_id)
+    if remote_status != 'COMPLETE':
+        raise RuntimeError(
+            f'Kaggle source run must be COMPLETE before Scene 5 voiceover repair '
+            f'(status={remote_status}). {remote_output[-600:]}'
+        )
+
+    # Persist the exact narration change before TTS/finalization so a transient API failure
+    # can be retried with retry-finalize without consuming another rewrite attempt.
+    pending['scene_voiceover_repair_attempts'] = int(pending.get('scene_voiceover_repair_attempts', 0) or 0) + 1
+    pending['scene_voiceover_repair'] = {
+        'status': 'in_progress',
+        'scene_index': 5,
+        'reported_original_ratio': reported_ratio,
+        'original_voiceover': original_line,
+        'replacement_voiceover': replacement_line,
+        'replacement_word_count': replacement_words,
+        'method': 'regenerate Scene 5 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA',
+        'requested_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'new_kaggle_gpu_dispatch': False,
+    }
+    if isinstance(pending.get('rhythm_repair'), dict):
+        pending['rhythm_repair']['status'] = 'partial_failed_at_scene_5'
+        pending['rhythm_repair']['followup_rejection_reason'] = reason[:1000]
+    beat['voiceover'] = replacement_line
+    pending['status'] = 'gpu_complete'
+    pending.pop('finalize_error', None)
+    write_json(PENDING, pending)
+
+    # Keep the already-approved tiny <=3% pitch-preserving fit available for Scene 1,
+    # which was the original borderline 1.39x rejection. No video speed is forced past 1.38x.
+    os.environ['BSK_ALLOW_TINY_VO_TEMPO_FIT'] = '1'
+    log(
+        f'Starting one targeted Scene 5 voiceover rewrite for Reel {reel_id}; '
+        'all six completed Kaggle MP4s will be reused, no GPU dispatch.'
+    )
+    result = poll_and_finalize()
+    latest = load_json(PENDING, {}) or {}
+    if latest.get('status') == 'delivered':
+        latest.setdefault('scene_voiceover_repair', {})['status'] = 'completed'
+        latest['scene_voiceover_repair']['completed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        write_json(PENDING, latest)
+    elif latest.get('status') == 'qa_rejected':
+        latest.setdefault('scene_voiceover_repair', {})['status'] = 'qa_rejected_again'
+        latest['scene_voiceover_repair']['final_qa_rejection_reason'] = str(latest.get('qa_rejection_reason', ''))[:1200]
+        write_json(PENDING, latest)
+    elif latest.get('status') == 'finalize_failed':
+        latest.setdefault('scene_voiceover_repair', {})['status'] = 'finalize_failed_retryable'
+        latest['scene_voiceover_repair']['finalize_error'] = str(latest.get('finalize_error', ''))[:1200]
+        write_json(PENDING, latest)
+    return result
+
 def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
@@ -1078,7 +1184,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -1091,6 +1197,8 @@ def main():
             return retry_finalize()
         if args.command == 'repair-rhythm-finalize':
             return repair_rhythm_finalize()
+        if args.command == 'repair-scene-voiceover-finalize':
+            return repair_scene_5_voiceover_finalize()
         if args.command == 'retry-gpu':
             return retry_failed_gpu()
         if args.command == 'resume-checkpoint':

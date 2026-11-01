@@ -32,6 +32,18 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('def retry_failed_gpu()', pipeline)
         self.assertIn('control_after_generate', pipeline)
 
+    def test_scene5_voiceover_repair_is_guarded_and_does_not_dispatch_gpu(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('repair-scene-voiceover', body)
+        self.assertIn('scene5_voiceover_repair_ok', body)
+        self.assertIn('Replace only Scene 5 Hindi narration and re-finalize the same AI scenes', body)
+        self.assertIn('repair-scene-voiceover-finalize', body)
+        self.assertIn("[ \"$POLL_ACTION\" = 'repair-scene-voiceover' ]", body)
+        pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
+        self.assertIn('def repair_scene_5_voiceover_finalize()', pipeline)
+        self.assertIn('new_kaggle_gpu_dispatch', pipeline)
+        self.assertIn('सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।', pipeline)
+
     def test_kaggle_cli_installs_six_explicitly_for_status_and_repair(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         expected = '"six>=1.16.0,<2" kaggle'
