@@ -126,7 +126,7 @@ jobs:
         if: steps.pending.outputs.active == 'true' && env.POLL_ACTION == 'poll'
         shell: bash
         run: |
-          python -m pip install --disable-pip-version-check -q kaggle
+          python -m pip install --disable-pip-version-check -q "six>=1.16.0,<2" kaggle
           mkdir -p "$HOME/.kaggle"
           printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > "$HOME/.kaggle/kaggle.json"
           chmod 600 "$HOME/.kaggle/kaggle.json"
@@ -188,7 +188,7 @@ jobs:
           if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ] || [ "$POLL_ACTION" = 'repair-rhythm' ]; then
             python -m pip install --disable-pip-version-check -r requirements-asr.txt
           fi
-          python -m pip install --disable-pip-version-check kaggle
+          python -m pip install --disable-pip-version-check "six>=1.16.0,<2" kaggle
           mkdir -p "$HOME/.kaggle"
           printf '{"username":"%s","key":"%s"}' "$KAGGLE_USERNAME" "$KAGGLE_KEY" > "$HOME/.kaggle/kaggle.json"
           chmod 600 "$HOME/.kaggle/kaggle.json"

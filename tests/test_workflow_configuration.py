@@ -32,6 +32,13 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('def retry_failed_gpu()', pipeline)
         self.assertIn('control_after_generate', pipeline)
 
+    def test_kaggle_cli_installs_six_explicitly_for_status_and_repair(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        expected = '"six>=1.16.0,<2" kaggle'
+        self.assertEqual(body.count(expected), 2)
+        self.assertIn('Quick remote Kaggle status check (minimal CLI only)', body)
+        self.assertIn('Install dependencies and configure private Kaggle CLI', body)
+
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */6 * * *"', body)
