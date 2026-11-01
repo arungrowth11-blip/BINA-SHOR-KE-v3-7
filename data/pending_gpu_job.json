@@ -129,7 +129,7 @@
             "scene_index": 5
           },
           {
-            "voiceover": "उसने सूखी छतरी टांग दी, मगर कमरा चुप ही रहा।",
+            "voiceover": "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।",
             "voice_direction": "शांत, ठहराव भरा अंत, अनकही दूरी का अहसास",
             "screen_text": "चीज़ वापस मिल गई\nसहजता नहीं",
             "visual_query": "dry umbrella hanging wooden peg quiet room",
@@ -239,8 +239,8 @@
   "gpu_retry_dispatched_at_ist": "2026-10-31T14:07:11+05:30",
   "gpu_retry_reason": "ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.",
   "active_finalizing_reel_id": "reel_01_115742",
-  "qa_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.62x); it is outside the bounded voice-timing repair window.",
-  "qa_rejected_at_ist": "2026-11-01T17:46:37+05:30",
+  "qa_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.54x); it is outside the bounded voice-timing repair window.",
+  "qa_rejected_at_ist": "2026-11-01T17:57:59+05:30",
   "rhythm_repair_attempts": 1,
   "rhythm_repair": {
     "status": "partial_failed_at_scene_5",
@@ -255,7 +255,7 @@
   },
   "scene_voiceover_repair_attempts": 1,
   "scene_voiceover_repair": {
-    "status": "in_progress",
+    "status": "completed_with_followup_scene6_repair",
     "scene_index": 5,
     "reported_original_ratio": 1.67,
     "original_voiceover": "सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।",
@@ -263,6 +263,18 @@
     "replacement_word_count": 8,
     "method": "regenerate Scene 5 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA",
     "requested_at_ist": "2026-11-01T17:45:51+05:30",
+    "new_kaggle_gpu_dispatch": false
+  },
+  "scene6_voiceover_repair_attempts": 1,
+  "scene6_voiceover_repair": {
+    "status": "in_progress",
+    "scene_index": 6,
+    "reported_original_ratio": 1.62,
+    "original_voiceover": "उसने सूखी छतरी टांग दी, मगर कमरा चुप ही रहा।",
+    "replacement_voiceover": "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।",
+    "replacement_word_count": 8,
+    "method": "regenerate Scene 6 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA",
+    "requested_at_ist": "2026-11-01T17:57:28+05:30",
     "new_kaggle_gpu_dispatch": false
   }
 }
