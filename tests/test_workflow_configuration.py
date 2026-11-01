@@ -62,6 +62,20 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('Quick remote Kaggle status check (minimal CLI only)', body)
         self.assertIn('Install dependencies and configure private Kaggle CLI', body)
 
+    def test_scene6_voiceover_repair_is_strictly_guarded_and_reuses_existing_scenes(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('repair-scene-6-voiceover', body)
+        self.assertIn('scene6_voiceover_repair_ok', body)
+        self.assertIn('Replace only Scene 6 Hindi narration and re-finalize the same AI scenes', body)
+        self.assertIn('repair-scene-6-voiceover-finalize', body)
+        self.assertIn('[ "$POLL_ACTION" = \'repair-scene-6-voiceover\' ]', body)
+        self.assertIn('1.61 <= float(scene6_match.group(1)) <= 1.63', body)
+        self.assertIn('scene6_source_matches', body)
+        pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
+        self.assertIn('def repair_scene_6_voiceover_finalize()', pipeline)
+        self.assertIn('उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
+        self.assertIn("'new_kaggle_gpu_dispatch': False", pipeline)
+
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */6 * * *"', body)

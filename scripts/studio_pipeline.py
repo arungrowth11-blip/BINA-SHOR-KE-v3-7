@@ -1133,6 +1133,112 @@ def repair_scene_5_voiceover_finalize() -> int:
         write_json(PENDING, latest)
     return result
 
+
+
+def repair_scene_6_voiceover_finalize() -> int:
+    """Replace only Scene 6 narration for the known 1.62x rejection and re-finalize existing MP4s.
+
+    This one-time recovery is strictly bound to the already-repaired Scene 5 in Reel
+    reel_01_115742. It reuses all six completed Kaggle MP4s and never dispatches GPU.
+    """
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'qa_rejected':
+        raise RuntimeError(
+            f'Scene 6 voiceover repair requires qa_rejected state (current={pending.get("status", "none")}).'
+        )
+    reason = str(pending.get('qa_rejection_reason', ''))
+    match = re.search(
+        r'AI scene(?:\s+6)?\s+would require excessive speed change\s*\(([0-9.]+)x\)',
+        reason,
+        re.IGNORECASE,
+    )
+    if not match:
+        raise RuntimeError('This action is restricted to the recorded Scene 6 excessive-speed QA rejection.')
+    reported_ratio = float(match.group(1))
+    if not 1.61 <= reported_ratio <= 1.63:
+        raise RuntimeError(f'Scene 6 ratio {reported_ratio:.2f}x is outside this targeted 1.62x repair case.')
+    if int(pending.get('rhythm_repair_attempts', 0) or 0) != 1:
+        raise RuntimeError('Scene 6 voiceover repair requires the one recorded prior rhythm-repair attempt.')
+    if int(pending.get('scene_voiceover_repair_attempts', 0) or 0) != 1:
+        raise RuntimeError('Scene 6 voiceover repair requires the completed one-time Scene 5 rewrite first.')
+    if int(pending.get('scene6_voiceover_repair_attempts', 0) or 0) >= 1:
+        raise RuntimeError('The one allowed Scene 6 voiceover rewrite attempt has already been used.')
+
+    reel_id = pending.get('active_finalizing_reel_id')
+    if reel_id != 'reel_01_115742':
+        raise RuntimeError('This one-time voiceover repair is restricted to Reel reel_01_115742.')
+    reels = pending.get('reels') if isinstance(pending.get('reels'), list) else []
+    reel = next((item for item in reels if item.get('reel_id') == reel_id), None)
+    if not reel or reel.get('delivery_status') == 'delivered':
+        raise RuntimeError('Could not uniquely identify an undelivered Reel for Scene 6 voiceover repair.')
+    concept = reel.get('concept') if isinstance(reel.get('concept'), dict) else {}
+    beats = concept.get('beats') if isinstance(concept.get('beats'), list) else []
+    if concept.get('title') != 'सूखी छतरी' or len(beats) != 6:
+        raise RuntimeError('Saved Reel concept does not match the expected six-scene सूखी छतरी manifest.')
+
+    scene5_original_replacement = 'सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।'
+    scene6_original = 'उसने सूखी छतरी टांग दी, मगर कमरा चुप ही रहा।'
+    scene6_replacement = 'उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।'
+    if int(beats[4].get('scene_index', 5)) != 5 or beats[4].get('voiceover') != scene5_original_replacement:
+        raise RuntimeError('Scene 5 must retain the approved v3.7.4b replacement before Scene 6 repair.')
+    if int(beats[5].get('scene_index', 6)) != 6 or beats[5].get('voiceover') != scene6_original:
+        raise RuntimeError('Scene 6 voiceover no longer matches the reviewed source line; refusing an unexpected overwrite.')
+    replacement_words = len(scene6_replacement.split())
+    if not 7 <= replacement_words <= 12:
+        raise RuntimeError('The Scene 6 replacement must satisfy the factory 7–12 word rule.')
+
+    expected_kernel_id = kaggle_kernel_id()
+    recorded_kernel_id = str(pending.get('kaggle_kernel_id', '')).strip()
+    if not recorded_kernel_id or recorded_kernel_id != expected_kernel_id:
+        raise RuntimeError('Kaggle kernel identity mismatch. Correct the account/slug before Scene 6 voiceover repair.')
+    configure_kaggle_cli()
+    remote_status, remote_output = kaggle_status(recorded_kernel_id)
+    if remote_status != 'COMPLETE':
+        raise RuntimeError(
+            f'Kaggle source run must be COMPLETE before Scene 6 voiceover repair '
+            f'(status={remote_status}). {remote_output[-600:]}'
+        )
+
+    pending['scene6_voiceover_repair_attempts'] = int(pending.get('scene6_voiceover_repair_attempts', 0) or 0) + 1
+    pending['scene6_voiceover_repair'] = {
+        'status': 'in_progress',
+        'scene_index': 6,
+        'reported_original_ratio': reported_ratio,
+        'original_voiceover': scene6_original,
+        'replacement_voiceover': scene6_replacement,
+        'replacement_word_count': replacement_words,
+        'method': 'regenerate Scene 6 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA',
+        'requested_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'new_kaggle_gpu_dispatch': False,
+    }
+    if isinstance(pending.get('scene_voiceover_repair'), dict):
+        pending['scene_voiceover_repair']['status'] = 'completed_with_followup_scene6_repair'
+    beats[5]['voiceover'] = scene6_replacement
+    pending['status'] = 'gpu_complete'
+    pending.pop('finalize_error', None)
+    write_json(PENDING, pending)
+
+    os.environ['BSK_ALLOW_TINY_VO_TEMPO_FIT'] = '1'
+    log(
+        f'Starting one targeted Scene 6 voiceover rewrite for Reel {reel_id}; '
+        'all six completed Kaggle MP4s will be reused, no GPU dispatch.'
+    )
+    result = poll_and_finalize()
+    latest = load_json(PENDING, {}) or {}
+    if latest.get('status') == 'delivered':
+        latest.setdefault('scene6_voiceover_repair', {})['status'] = 'completed'
+        latest['scene6_voiceover_repair']['completed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        write_json(PENDING, latest)
+    elif latest.get('status') == 'qa_rejected':
+        latest.setdefault('scene6_voiceover_repair', {})['status'] = 'qa_rejected_again'
+        latest['scene6_voiceover_repair']['final_qa_rejection_reason'] = str(latest.get('qa_rejection_reason', ''))[:1200]
+        write_json(PENDING, latest)
+    elif latest.get('status') == 'finalize_failed':
+        latest.setdefault('scene6_voiceover_repair', {})['status'] = 'finalize_failed_retryable'
+        latest['scene6_voiceover_repair']['finalize_error'] = str(latest.get('finalize_error', ''))[:1200]
+        write_json(PENDING, latest)
+    return result
+
 def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
@@ -1191,7 +1297,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -1206,6 +1312,8 @@ def main():
             return repair_rhythm_finalize()
         if args.command == 'repair-scene-voiceover-finalize':
             return repair_scene_5_voiceover_finalize()
+        if args.command == 'repair-scene-6-voiceover-finalize':
+            return repair_scene_6_voiceover_finalize()
         if args.command == 'retry-gpu':
             return retry_failed_gpu()
         if args.command == 'resume-checkpoint':
