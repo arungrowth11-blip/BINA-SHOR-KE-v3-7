@@ -1034,16 +1034,23 @@ def repair_scene_5_voiceover_finalize() -> int:
             f'Scene 5 voiceover repair requires qa_rejected state (current={pending.get("status", "none")}).'
         )
     reason = str(pending.get('qa_rejection_reason', ''))
+    # v3.7.4b's QA exception string omits the scene index: it stores
+    # "AI scene would require excessive speed change (1.67x)". Accept this
+    # exact generic form as well as an explicit Scene 5 form; never accept a
+    # different numbered scene. The exact Reel/source-line and preceding
+    # rhythm-repair guards below bind the generic message to this one case.
     match = re.search(
-        r'AI scene\s+5\s+would require excessive speed change\s*\(([0-9.]+)x\)',
+        r'AI scene(?:\s+5)?\s+would require excessive speed change\s*\(([0-9.]+)x\)',
         reason,
         re.IGNORECASE,
     )
     if not match:
         raise RuntimeError('This action is restricted to the recorded Scene 5 excessive-speed QA rejection.')
     reported_ratio = float(match.group(1))
-    if not 1.50 <= reported_ratio <= 1.80:
-        raise RuntimeError(f'Scene 5 ratio {reported_ratio:.2f}x is outside this targeted repair case.')
+    if not 1.66 <= reported_ratio <= 1.68:
+        raise RuntimeError(f'Scene 5 ratio {reported_ratio:.2f}x is outside this targeted 1.67x repair case.')
+    if int(pending.get('rhythm_repair_attempts', 0) or 0) != 1:
+        raise RuntimeError('Scene 5 voiceover repair requires the one recorded prior rhythm-repair attempt.')
     if int(pending.get('scene_voiceover_repair_attempts', 0) or 0) >= 1:
         raise RuntimeError('The one allowed Scene 5 voiceover rewrite attempt has already been used.')
 

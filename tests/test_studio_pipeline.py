@@ -239,7 +239,7 @@ class StudioPipelineTests(unittest.TestCase):
                 'job_id': '20261031_115742', 'status': 'qa_rejected',
                 'kaggle_kernel_id': 'owner/worker',
                 'active_finalizing_reel_id': 'reel_01_115742',
-                'qa_rejection_reason': 'RuntimeError: AI scene 5 would require excessive speed change (1.67x); it is outside the bounded voice-timing repair window.',
+                'qa_rejection_reason': 'RuntimeError: AI scene would require excessive speed change (1.67x); it is outside the bounded voice-timing repair window.',
                 'rhythm_repair_attempts': 1,
                 'rhythm_repair': {'status': 'in_progress', 'scene_index': 1},
                 'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': concept}],
@@ -281,6 +281,7 @@ class StudioPipelineTests(unittest.TestCase):
                 'job_id': '20261031_115742', 'status': 'qa_rejected',
                 'kaggle_kernel_id': 'owner/worker', 'active_finalizing_reel_id': 'reel_01_115742',
                 'qa_rejection_reason': 'AI scene 4 would require excessive speed change (1.67x)',
+                'rhythm_repair_attempts': 1,
                 'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': {
                     'title': 'सूखी छतरी', 'beats': [{'scene_index': i, 'voiceover': 'x'} for i in range(1, 7)]
                 }}],
@@ -295,6 +296,36 @@ class StudioPipelineTests(unittest.TestCase):
                 studio_pipeline.write_json(studio_pipeline.PENDING, repeated)
                 with self.assertRaisesRegex(RuntimeError, 'already been used'):
                     studio_pipeline.repair_scene_5_voiceover_finalize()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_scene5_voiceover_repair_refuses_ratio_outside_exact_167_window(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            original = 'सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।'
+            concept = {
+                'title': 'सूखी छतरी',
+                'beats': [
+                    {'scene_index': i, 'voiceover': f'मूल पंक्ति संख्या {i} सुरक्षित रखी गई है.'}
+                    for i in range(1, 7)
+                ],
+            }
+            concept['beats'][4]['voiceover'] = original
+            state = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker',
+                'active_finalizing_reel_id': 'reel_01_115742',
+                'qa_rejection_reason': 'RuntimeError: AI scene would require excessive speed change (1.70x)',
+                'rhythm_repair_attempts': 1,
+                'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': concept}],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'):
+                    with self.assertRaisesRegex(RuntimeError, 'outside this targeted 1.67x repair case'):
+                        studio_pipeline.repair_scene_5_voiceover_finalize()
             finally:
                 studio_pipeline.PENDING = old_pending
 

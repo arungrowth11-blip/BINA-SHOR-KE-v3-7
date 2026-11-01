@@ -44,6 +44,17 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('new_kaggle_gpu_dispatch', pipeline)
         self.assertIn('सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।', pipeline)
 
+    def test_scene5_voiceover_gate_accepts_actual_generic_qa_message_but_is_strictly_bound(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn(r'AI scene(?:\s+5)?\s+would require excessive speed change', body)
+        self.assertIn('1.66 <= float(scene5_match.group(1)) <= 1.68', body)
+        self.assertIn('int(state.get("rhythm_repair_attempts", 0) or 0) == 1', body)
+        self.assertIn('scene5_source_matches', body)
+        pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
+        self.assertIn(r"AI scene(?:\s+5)?\s+would require excessive speed change", pipeline)
+        self.assertIn("int(pending.get('rhythm_repair_attempts', 0) or 0) != 1", pipeline)
+        self.assertIn("'सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।'", pipeline)
+
     def test_kaggle_cli_installs_six_explicitly_for_status_and_repair(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         expected = '"six>=1.16.0,<2" kaggle'

@@ -88,12 +88,35 @@ jobs:
                               and "too short" not in qa_reason
                               and int(state.get("rhythm_repair_attempts", 0) or 0) < 1)
           import re
-          scene5_match = re.search(r"AI scene\s+5\s+would require excessive speed change\s*\(([0-9.]+)x\)", str(state.get("qa_rejection_reason", "")), re.IGNORECASE)
+          # The QA exception text in v3.7.4b records the ratio but omits the scene index
+          # ("AI scene would require ..."). Accept that exact format as well as an
+          # explicit "AI scene 5 ..." message, but keep the target Reel, source line,
+          # preceding rhythm-repair attempt, and one-time/ratio guards exact.
+          scene5_match = re.search(
+              r"AI scene(?:\s+5)?\s+would require excessive speed change\s*\(([0-9.]+)x\)",
+              str(state.get("qa_rejection_reason", "")), re.IGNORECASE,
+          )
+          state_reels = state.get("reels") if isinstance(state.get("reels"), list) else []
+          scene5_reel = next(
+              (item for item in state_reels if isinstance(item, dict) and item.get("reel_id") == "reel_01_115742"),
+              None,
+          )
+          scene5_concept = scene5_reel.get("concept") if isinstance(scene5_reel, dict) and isinstance(scene5_reel.get("concept"), dict) else {}
+          scene5_beats = scene5_concept.get("beats") if isinstance(scene5_concept.get("beats"), list) else []
+          scene5_source_matches = (
+              scene5_concept.get("title") == "सूखी छतरी"
+              and len(scene5_beats) == 6
+              and isinstance(scene5_beats[4], dict)
+              and int(scene5_beats[4].get("scene_index", 5)) == 5
+              and scene5_beats[4].get("voiceover") == "सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।"
+          )
           scene5_voiceover_repair_ok = (
               state.get("status") == "qa_rejected"
               and scene5_match is not None
-              and 1.50 <= float(scene5_match.group(1)) <= 1.80
+              and 1.66 <= float(scene5_match.group(1)) <= 1.68
               and state.get("active_finalizing_reel_id") == "reel_01_115742"
+              and int(state.get("rhythm_repair_attempts", 0) or 0) == 1
+              and scene5_source_matches
               and int(state.get("scene_voiceover_repair_attempts", 0) or 0) < 1
           )
           gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
