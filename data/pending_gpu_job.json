@@ -1,7 +1,7 @@
 {
   "job_id": "20261031_115742",
   "created_at_ist": "2026-10-31T11:59:19+05:30",
-  "status": "gpu_failed",
+  "status": "qa_rejected",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261031_115742",
@@ -223,7 +223,8 @@
           "scene_index": 6
         }
       ],
-      "delivery_status": "planned"
+      "delivery_status": "planned",
+      "output_directory": "output/20261031_1826_1_reel-1"
     }
   ],
   "policy": {
@@ -231,7 +232,13 @@
     "auto_facebook_publish": false,
     "max_reels": 1
   },
-  "dispatched_at_ist": "2026-10-31T11:59:22+05:30",
-  "dispatch_output": "Your kernel title does not resolve to the specified id. This may result in surprising behavior. We suggest making your title something that resolves to the specified id. See https://en.wikipedia.org/wiki/Clean_URL#Slug for more information on how slugs are determined.\nKernel version 1 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
-  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"RuntimeError\",\n  \"error\": \"ComfyUI node KSampler schema changed; unsupported inputs=['control_after_generate']; missing required inputs=[]; supported=['cfg', 'denoise', 'latent_image', 'model', 'negative', 'positive', 'sampler_name', 'scheduler', 'seed', 'steps']\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261031_115742\"\n}"
+  "dispatched_at_ist": "2026-10-31T14:07:11+05:30",
+  "dispatch_output": "Kernel version 2 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
+  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"RuntimeError\",\n  \"error\": \"ComfyUI node KSampler schema changed; unsupported inputs=['control_after_generate']; missing required inputs=[]; supported=['cfg', 'denoise', 'latent_image', 'model', 'negative', 'positive', 'sampler_name', 'scheduler', 'seed', 'steps']\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261031_115742\"\n}",
+  "gpu_retry_attempts": 1,
+  "gpu_retry_dispatched_at_ist": "2026-10-31T14:07:11+05:30",
+  "gpu_retry_reason": "ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.",
+  "active_finalizing_reel_id": "reel_01_115742",
+  "qa_rejection_reason": "RuntimeError: AI scene 1 would require excessive speed change (1.39x); regenerate/adjust voiceover.",
+  "qa_rejected_at_ist": "2026-10-31T18:26:28+05:30"
 }
