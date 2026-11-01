@@ -14,6 +14,7 @@ on:
           - "repair-rhythm"
           - "repair-scene-voiceover"
           - "repair-scene-6-voiceover"
+          - "repair-scene-6-voiceover-followup"
           - "retry-gpu"
           - "resume-checkpoint"
           - "resolve-dispatch-running"
@@ -151,6 +152,28 @@ jobs:
               and scene6_source_matches
               and int(state.get("scene6_voiceover_repair_attempts", 0) or 0) < 1
           )
+          # One final Scene 6 shortening is allowed only after the first Scene 6
+          # rewrite was applied and rejected at the exact observed 1.54x ratio.
+          scene6_followup_match = re.search(
+              r"AI scene(?:\s+6)?\s+would require excessive speed change\s*\(([0-9.]+)x\)",
+              str(state.get("qa_rejection_reason", "")), re.IGNORECASE,
+          )
+          scene6_followup_ok = (
+              state.get("status") == "qa_rejected"
+              and scene6_followup_match is not None
+              and 1.53 <= float(scene6_followup_match.group(1)) <= 1.55
+              and state.get("active_finalizing_reel_id") == "reel_01_115742"
+              and int(state.get("rhythm_repair_attempts", 0) or 0) == 1
+              and int(state.get("scene_voiceover_repair_attempts", 0) or 0) == 1
+              and int(state.get("scene6_voiceover_repair_attempts", 0) or 0) == 1
+              and isinstance(state.get("scene6_voiceover_repair"), dict)
+              and state["scene6_voiceover_repair"].get("status") == "qa_rejected_again"
+              and len(scene6_beats) == 6
+              and scene6_concept.get("title") == "सूखी छतरी"
+              and scene6_beats[4].get("voiceover") == "सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।"
+              and scene6_beats[5].get("voiceover") == "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।"
+              and int(state.get("scene6_voiceover_followup_attempts", 0) or 0) < 1
+          )
           gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
           known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
                                     or "control_after_generate" in gpu_error_text)
@@ -170,6 +193,8 @@ jobs:
               allowed = {"qa_rejected"} if scene5_voiceover_repair_ok else set()
           elif action == "repair-scene-6-voiceover":
               allowed = {"qa_rejected"} if scene6_voiceover_repair_ok else set()
+          elif action == "repair-scene-6-voiceover-followup":
+              allowed = {"qa_rejected"} if scene6_followup_ok else set()
           elif action == "retry-gpu":
               allowed = {"gpu_failed"} if retry_gpu_ok else set()
           elif action == "resume-checkpoint":
@@ -220,7 +245,7 @@ jobs:
             echo 'finalize=false' >> "$GITHUB_OUTPUT"
           else
             echo 'required=true' >> "$GITHUB_OUTPUT"
-            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'repair-rhythm' ] || [ "$action" = 'repair-scene-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover' ] || [ "$action" = 'poll' ]; then
+            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'repair-rhythm' ] || [ "$action" = 'repair-scene-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover-followup' ] || [ "$action" = 'poll' ]; then
               echo 'finalize=true' >> "$GITHUB_OUTPUT"
             else
               echo 'finalize=false' >> "$GITHUB_OUTPUT"
@@ -254,7 +279,7 @@ jobs:
         if: steps.work.outputs.required == 'true'
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
-          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ] || [ "$POLL_ACTION" = 'repair-rhythm' ] || [ "$POLL_ACTION" = 'repair-scene-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover' ]; then
+          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ] || [ "$POLL_ACTION" = 'repair-rhythm' ] || [ "$POLL_ACTION" = 'repair-scene-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover-followup' ]; then
             python -m pip install --disable-pip-version-check -r requirements-asr.txt
           fi
           python -m pip install --disable-pip-version-check "six>=1.16.0,<2" kaggle
@@ -281,6 +306,10 @@ jobs:
       - name: Replace only Scene 6 Hindi narration and re-finalize the same AI scenes
         if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'repair-scene-6-voiceover'
         run: python scripts/studio_pipeline.py repair-scene-6-voiceover-finalize
+
+      - name: Shorten only Scene 6 narration once more and re-finalize existing AI scenes
+        if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'repair-scene-6-voiceover-followup'
+        run: python scripts/studio_pipeline.py repair-scene-6-voiceover-followup-finalize
 
       - name: Retry the same Reel after the KSampler schema fix
         if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'retry-gpu'

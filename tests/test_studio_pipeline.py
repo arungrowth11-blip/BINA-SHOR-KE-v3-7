@@ -329,6 +329,106 @@ class StudioPipelineTests(unittest.TestCase):
             finally:
                 studio_pipeline.PENDING = old_pending
 
+    def test_scene6_voiceover_followup_changes_only_scene6_and_reuses_completed_gpu_scenes(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            scene5_replacement = 'सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।'
+            scene6_previous = 'उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।'
+            scene6_replacement = 'उसने छतरी टाँगी, मगर कमरा चुप रहा।'
+            concept = {
+                'title': 'सूखी छतरी',
+                'beats': [
+                    {'scene_index': i, 'voiceover': f'मूल पंक्ति संख्या {i} सुरक्षित रखी गई है।', 'voice_direction': f'direction {i}', 'video_prompt': f'video {i}'}
+                    for i in range(1, 7)
+                ],
+            }
+            concept['beats'][4]['voiceover'] = scene5_replacement
+            concept['beats'][5]['voiceover'] = scene6_previous
+            state = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker',
+                'active_finalizing_reel_id': 'reel_01_115742',
+                'qa_rejection_reason': 'RuntimeError: AI scene would require excessive speed change (1.54x); outside the bounded voice-timing repair window.',
+                'rhythm_repair_attempts': 1,
+                'scene_voiceover_repair_attempts': 1,
+                'scene6_voiceover_repair_attempts': 1,
+                'scene6_voiceover_repair': {'status': 'qa_rejected_again', 'new_kaggle_gpu_dispatch': False},
+                'scene6_voiceover_followup_attempts': 0,
+                'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': concept}],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                def fake_finalize():
+                    latest = studio_pipeline.load_json(studio_pipeline.PENDING)
+                    self.assertEqual(latest['status'], 'gpu_complete')
+                    beats = latest['reels'][0]['concept']['beats']
+                    self.assertEqual(beats[5]['voiceover'], scene6_replacement)
+                    self.assertEqual(beats[5]['video_prompt'], 'video 6')
+                    self.assertEqual(beats[5]['voice_direction'], 'direction 6')
+                    self.assertEqual(beats[4]['voiceover'], scene5_replacement)
+                    self.assertEqual(beats[0]['voiceover'], 'मूल पंक्ति संख्या 1 सुरक्षित रखी गई है।')
+                    latest['status'] = 'delivered'
+                    studio_pipeline.write_json(studio_pipeline.PENDING, latest)
+                    return 0
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('COMPLETE', 'KernelWorkerStatus.COMPLETE')), \
+                     patch.object(studio_pipeline, 'poll_and_finalize', side_effect=fake_finalize) as finalize:
+                    self.assertEqual(studio_pipeline.repair_scene_6_voiceover_followup_finalize(), 0)
+                    self.assertEqual(studio_pipeline.os.environ.get('BSK_ALLOW_TINY_VO_TEMPO_FIT'), '1')
+                    finalize.assert_called_once()
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'delivered')
+                self.assertEqual(updated['scene6_voiceover_followup_attempts'], 1)
+                self.assertEqual(updated['scene6_voiceover_followup']['status'], 'completed')
+                self.assertFalse(updated['scene6_voiceover_followup']['new_kaggle_gpu_dispatch'])
+                self.assertEqual(len(scene6_replacement.split()), 7)
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.os.environ.pop('BSK_ALLOW_TINY_VO_TEMPO_FIT', None)
+
+    def test_scene6_voiceover_followup_refuses_wrong_ratio_or_repeated_attempt(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            scene5_replacement = 'सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।'
+            scene6_previous = 'उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।'
+            concept = {
+                'title': 'सूखी छतरी',
+                'beats': [{'scene_index': i, 'voiceover': f'line {i}'} for i in range(1, 7)],
+            }
+            concept['beats'][4]['voiceover'] = scene5_replacement
+            concept['beats'][5]['voiceover'] = scene6_previous
+            base = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker', 'active_finalizing_reel_id': 'reel_01_115742',
+                'qa_rejection_reason': 'AI scene would require excessive speed change (1.54x)',
+                'rhythm_repair_attempts': 1, 'scene_voiceover_repair_attempts': 1,
+                'scene6_voiceover_repair_attempts': 1,
+                'scene6_voiceover_repair': {'status': 'qa_rejected_again'},
+                'scene6_voiceover_followup_attempts': 0,
+                'reels': [{'reel_id': 'reel_01_115742', 'delivery_status': 'planned', 'concept': concept}],
+            }
+            try:
+                wrong_ratio = dict(base)
+                wrong_ratio['qa_rejection_reason'] = 'AI scene would require excessive speed change (1.62x)'
+                studio_pipeline.write_json(studio_pipeline.PENDING, wrong_ratio)
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'):
+                    with self.assertRaisesRegex(RuntimeError, 'outside this targeted 1.54x follow-up case'):
+                        studio_pipeline.repair_scene_6_voiceover_followup_finalize()
+                repeated = dict(base)
+                repeated['scene6_voiceover_followup_attempts'] = 1
+                studio_pipeline.write_json(studio_pipeline.PENDING, repeated)
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'):
+                    with self.assertRaisesRegex(RuntimeError, 'already been used'):
+                        studio_pipeline.repair_scene_6_voiceover_followup_finalize()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
     def test_scene6_voiceover_repair_changes_only_scene6_and_reuses_completed_gpu_scenes(self):
         old_pending = studio_pipeline.PENDING
         with tempfile.TemporaryDirectory() as folder:

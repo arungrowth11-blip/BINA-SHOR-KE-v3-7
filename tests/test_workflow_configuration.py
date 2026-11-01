@@ -76,6 +76,20 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
         self.assertIn("'new_kaggle_gpu_dispatch': False", pipeline)
 
+    def test_scene6_followup_voiceover_repair_is_one_time_and_reuses_existing_scenes(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('repair-scene-6-voiceover-followup', body)
+        self.assertIn('scene6_followup_ok', body)
+        self.assertIn('Shorten only Scene 6 narration once more and re-finalize existing AI scenes', body)
+        self.assertIn('repair-scene-6-voiceover-followup-finalize', body)
+        self.assertIn("[ \"$POLL_ACTION\" = 'repair-scene-6-voiceover-followup' ]", body)
+        self.assertIn('1.53 <= float(scene6_followup_match.group(1)) <= 1.55', body)
+        self.assertIn('scene6_voiceover_followup_attempts', body)
+        pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
+        self.assertIn('def repair_scene_6_voiceover_followup_finalize()', pipeline)
+        self.assertIn('उसने छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
+        self.assertIn("'new_kaggle_gpu_dispatch': False", pipeline)
+
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */6 * * *"', body)
