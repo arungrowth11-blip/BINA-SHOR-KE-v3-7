@@ -461,6 +461,22 @@ class FactoryLogicTests(unittest.TestCase):
                 producer.render_reel(concept, Path(folder), set(), set())
             mocked_tts.assert_not_called()
 
+    def test_borderline_ai_scene_ratio_uses_tiny_pitch_preserving_audio_fit_only_when_enabled(self):
+        clip_duration = 3.375
+        audio_duration = clip_duration * 1.39 - 0.08
+        with self.assertRaisesRegex(RuntimeError, "excessive speed change"):
+            producer.fit_ai_scene_timing(audio_duration, clip_duration)
+        timing = producer.fit_ai_scene_timing(audio_duration, clip_duration, allow_tiny_audio_tempo_fit=True)
+        self.assertGreater(timing["audio_tempo"], 1.0)
+        self.assertLessEqual(timing["audio_tempo"], 1.03)
+        self.assertLessEqual(timing["video_speed_ratio"], 1.38)
+
+    def test_ai_scene_ratio_outside_bounded_rhythm_repair_is_rejected(self):
+        clip_duration = 3.375
+        audio_duration = clip_duration * 1.50 - 0.08
+        with self.assertRaisesRegex(RuntimeError, "outside the bounded voice-timing repair window"):
+            producer.fit_ai_scene_timing(audio_duration, clip_duration, allow_tiny_audio_tempo_fit=True)
+
     def test_probe_media_accepts_native_24_fps_for_ai_and_30_fps_for_smoke(self):
         body = {"streams": [
             {"codec_type": "video", "width": 1080, "height": 1920, "avg_frame_rate": "24/1", "r_frame_rate": "24/1", "codec_name": "h264"},

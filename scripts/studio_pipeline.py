@@ -774,7 +774,7 @@ def _poll_and_finalize_impl() -> int:
             reel['delivery_status'] = 'delivered'
             reel['delivery_completed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
             history = producer.load_history()
-            history.setdefault('topics', []).append({
+            delivered_topic = {
                 'title': concept['title'], 'theme': concept['theme'], 'pillar': concept['pillar'],
                 'narrative_engine': concept.get('narrative_engine', ''),
                 'emotional_aftertaste': concept.get('emotional_aftertaste', ''),
@@ -788,8 +788,13 @@ def _poll_and_finalize_impl() -> int:
                 'qa_passed': bool(build.get('technical', {}).get('technical_checks_passed') is True),
                 'telegram_delivered': all(reel['delivery_steps'].get(step) is True for step in ('video', 'cover', 'message', 'publish_kit')),
                 'qa_completed_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
-            })
-            history['generated_count'] = int(history.get('generated_count', 0)) + 1
+            }
+            existing_topic = next((item for item in reversed(history.setdefault('topics', [])) if item.get('reel_id') == reel['reel_id']), None)
+            if existing_topic is not None:
+                existing_topic.update(delivered_topic)
+            else:
+                history['topics'].append(delivered_topic)
+                history['generated_count'] = int(history.get('generated_count', 0)) + 1
             producer.save_history(history)
             write_json(PENDING, pending)
             log(f"Delivered ready-for-review Reel {ordinal}/{len(pending['reels'])}: {concept['title']}")
@@ -956,6 +961,65 @@ def resume_saved_checkpoint() -> int:
     return dispatch_checkpoint_resume(pending, automatic=False)
 
 
+def repair_rhythm_finalize() -> int:
+    """Re-finalize the same completed AI scenes after a narrowly bounded rhythm-only QA rejection.
+
+    This action does not dispatch Kaggle GPU. It permits at most one <=3% pitch-preserving
+    audio tempo fit for the specifically rejected scene, and refuses visual/other QA defects.
+    """
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'qa_rejected':
+        raise RuntimeError(f"Rhythm repair requires qa_rejected state (current={pending.get('status', 'none')}).")
+    reason = str(pending.get('qa_rejection_reason', ''))
+    match = re.search(r'AI scene (\d+) would require excessive speed change \(([0-9.]+)x\)', reason, re.IGNORECASE)
+    if not match:
+        raise RuntimeError('This QA rejection is not a supported AI-scene rhythm-only rejection. Do not bypass visual/technical QA.')
+    scene_index = int(match.group(1))
+    reported_ratio = float(match.group(2))
+    if not 1.38 < reported_ratio <= 1.42:
+        raise RuntimeError(f'Reported speed ratio {reported_ratio:.2f}x is outside the narrow repair window (1.38x–1.42x).')
+    if int(pending.get('rhythm_repair_attempts', 0) or 0) >= 1:
+        raise RuntimeError('The one allowed rhythm-only repair attempt has already been used.')
+    reels = pending.get('reels') if isinstance(pending.get('reels'), list) else []
+    reel_id = pending.get('active_finalizing_reel_id')
+    failed_reel = next((item for item in reels if item.get('reel_id') == reel_id), None)
+    if not failed_reel or failed_reel.get('delivery_status') == 'delivered':
+        raise RuntimeError('Could not uniquely identify an undelivered Reel for rhythm-only repair.')
+    concept = failed_reel.get('concept') if isinstance(failed_reel.get('concept'), dict) else {}
+    beats = concept.get('beats') if isinstance(concept.get('beats'), list) else []
+    if not 1 <= scene_index <= len(beats):
+        raise RuntimeError('Rejected scene index does not match the saved Reel concept.')
+    if not pending.get('kaggle_kernel_id') or pending.get('kaggle_kernel_id') != kaggle_kernel_id():
+        raise RuntimeError('Kaggle kernel identity mismatch. Correct the account/slug before rhythm repair.')
+    configure_kaggle_cli()
+    remote_status, remote_output = kaggle_status(pending['kaggle_kernel_id'])
+    if remote_status != 'COMPLETE':
+        raise RuntimeError(f'Kaggle source run must be COMPLETE before rhythm repair (status={remote_status}). {remote_output[-600:]}')
+
+    pending['rhythm_repair_attempts'] = int(pending.get('rhythm_repair_attempts', 0) or 0) + 1
+    pending['rhythm_repair'] = {
+        'status': 'in_progress',
+        'scene_index': scene_index,
+        'reported_original_ratio': reported_ratio,
+        'max_audio_tempo': 1.03,
+        'max_video_speed_ratio': 1.38,
+        'method': 'pitch-preserving FFmpeg atempo on narration only; reuse completed Kaggle scene MP4s',
+        'requested_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'new_kaggle_gpu_dispatch': False,
+    }
+    pending['status'] = 'gpu_complete'
+    write_json(PENDING, pending)
+    os.environ['BSK_ALLOW_TINY_VO_TEMPO_FIT'] = '1'
+    log(f"Starting one bounded rhythm-only finalization repair for Reel {reel_id}, scene {scene_index}; reusing completed Kaggle MP4s, no GPU dispatch.")
+    result = poll_and_finalize()
+    latest = load_json(PENDING, {}) or {}
+    if latest.get('status') == 'delivered':
+        latest.setdefault('rhythm_repair', {})['status'] = 'completed'
+        latest['rhythm_repair']['completed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        write_json(PENDING, latest)
+    return result
+
+
 def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
@@ -1014,7 +1078,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -1025,6 +1089,8 @@ def main():
             return plan_week(1)
         if args.command == 'retry-finalize':
             return retry_finalize()
+        if args.command == 'repair-rhythm-finalize':
+            return repair_rhythm_finalize()
         if args.command == 'retry-gpu':
             return retry_failed_gpu()
         if args.command == 'resume-checkpoint':

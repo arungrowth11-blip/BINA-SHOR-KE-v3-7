@@ -1704,6 +1704,55 @@ def create_cover_background(destination: Path, seed_text: str = "BINA SHOR KE") 
     image.save(destination, format="PNG", optimize=True)
 
 
+def fit_ai_scene_timing(audio_duration: float, clip_duration: float, *, allow_tiny_audio_tempo_fit: bool = False) -> dict[str, float]:
+    """Keep AI video time-warp within its quality limit; permit only a tiny pitch-preserving audio fit.
+
+    This is reserved for a dedicated recovery action after a borderline rhythm rejection.
+    It never changes narration words and never permits >3% audio acceleration.
+    """
+    if audio_duration <= 0 or clip_duration <= 0:
+        raise ValueError("Audio and AI clip durations must be positive.")
+    audio_pad = 0.08
+    max_video_ratio = 1.38
+    target_duration = audio_duration + audio_pad
+    ratio = target_duration / clip_duration
+    tempo = 1.0
+    rendered_audio_duration = audio_duration
+
+    if ratio > max_video_ratio and allow_tiny_audio_tempo_fit:
+        # The reported 1.39x rejection is a borderline overrun. Allow a maximum
+        # 3% pitch-preserving audio tempo increase, and only for ratios <= 1.42x.
+        if ratio > 1.42:
+            raise RuntimeError(
+                f"AI scene would require excessive speed change ({ratio:.2f}x); "
+                "it is outside the bounded voice-timing repair window."
+            )
+        max_audio_duration = clip_duration * max_video_ratio - audio_pad
+        if max_audio_duration <= 0:
+            raise RuntimeError("AI scene is too short for the bounded voice-timing repair.")
+        tempo = audio_duration / max_audio_duration
+        if not 1.0 < tempo <= 1.03:
+            raise RuntimeError(
+                f"Voice timing repair would require {tempo:.3f}x audio tempo; "
+                "maximum allowed is 1.03x. Regenerate the voiceover or scene."
+            )
+        rendered_audio_duration = audio_duration / tempo
+        target_duration = rendered_audio_duration + audio_pad
+        ratio = target_duration / clip_duration
+        if ratio > max_video_ratio + 1e-6:
+            raise RuntimeError("Bounded voice timing repair could not bring the AI video ratio within 1.38x.")
+
+    if not 0.72 <= ratio <= max_video_ratio:
+        raise RuntimeError(f"AI scene would require excessive speed change ({ratio:.2f}x); regenerate/adjust voiceover.")
+    return {
+        "audio_tempo": round(tempo, 6),
+        "original_audio_duration": round(audio_duration, 4),
+        "rendered_audio_duration": round(rendered_audio_duration, 4),
+        "target_duration": round(target_duration, 4),
+        "video_speed_ratio": round(ratio, 6),
+    }
+
+
 def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], history_asset_ids: set[str]) -> dict[str, Any]:
     """Render a Reel from original custom graphics; optionally use 2 Pexels shots in cinematic pillar."""
     clips_dir = reel_dir / "clips"
@@ -1720,6 +1769,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     first_visual: Path | None = None
     first_beat: dict[str, Any] | None = None
     total_voice_seconds = 0.0
+    rhythm_adjustments: list[dict[str, Any]] = []
     original_graphic_scenes = 0
     stock_scenes = 0
 
@@ -1746,6 +1796,9 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         if not 1.0 <= audio_duration <= 8.0:
             raise RuntimeError(f"TTS beat {i+1} length {audio_duration:.2f}s is outside expected range; quality gate stopped rendering.")
         total_voice_seconds += audio_duration
+        rendered_audio_duration = audio_duration
+        target_duration = audio_duration + 0.08
+        audio_tempo = 1.0
 
         # Primary mode: locally generated photoreal AI clip from the Kaggle Wan render stage.
         ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
@@ -1758,10 +1811,27 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             clip_duration = probe_duration(ai_clip)
             if clip_duration < 2.5:
                 raise RuntimeError(f"AI scene {i+1} too short ({clip_duration:.2f}s); refusing low-quality loop.")
-            target_duration = audio_duration + 0.08
-            ratio = target_duration / clip_duration
-            if not 0.72 <= ratio <= 1.38:
-                raise RuntimeError(f"AI scene {i+1} would require excessive speed change ({ratio:.2f}x); regenerate/adjust voiceover.")
+            timing = fit_ai_scene_timing(
+                audio_duration, clip_duration,
+                allow_tiny_audio_tempo_fit=os.getenv("BSK_ALLOW_TINY_VO_TEMPO_FIT", "0").strip().lower() in {"1", "true", "yes"},
+            )
+            target_duration = timing["target_duration"]
+            rendered_audio_duration = timing["rendered_audio_duration"]
+            audio_tempo = timing["audio_tempo"]
+            ratio = timing["video_speed_ratio"]
+            if audio_tempo > 1.000001:
+                adjustment = {
+                    "scene_index": i + 1,
+                    "method": "FFmpeg atempo (pitch-preserving)",
+                    "audio_tempo": audio_tempo,
+                    "original_audio_duration_seconds": timing["original_audio_duration"],
+                    "rendered_audio_duration_seconds": timing["rendered_audio_duration"],
+                    "video_speed_ratio_before": round((audio_duration + 0.08) / clip_duration, 4),
+                    "video_speed_ratio_after": ratio,
+                    "human_listening_review_required": True,
+                }
+                rhythm_adjustments.append(adjustment)
+                log(f"Applied bounded voice timing fit to AI scene {i+1}: atempo={audio_tempo:.4f}; video ratio={ratio:.4f}x.")
             input_args = ["-i", str(ai_clip), "-i", str(audio_path)]
             video_filter = (
                 f"setpts=PTS*{ratio:.5f},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
@@ -1814,17 +1884,18 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             )
 
         ass_path = segments_dir / f"beat_{i+1:02d}.ass"
-        write_ass(ass_path, beat["screen_text"], audio_duration + 0.08,
+        write_ass(ass_path, beat["screen_text"], target_duration,
                   overlay_text=beat["overlay_text"], overlay_type=beat["overlay_type"],
                   scene_index=i + 1, scene_count=len(concept["beats"]))
         segment_path = segments_dir / f"segment_{i+1:02d}.mp4"
-        duration = audio_duration + 0.08
+        duration = target_duration
+        audio_filter = (f"atempo={audio_tempo:.6f}," if audio_tempo > 1.000001 else "") + "apad=pad_dur=0.08,loudnorm=I=-16:TP=-1.5:LRA=11"
         run_cmd([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *input_args,
             "-vf", video_filter, "-map", "0:v:0", "-map", "1:a:0",
             "-t", f"{duration:.3f}", "-r", str(target_fps), "-vsync", "cfr",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "21", "-pix_fmt", "yuv420p",
-            "-af", "apad=pad_dur=0.08,loudnorm=I=-16:TP=-1.5:LRA=11",
+            "-af", audio_filter,
             "-c:a", "aac", "-b:a", "128k", "-movflags", "+faststart", str(segment_path),
         ], timeout=300)
         segment_paths.append(segment_path)
@@ -1895,6 +1966,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         "originality_safeguards": concept.get("originality_safeguards", {}),
         "meta_originality_or_monetization_guaranteed": False,
         "technical_checks_passed": True, "original_sound_bed_mixed": True, "rendered_frame_visual_qa": frame_review,
+        "audio_timing_adjustments": rhythm_adjustments,
         "manual_review_required": [
             "Listen once for Hindi pronunciation and pacing.",
             "Check every subtitle on a phone screen before publishing.",
@@ -1904,7 +1976,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             "Use Meta's current AI disclosure/label option when required for realistic synthetic media; do not imply a fictional story is a verified real event.",
         ],
     }
-    return {"video_path": video_path, "cover_path": cover_path, "credits": pexels_credits, "asset_ids": used_assets, "technical": technical, "voice_seconds": round(total_voice_seconds, 2)}
+    return {"video_path": video_path, "cover_path": cover_path, "credits": pexels_credits, "asset_ids": used_assets, "technical": technical, "voice_seconds": round(total_voice_seconds, 2), "audio_timing_adjustments": rhythm_adjustments}
 
 
 def generate_carousel(history: dict[str, Any], slot: datetime) -> tuple[dict[str, Any], dict[str, Any]]:

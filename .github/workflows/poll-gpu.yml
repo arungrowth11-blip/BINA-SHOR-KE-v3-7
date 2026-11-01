@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Poll an active job, or explicitly retry a failed/interrupted finalization"
+        description: "Poll, retry a GPU schema failure, or apply one bounded rhythm-only repair"
         required: true
         default: "poll"
         type: choice
         options:
           - "poll"
           - "retry-finalize"
+          - "repair-rhythm"
           - "retry-gpu"
           - "resume-checkpoint"
           - "resolve-dispatch-running"
@@ -79,6 +80,12 @@ jobs:
           action = os.environ.get("POLL_ACTION", "poll")
           poll_states = {"gpu_running", "gpu_complete"}
           retry_states = {"finalize_failed", "finalizing", "gpu_failed"}
+          qa_reason = str(state.get("qa_rejection_reason", "")).lower()
+          rhythm_repair_ok = (state.get("status") == "qa_rejected"
+                              and "would require excessive speed change" in qa_reason
+                              and "critical visual defect" not in qa_reason
+                              and "too short" not in qa_reason
+                              and int(state.get("rhythm_repair_attempts", 0) or 0) < 1)
           gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
           known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
                                     or "control_after_generate" in gpu_error_text)
@@ -92,6 +99,8 @@ jobs:
           resume_states = {"gpu_checkpoint_saved"}
           if action == "retry-finalize":
               allowed = retry_states
+          elif action == "repair-rhythm":
+              allowed = {"qa_rejected"} if rhythm_repair_ok else set()
           elif action == "retry-gpu":
               allowed = {"gpu_failed"} if retry_gpu_ok else set()
           elif action == "resume-checkpoint":
@@ -142,7 +151,7 @@ jobs:
             echo 'finalize=false' >> "$GITHUB_OUTPUT"
           else
             echo 'required=true' >> "$GITHUB_OUTPUT"
-            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'poll' ]; then
+            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'repair-rhythm' ] || [ "$action" = 'poll' ]; then
               echo 'finalize=true' >> "$GITHUB_OUTPUT"
             else
               echo 'finalize=false' >> "$GITHUB_OUTPUT"
@@ -176,7 +185,7 @@ jobs:
         if: steps.work.outputs.required == 'true'
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
-          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ]; then
+          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ] || [ "$POLL_ACTION" = 'repair-rhythm' ]; then
             python -m pip install --disable-pip-version-check -r requirements-asr.txt
           fi
           python -m pip install --disable-pip-version-check kaggle
@@ -191,6 +200,10 @@ jobs:
       - name: Explicitly retry a failed/interrupted finalization
         if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'retry-finalize'
         run: python scripts/studio_pipeline.py retry-finalize
+
+      - name: Repair borderline narration rhythm using the same AI scenes
+        if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'repair-rhythm'
+        run: python scripts/studio_pipeline.py repair-rhythm-finalize
 
       - name: Retry the same Reel after the KSampler schema fix
         if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'retry-gpu'

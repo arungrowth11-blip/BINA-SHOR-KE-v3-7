@@ -22,6 +22,10 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_gpu_workflow_has_guarded_same_reel_retry_action(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         self.assertIn('retry-gpu', body)
+        self.assertIn('repair-rhythm', body)
+        self.assertIn('Repair borderline narration rhythm using the same AI scenes', body)
+        self.assertIn("[ \"$POLL_ACTION\" = 'repair-rhythm' ]", body)
+        self.assertIn('repair-rhythm-finalize', body)
         self.assertIn('Retry the same Reel after the KSampler schema fix', body)
         self.assertIn('refusing to silently skip GPU work', body)
         pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')

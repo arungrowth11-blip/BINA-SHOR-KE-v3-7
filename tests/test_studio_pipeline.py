@@ -193,6 +193,60 @@ class StudioPipelineTests(unittest.TestCase):
             finally:
                 studio_pipeline.PENDING = old_pending
 
+    def test_rhythm_repair_reuses_completed_kaggle_scenes_without_gpu_dispatch(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            state = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker', 'active_finalizing_reel_id': 'reel-1',
+                'qa_rejection_reason': 'RuntimeError: AI scene 1 would require excessive speed change (1.39x); regenerate/adjust voiceover.',
+                'reels': [{'reel_id': 'reel-1', 'delivery_status': 'planned', 'concept': {'beats': [{}, {}, {}, {}, {}, {}]}}],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('COMPLETE', 'KernelWorkerStatus.COMPLETE')), \
+                     patch.object(studio_pipeline, 'poll_and_finalize', return_value=0) as finalize:
+                    self.assertEqual(studio_pipeline.repair_rhythm_finalize(), 0)
+                    self.assertEqual(studio_pipeline.os.environ.get('BSK_ALLOW_TINY_VO_TEMPO_FIT'), '1')
+                    finalize.assert_called_once()
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'gpu_complete')
+                self.assertEqual(updated['rhythm_repair_attempts'], 1)
+                self.assertFalse(updated['rhythm_repair']['new_kaggle_gpu_dispatch'])
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.os.environ.pop('BSK_ALLOW_TINY_VO_TEMPO_FIT', None)
+
+    def test_rhythm_repair_refuses_visual_qa_rejection(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                'status': 'qa_rejected', 'qa_rejection_reason': 'Critical visual defect: broken hand',
+            })
+            try:
+                with self.assertRaisesRegex(RuntimeError, 'not a supported'):
+                    studio_pipeline.repair_rhythm_finalize()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_rhythm_repair_refuses_ratio_outside_narrow_window(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                'status': 'qa_rejected', 'qa_rejection_reason': 'AI scene 1 would require excessive speed change (1.48x)',
+            })
+            try:
+                with self.assertRaisesRegex(RuntimeError, 'outside the narrow repair window'):
+                    studio_pipeline.repair_rhythm_finalize()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
     def test_offline_graph_has_native_t2v_shape(self):
         self.assertEqual(studio_pipeline.self_test(), 0)
 
