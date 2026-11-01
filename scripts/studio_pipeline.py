@@ -1271,8 +1271,8 @@ def repair_scene_6_voiceover_followup_finalize() -> int:
     if int(pending.get('scene6_voiceover_followup_attempts', 0) or 0) >= 1:
         raise RuntimeError('The one allowed Scene 6 follow-up rewrite attempt has already been used.')
     prior_repair = pending.get('scene6_voiceover_repair')
-    if not isinstance(prior_repair, dict) or prior_repair.get('status') != 'qa_rejected_again':
-        raise RuntimeError('The prior Scene 6 rewrite must be recorded as qa_rejected_again before follow-up.')
+    if not isinstance(prior_repair, dict) or prior_repair.get('status') not in {'qa_rejected_again', 'in_progress'}:
+        raise RuntimeError('The prior Scene 6 rewrite must be recorded as qa_rejected_again or in_progress after its exact 1.54x QA rejection.')
 
     reel_id = pending.get('active_finalizing_reel_id')
     if reel_id != 'reel_01_115742':
@@ -1332,7 +1332,22 @@ def repair_scene_6_voiceover_followup_finalize() -> int:
         f'Starting one final bounded Scene 6 voiceover shortening for Reel {reel_id}; '
         'all six completed Kaggle MP4s will be reused, no GPU dispatch.'
     )
-    result = poll_and_finalize()
+    try:
+        result = poll_and_finalize()
+    except Exception:
+        # poll_and_finalize persists qa_rejected/finalize_failed and then re-raises.
+        # Persist the repair outcome here as well; otherwise the attempt remains
+        # misleadingly marked in_progress and recovery gates cannot diagnose it.
+        latest = load_json(PENDING, {}) or {}
+        if latest.get('status') == 'qa_rejected':
+            latest.setdefault('scene6_voiceover_followup', {})['status'] = 'qa_rejected_again'
+            latest['scene6_voiceover_followup']['final_qa_rejection_reason'] = str(latest.get('qa_rejection_reason', ''))[:1200]
+            write_json(PENDING, latest)
+        elif latest.get('status') == 'finalize_failed':
+            latest.setdefault('scene6_voiceover_followup', {})['status'] = 'finalize_failed_retryable'
+            latest['scene6_voiceover_followup']['finalize_error'] = str(latest.get('finalize_error', ''))[:1200]
+            write_json(PENDING, latest)
+        raise
     latest = load_json(PENDING, {}) or {}
     if latest.get('status') == 'delivered':
         latest.setdefault('scene6_voiceover_followup', {})['status'] = 'completed'

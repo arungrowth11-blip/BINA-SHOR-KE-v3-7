@@ -167,7 +167,7 @@ jobs:
               and int(state.get("scene_voiceover_repair_attempts", 0) or 0) == 1
               and int(state.get("scene6_voiceover_repair_attempts", 0) or 0) == 1
               and isinstance(state.get("scene6_voiceover_repair"), dict)
-              and state["scene6_voiceover_repair"].get("status") == "qa_rejected_again"
+              and state["scene6_voiceover_repair"].get("status") in {"qa_rejected_again", "in_progress"}
               and len(scene6_beats) == 6
               and scene6_concept.get("title") == "सूखी छतरी"
               and scene6_beats[4].get("voiceover") == "सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।"

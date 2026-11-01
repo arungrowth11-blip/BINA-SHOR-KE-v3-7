@@ -85,6 +85,7 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn("[ \"$POLL_ACTION\" = 'repair-scene-6-voiceover-followup' ]", body)
         self.assertIn('1.53 <= float(scene6_followup_match.group(1)) <= 1.55', body)
         self.assertIn('scene6_voiceover_followup_attempts', body)
+        self.assertIn('get("status") in {"qa_rejected_again", "in_progress"}', body)
         pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
         self.assertIn('def repair_scene_6_voiceover_followup_finalize()', pipeline)
         self.assertIn('उसने छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
