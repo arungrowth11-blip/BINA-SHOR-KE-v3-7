@@ -1,2 +1,2 @@
-# Local, open-weight multilingual transcription QA. No hosted API or per-request fee.
-faster-whisper==1.2.1
+# Optional CPU-only Hindi transcription/timing stage. Install only when ready to align audio.
+faster-whisper>=1.1.1,<2.0.0

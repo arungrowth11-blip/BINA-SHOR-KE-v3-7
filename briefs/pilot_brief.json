@@ -1,0 +1,21 @@
+{
+  "topic": "एक रोज़मर्रा की छोटी गलतफहमी, जिसे कोई व्यक्ति अपने व्यवहार से ठीक करता है",
+  "audience": "व्यापक हिंदी भाषी दर्शक; युवा वयस्क और परिवार",
+  "purpose": "एक मौलिक, पूरी और भावनात्मक रूप से सच्ची छोटी कहानी; दर्शक अंत तक समझ सके कि क्या बदला",
+  "language": "Natural spoken Hindi in Devanagari",
+  "duration_policy": "story_decides; no fixed word count or scene count",
+  "fiction_or_fact": "fiction",
+  "avoid": [
+    "forced tragedy or poverty porn",
+    "generic motivational slogans",
+    "unearned twist or accidental cliffhanger",
+    "repeating rain, missed calls, letters or phone notifications as a default reveal"
+  ],
+  "must_have": [
+    "a specific human detail",
+    "a believable character contradiction",
+    "a consequential choice",
+    "a clear consequence",
+    "a complete resolution"
+  ]
+}

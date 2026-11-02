@@ -1,39 +1,37 @@
-name: BINA SHOR KE — Offline Quality Gates
+name: BINA SHOR KE v4 — Offline Quality Gates
 
 on:
   push:
-    branches: [main, master]
+    branches: [v4-rebuild]
   pull_request:
+    branches: [v4-rebuild]
   workflow_dispatch:
 
 permissions:
   contents: read
 
+concurrency:
+  group: bsk-v4-quality-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   offline-validation:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 10
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout v4 branch
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: requirements.txt
-      - name: Install small local dependencies only
-        run: python -m pip install --disable-pip-version-check -r requirements.txt
-      - name: Compile all project Python files
-        run: python -m compileall -q scripts tests
-      - name: Run offline regression tests
+      - name: Install local requirements
+        run: python -m pip install --disable-pip-version-check -e . -r requirements.txt
+      - name: Compile source and tests
+        run: python -m compileall -q src tests scripts
+      - name: Run offline tests only
         run: python -m unittest discover -s tests -v
-      - name: Verify workflow YAML syntax
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          import yaml
-          for path in sorted(Path(".github/workflows").glob("*.yml")):
-              yaml.safe_load(path.read_text(encoding="utf-8"))
-              print(f"YAML OK: {path}")
-          PY
+      - name: Validate workflow safety
+        run: python scripts/validate_workflows.py

@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "bina-shor-ke"
+version = "4.0.0a1"
+description = "Audio-first Hindi short-form storytelling production system"
+requires-python = ">=3.11"
+dependencies = [
+  "requests>=2.32.0,<3.0.0",
+  "python-dotenv>=1.0.1,<2.0.0",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
