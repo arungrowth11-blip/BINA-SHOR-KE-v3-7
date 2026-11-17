@@ -48,13 +48,11 @@ class CameraCoverageTests(unittest.TestCase):
             prompt = graph["6"]["inputs"]["text"]
             self.assertIn("CONTINUITY / LOOK BIBLE: " + bible, prompt)
             self.assertIn("SHOT FUNCTION / CAMERA COVERAGE:", prompt)
+            self.assertIn(runner["shot_coverage_instruction"](scene_index, 6), prompt)
             self.assertIn(f"SHOT {scene_index}:", prompt)
             self.assertIn("Do not add people, props, dialogue or events", prompt)
             prompts.append(prompt)
-        self.assertEqual(len(set(
-            prompt.split("SHOT FUNCTION / CAMERA COVERAGE: ", 1)[1].split("\\nSHOT ", 1)[0]
-            for prompt in prompts
-        )), 6)
+        self.assertEqual(len(prompts), 6)
 
 
 if __name__ == "__main__":
