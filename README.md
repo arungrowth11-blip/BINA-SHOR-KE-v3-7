@@ -68,3 +68,9 @@ This release is offline-tested only. No live Kaggle GPU, external API, or Telegr
 - A one-time `rebuild-rejected-timing` action can re-finalize a single Reel rejected only for narration/video timing, but only after confirming the existing Kaggle kernel is COMPLETE. It reuses the existing scene outputs, does not dispatch another GPU run, and still runs full technical/visual QA and Telegram delivery gates.
 - Visual defects, black frames, freeze defects and too-short scenes cannot use this recovery. A repeat timing rebuild is blocked.
 - This change does not resolve GitHub-hosted runner provisioning/account-level failures; those must be confirmed by a successful Actions job start.
+
+## Selective upgrades from the separate AI Comedy Factory blueprint
+
+- The six Wan scene prompts now receive a consistent, story-aware coverage role: establishing, action, detail insert, consequence, turning point and visual payoff. The same visual bible is repeated across all six prompts. Camera guidance cannot invent characters, props or events and never overrides the beat's actual action.
+- The complete narration + ambience master bus now receives final integrated loudness normalization at -16 LUFS, a -1.5 dBTP target and a final sample limiter. This adapts the source blueprint's broadcast-mastering idea while preserving BINA SHOR KE's quieter mix target.
+- Existing provider failover, TTS retry/cache, subtitles/overlays, per-scene continuity bible, checkpoint recovery and technical/visual QA were retained rather than duplicated. FLUX/Wan alternate model stacks, meme outros and extra TTS providers were not imported because they are unqualified for this free-GPU production path and would add resource or quality risk.
