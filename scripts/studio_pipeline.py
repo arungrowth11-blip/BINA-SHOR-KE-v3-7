@@ -1364,6 +1364,83 @@ def repair_scene_6_voiceover_followup_finalize() -> int:
     return result
 
 
+def rebuild_rejected_timing() -> int:
+    """Re-finalize one timing-only QA rejection using the existing completed Kaggle scenes.
+
+    This is deliberately narrow: it cannot bypass visual/technical QA, cannot dispatch
+    a new GPU job, is limited to one undelivered Reel, and can run only once.
+    """
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') != 'qa_rejected':
+        raise RuntimeError(
+            f"Timing rebuild requires qa_rejected state (current={pending.get('status', 'none')})."
+        )
+    reason = str(pending.get('qa_rejection_reason', ''))
+    lowered = reason.lower()
+    if 'would require excessive speed change' not in lowered:
+        raise RuntimeError('This recovery is only for the recorded narration/video timing rejection.')
+    if any(marker in lowered for marker in ('critical visual defect', 'too short', 'black frame', 'freeze defect')):
+        raise RuntimeError('A visual, black-frame, freeze or too-short rejection cannot use timing-only recovery.')
+    if int(pending.get('timing_rebuild_attempts', 0) or 0) >= 1:
+        raise RuntimeError('The one permitted timing-only rebuild has already been used.')
+
+    reels = pending.get('reels') if isinstance(pending.get('reels'), list) else []
+    if len(reels) != 1:
+        raise RuntimeError('Timing-only recovery is restricted to a single-Reel GPU job.')
+    reel = reels[0]
+    reel_id = pending.get('active_finalizing_reel_id')
+    if not reel_id or reel.get('reel_id') != reel_id or reel.get('delivery_status') == 'delivered':
+        raise RuntimeError('The active undelivered Reel could not be uniquely verified.')
+
+    configure_kaggle_cli()
+    remote_status, remote_output = kaggle_status(pending.get('kaggle_kernel_id', ''))
+    if remote_status != 'COMPLETE':
+        raise RuntimeError(
+            f'Existing Kaggle output is not confirmed COMPLETE (status={remote_status}); '
+            f'no new GPU job was started. {remote_output[-800:]}'
+        )
+
+    pending['timing_rebuild_attempts'] = int(pending.get('timing_rebuild_attempts', 0) or 0) + 1
+    pending['timing_rebuild'] = {
+        'status': 'in_progress',
+        'reel_id': reel_id,
+        'original_qa_rejection_reason': reason[:1200],
+        'requested_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'new_kaggle_gpu_dispatch': False,
+        'method': 'reuse the completed six-scene Kaggle output; apply bounded video timing and audio padding in finalization',
+    }
+    pending['status'] = 'gpu_complete'
+    pending.pop('qa_rejection_reason', None)
+    pending.pop('qa_rejected_at_ist', None)
+    write_json(PENDING, pending)
+    log(f'Rebuilding timing-only QA rejection for {reel_id} from existing Kaggle output; no GPU dispatch.')
+
+    try:
+        result = poll_and_finalize()
+    except Exception:
+        latest = load_json(PENDING, {}) or {}
+        recovery = latest.setdefault('timing_rebuild', {})
+        recovery['status'] = (
+            'qa_rejected_again' if latest.get('status') == 'qa_rejected'
+            else 'finalize_failed' if latest.get('status') == 'finalize_failed'
+            else 'recovery_failed'
+        )
+        recovery['finished_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        recovery['final_qa_rejection_reason'] = str(latest.get('qa_rejection_reason', ''))[:1200]
+        write_json(PENDING, latest)
+        raise
+
+    latest = load_json(PENDING, {}) or {}
+    recovery = latest.setdefault('timing_rebuild', {})
+    recovery['status'] = 'delivered' if latest.get('status') == 'delivered' else (
+        'qa_rejected_again' if latest.get('status') == 'qa_rejected' else 'finalize_failed'
+    )
+    recovery['finished_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    recovery['final_qa_rejection_reason'] = str(latest.get('qa_rejection_reason', ''))[:1200]
+    write_json(PENDING, latest)
+    return result
+
+
 def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
@@ -1422,7 +1499,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'repair-scene-6-voiceover-followup-finalize', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'repair-scene-6-voiceover-followup-finalize', 'rebuild-rejected-timing', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -1441,6 +1518,8 @@ def main():
             return repair_scene_6_voiceover_finalize()
         if args.command == 'repair-scene-6-voiceover-followup-finalize':
             return repair_scene_6_voiceover_followup_finalize()
+        if args.command == 'rebuild-rejected-timing':
+            return rebuild_rejected_timing()
         if args.command == 'retry-gpu':
             return retry_failed_gpu()
         if args.command == 'resume-checkpoint':
