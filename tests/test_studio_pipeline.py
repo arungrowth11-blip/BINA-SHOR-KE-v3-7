@@ -572,6 +572,71 @@ class StudioPipelineTests(unittest.TestCase):
             finally:
                 studio_pipeline.PENDING = old_pending
 
+    def test_timing_rebuild_reuses_completed_gpu_output_without_dispatch(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            state = {
+                'job_id': '20261031_115742', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker',
+                'active_finalizing_reel_id': 'reel_01_115742',
+                'qa_rejection_reason': 'RuntimeError: AI scene would require excessive speed change (1.52x)',
+                'reels': [{
+                    'reel_id': 'reel_01_115742', 'delivery_status': 'planned',
+                    'concept': {'title': 'सूखी छतरी', 'beats': [{}, {}, {}, {}, {}, {}]},
+                }],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                def fake_finalize():
+                    latest = studio_pipeline.load_json(studio_pipeline.PENDING)
+                    self.assertEqual(latest['status'], 'gpu_complete')
+                    self.assertFalse(latest['timing_rebuild']['new_kaggle_gpu_dispatch'])
+                    latest['status'] = 'delivered'
+                    studio_pipeline.write_json(studio_pipeline.PENDING, latest)
+                    return 0
+
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('COMPLETE', 'KernelWorkerStatus.COMPLETE')), \
+                     patch.object(studio_pipeline, 'poll_and_finalize', side_effect=fake_finalize) as finalize:
+                    self.assertEqual(studio_pipeline.rebuild_rejected_timing(), 0)
+                    finalize.assert_called_once()
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'delivered')
+                self.assertEqual(updated['timing_rebuild_attempts'], 1)
+                self.assertEqual(updated['timing_rebuild']['status'], 'delivered')
+                self.assertFalse(updated['timing_rebuild']['new_kaggle_gpu_dispatch'])
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_timing_rebuild_refuses_visual_rejection_and_repeated_attempt(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            base = {
+                'job_id': 'job-1', 'status': 'qa_rejected',
+                'kaggle_kernel_id': 'owner/worker',
+                'active_finalizing_reel_id': 'reel-1',
+                'reels': [{'reel_id': 'reel-1', 'delivery_status': 'planned', 'concept': {'beats': []}}],
+                'qa_rejection_reason': 'AI scene would require excessive speed change (1.52x)',
+            }
+            try:
+                visual = dict(base)
+                visual['qa_rejection_reason'] = 'Critical visual defect: broken hand'
+                studio_pipeline.write_json(studio_pipeline.PENDING, visual)
+                with self.assertRaisesRegex(RuntimeError, 'only for the recorded narration/video timing'):
+                    studio_pipeline.rebuild_rejected_timing()
+
+                repeated = dict(base)
+                repeated['timing_rebuild_attempts'] = 1
+                studio_pipeline.write_json(studio_pipeline.PENDING, repeated)
+                with self.assertRaisesRegex(RuntimeError, 'already been used'):
+                    studio_pipeline.rebuild_rejected_timing()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
     def test_rhythm_repair_refuses_visual_qa_rejection(self):
         old_pending = studio_pipeline.PENDING
         with tempfile.TemporaryDirectory() as folder:
