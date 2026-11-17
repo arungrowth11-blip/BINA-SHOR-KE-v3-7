@@ -60,3 +60,11 @@ No guarantee of artifact-free video, audience distribution, 10,000 views, moneti
 - Added adversarial integration tests for generated worker manifest type, Telegram approval qualification, same-run feedback reload, missing-token workflow conditions, empty kernel slug, and checkpoint protection.
 
 This release is offline-tested only. No live Kaggle GPU, external API, or Telegram production run was performed.
+
+
+## v3.8 adaptive narration timing and rejected-scene recovery
+
+- AI scenes are never accelerated beyond 1.38x. Short narration keeps the source scene at natural speed and pads the audio to the scene boundary; longer narration may use a <=1.20s cloned end-frame hold, below the full-video freeze detector threshold. Longer mismatches still fail closed.
+- A one-time `rebuild-rejected-timing` action can re-finalize a single Reel rejected only for narration/video timing, but only after confirming the existing Kaggle kernel is COMPLETE. It reuses the existing scene outputs, does not dispatch another GPU run, and still runs full technical/visual QA and Telegram delivery gates.
+- Visual defects, black frames, freeze defects and too-short scenes cannot use this recovery. A repeat timing rebuild is blocked.
+- This change does not resolve GitHub-hosted runner provisioning/account-level failures; those must be confirmed by a successful Actions job start.

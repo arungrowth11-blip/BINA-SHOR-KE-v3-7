@@ -1705,28 +1705,31 @@ def create_cover_background(destination: Path, seed_text: str = "BINA SHOR KE") 
 
 
 def fit_ai_scene_timing(audio_duration: float, clip_duration: float, *, allow_tiny_audio_tempo_fit: bool = False) -> dict[str, float]:
-    """Keep AI video time-warp within its quality limit; permit only a tiny pitch-preserving audio fit.
+    """Synchronize narration without forcing harsh video speed-ups or rejecting short VO.
 
-    This is reserved for a dedicated recovery action after a borderline rhythm rejection.
-    It never changes narration words and never permits >3% audio acceleration.
+    The source AI clip is kept within a conservative 0.72x–1.38x playback range.
+    If narration is shorter than that range, retain the clip's natural duration and
+    pad the audio bed. If narration is slightly longer, slow the clip only to 1.38x
+    and clone the final frame for a tightly bounded editorial hold. The hold remains
+    below motion_diagnostics' 1.35s freeze threshold. A dedicated repair may also
+    apply at most 3% pitch-preserving audio acceleration for borderline cases.
     """
     if audio_duration <= 0 or clip_duration <= 0:
         raise ValueError("Audio and AI clip durations must be positive.")
+
     audio_pad = 0.08
     max_video_ratio = 1.38
-    target_duration = audio_duration + audio_pad
-    ratio = target_duration / clip_duration
-    tempo = 1.0
+    min_video_ratio = 0.72
+    max_tail_hold = 1.20
     rendered_audio_duration = audio_duration
+    tempo = 1.0
+    target_duration = audio_duration + audio_pad
+    raw_ratio = target_duration / clip_duration
 
-    if ratio > max_video_ratio and allow_tiny_audio_tempo_fit:
-        # The reported 1.39x rejection is a borderline overrun. Allow a maximum
-        # 3% pitch-preserving audio tempo increase, and only for ratios <= 1.42x.
-        if ratio > 1.42:
-            raise RuntimeError(
-                f"AI scene would require excessive speed change ({ratio:.2f}x); "
-                "it is outside the bounded voice-timing repair window."
-            )
+    # Preserve the previously qualified <=3% pitch-preserving fit for borderline
+    # cases only. Larger timing mismatches are handled by a short visual end-hold,
+    # never by speeding up Hindi narration or pushing the video beyond 1.38x.
+    if raw_ratio > max_video_ratio and allow_tiny_audio_tempo_fit and raw_ratio <= 1.42:
         max_audio_duration = clip_duration * max_video_ratio - audio_pad
         if max_audio_duration <= 0:
             raise RuntimeError("AI scene is too short for the bounded voice-timing repair.")
@@ -1738,21 +1741,33 @@ def fit_ai_scene_timing(audio_duration: float, clip_duration: float, *, allow_ti
             )
         rendered_audio_duration = audio_duration / tempo
         target_duration = rendered_audio_duration + audio_pad
-        ratio = target_duration / clip_duration
-        if ratio > max_video_ratio + 1e-6:
-            raise RuntimeError("Bounded voice timing repair could not bring the AI video ratio within 1.38x.")
+        raw_ratio = target_duration / clip_duration
 
-    if not 0.72 <= ratio <= max_video_ratio:
-        raise RuntimeError(f"AI scene would require excessive speed change ({ratio:.2f}x); regenerate/adjust voiceover.")
+    # Never accelerate a short visual just to match a short spoken line. Let the
+    # scene play at its native duration while the mixed ambience carries the tail.
+    if raw_ratio < min_video_ratio:
+        target_duration = clip_duration
+        video_speed_ratio = 1.0
+    else:
+        video_speed_ratio = min(raw_ratio, max_video_ratio)
+
+    video_hold_duration = max(0.0, target_duration - clip_duration * video_speed_ratio)
+    if video_hold_duration > max_tail_hold + 1e-6:
+        raise RuntimeError(
+            f"AI scene needs a {video_hold_duration:.2f}s end hold, above the "
+            f"{max_tail_hold:.2f}s quality limit; regenerate a longer scene or shorten the narration."
+        )
+
+    audio_pad_duration = max(0.0, target_duration - rendered_audio_duration)
     return {
         "audio_tempo": round(tempo, 6),
         "original_audio_duration": round(audio_duration, 4),
         "rendered_audio_duration": round(rendered_audio_duration, 4),
         "target_duration": round(target_duration, 4),
-        "video_speed_ratio": round(ratio, 6),
+        "video_speed_ratio": round(video_speed_ratio, 6),
+        "video_hold_duration": round(video_hold_duration, 4),
+        "audio_pad_duration": round(audio_pad_duration, 4),
     }
-
-
 def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], history_asset_ids: set[str]) -> dict[str, Any]:
     """Render a Reel from original custom graphics; optionally use 2 Pexels shots in cinematic pillar."""
     clips_dir = reel_dir / "clips"
@@ -1819,22 +1834,33 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             rendered_audio_duration = timing["rendered_audio_duration"]
             audio_tempo = timing["audio_tempo"]
             ratio = timing["video_speed_ratio"]
-            if audio_tempo > 1.000001:
+            video_hold_duration = timing["video_hold_duration"]
+            audio_pad_duration = timing["audio_pad_duration"]
+            if audio_tempo > 1.000001 or video_hold_duration > 0.001 or audio_pad_duration > 0.081:
                 adjustment = {
                     "scene_index": i + 1,
-                    "method": "FFmpeg atempo (pitch-preserving)",
+                    "method": "bounded video retime / intentional end-hold / audio padding",
                     "audio_tempo": audio_tempo,
                     "original_audio_duration_seconds": timing["original_audio_duration"],
                     "rendered_audio_duration_seconds": timing["rendered_audio_duration"],
                     "video_speed_ratio_before": round((audio_duration + 0.08) / clip_duration, 4),
                     "video_speed_ratio_after": ratio,
+                    "video_hold_duration_seconds": video_hold_duration,
+                    "audio_pad_duration_seconds": audio_pad_duration,
                     "human_listening_review_required": True,
                 }
                 rhythm_adjustments.append(adjustment)
-                log(f"Applied bounded voice timing fit to AI scene {i+1}: atempo={audio_tempo:.4f}; video ratio={ratio:.4f}x.")
+                log(
+                    f"Timed AI scene {i+1}: video ratio={ratio:.4f}x, "
+                    f"end hold={video_hold_duration:.3f}s, audio pad={audio_pad_duration:.3f}s."
+                )
             input_args = ["-i", str(ai_clip), "-i", str(audio_path)]
+            hold_filter = (
+                f",tpad=stop_mode=clone:stop_duration={video_hold_duration:.3f}"
+                if video_hold_duration > 0.001 else ""
+            )
             video_filter = (
-                f"setpts=PTS*{ratio:.5f},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+                f"setpts=PTS*{ratio:.5f}{hold_filter},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
                 f"fps={target_fps},eq=contrast=1.035:saturation=0.94:brightness=-0.008,vignette=PI/6,"
                 f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
             )
@@ -1889,7 +1915,11 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                   scene_index=i + 1, scene_count=len(concept["beats"]))
         segment_path = segments_dir / f"segment_{i+1:02d}.mp4"
         duration = target_duration
-        audio_filter = (f"atempo={audio_tempo:.6f}," if audio_tempo > 1.000001 else "") + "apad=pad_dur=0.08,loudnorm=I=-16:TP=-1.5:LRA=11"
+        audio_pad_duration = timing["audio_pad_duration"] if ai_clip.exists() else 0.08
+        audio_filter = (
+            (f"atempo={audio_tempo:.6f}," if audio_tempo > 1.000001 else "")
+            + f"apad=pad_dur={audio_pad_duration:.3f},loudnorm=I=-16:TP=-1.5:LRA=11"
+        )
         run_cmd([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *input_args,
             "-vf", video_filter, "-map", "0:v:0", "-map", "1:a:0",

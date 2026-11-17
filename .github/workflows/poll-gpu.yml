@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       action:
-        description: "Poll, retry a GPU schema failure, or run a guarded same-scene voiceover repair"
+        description: "Poll, retry a failed stage, run a guarded repair, or rebuild a timing-only QA rejection"
         required: true
         default: "poll"
         type: choice
@@ -15,6 +15,7 @@ on:
           - "repair-scene-voiceover"
           - "repair-scene-6-voiceover"
           - "repair-scene-6-voiceover-followup"
+          - "rebuild-rejected-timing"
           - "retry-gpu"
           - "resume-checkpoint"
           - "resolve-dispatch-running"
@@ -174,6 +175,20 @@ jobs:
               and scene6_beats[5].get("voiceover") == "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।"
               and int(state.get("scene6_voiceover_followup_attempts", 0) or 0) < 1
           )
+          timing_rebuild_ok = (
+              state.get("status") == "qa_rejected"
+              and "would require excessive speed change" in qa_reason
+              and "critical visual defect" not in qa_reason
+              and "too short" not in qa_reason
+              and "black frame" not in qa_reason
+              and "freeze defect" not in qa_reason
+              and int(state.get("timing_rebuild_attempts", 0) or 0) < 1
+              and isinstance(state.get("reels"), list)
+              and len(state.get("reels")) == 1
+              and bool(state.get("active_finalizing_reel_id"))
+              and state["reels"][0].get("reel_id") == state.get("active_finalizing_reel_id")
+              and state["reels"][0].get("delivery_status") != "delivered"
+          )
           gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
           known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
                                     or "control_after_generate" in gpu_error_text)
@@ -195,6 +210,8 @@ jobs:
               allowed = {"qa_rejected"} if scene6_voiceover_repair_ok else set()
           elif action == "repair-scene-6-voiceover-followup":
               allowed = {"qa_rejected"} if scene6_followup_ok else set()
+          elif action == "rebuild-rejected-timing":
+              allowed = {"qa_rejected"} if timing_rebuild_ok else set()
           elif action == "retry-gpu":
               allowed = {"gpu_failed"} if retry_gpu_ok else set()
           elif action == "resume-checkpoint":
@@ -245,7 +262,7 @@ jobs:
             echo 'finalize=false' >> "$GITHUB_OUTPUT"
           else
             echo 'required=true' >> "$GITHUB_OUTPUT"
-            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'repair-rhythm' ] || [ "$action" = 'repair-scene-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover-followup' ] || [ "$action" = 'poll' ]; then
+            if [ "$action" = 'retry-finalize' ] || [ "$action" = 'repair-rhythm' ] || [ "$action" = 'repair-scene-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover' ] || [ "$action" = 'repair-scene-6-voiceover-followup' ] || [ "$action" = 'rebuild-rejected-timing' ] || [ "$action" = 'poll' ]; then
               echo 'finalize=true' >> "$GITHUB_OUTPUT"
             else
               echo 'finalize=false' >> "$GITHUB_OUTPUT"
@@ -279,7 +296,7 @@ jobs:
         if: steps.work.outputs.required == 'true'
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
-          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ] || [ "$POLL_ACTION" = 'repair-rhythm' ] || [ "$POLL_ACTION" = 'repair-scene-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover-followup' ]; then
+          if [ "$POLL_ACTION" = 'poll' ] || [ "$POLL_ACTION" = 'retry-finalize' ] || [ "$POLL_ACTION" = 'repair-rhythm' ] || [ "$POLL_ACTION" = 'repair-scene-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover' ] || [ "$POLL_ACTION" = 'repair-scene-6-voiceover-followup' ] || [ "$POLL_ACTION" = 'rebuild-rejected-timing' ]; then
             python -m pip install --disable-pip-version-check -r requirements-asr.txt
           fi
           python -m pip install --disable-pip-version-check "six>=1.16.0,<2" kaggle
@@ -310,6 +327,10 @@ jobs:
       - name: Shorten only Scene 6 narration once more and re-finalize existing AI scenes
         if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'repair-scene-6-voiceover-followup'
         run: python scripts/studio_pipeline.py repair-scene-6-voiceover-followup-finalize
+
+      - name: Rebuild a timing-only QA rejection from existing GPU scenes
+        if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'rebuild-rejected-timing'
+        run: python scripts/studio_pipeline.py rebuild-rejected-timing
 
       - name: Retry the same Reel after the KSampler schema fix
         if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'retry-gpu'

@@ -461,21 +461,52 @@ class FactoryLogicTests(unittest.TestCase):
                 producer.render_reel(concept, Path(folder), set(), set())
             mocked_tts.assert_not_called()
 
-    def test_borderline_ai_scene_ratio_uses_tiny_pitch_preserving_audio_fit_only_when_enabled(self):
+    def test_borderline_ai_scene_uses_tiny_pitch_preserving_audio_fit_only_when_enabled(self):
         clip_duration = 3.375
         audio_duration = clip_duration * 1.39 - 0.08
-        with self.assertRaisesRegex(RuntimeError, "excessive speed change"):
-            producer.fit_ai_scene_timing(audio_duration, clip_duration)
-        timing = producer.fit_ai_scene_timing(audio_duration, clip_duration, allow_tiny_audio_tempo_fit=True)
-        self.assertGreater(timing["audio_tempo"], 1.0)
-        self.assertLessEqual(timing["audio_tempo"], 1.03)
-        self.assertLessEqual(timing["video_speed_ratio"], 1.38)
 
-    def test_ai_scene_ratio_outside_bounded_rhythm_repair_is_rejected(self):
+        unassisted = producer.fit_ai_scene_timing(audio_duration, clip_duration)
+        self.assertEqual(unassisted["audio_tempo"], 1.0)
+        self.assertLessEqual(unassisted["video_speed_ratio"], 1.38)
+        self.assertGreater(unassisted["video_hold_duration"], 0.0)
+        self.assertLessEqual(unassisted["video_hold_duration"], 1.20)
+
+        assisted = producer.fit_ai_scene_timing(
+            audio_duration, clip_duration, allow_tiny_audio_tempo_fit=True
+        )
+        self.assertGreater(assisted["audio_tempo"], 1.0)
+        self.assertLessEqual(assisted["audio_tempo"], 1.03)
+        self.assertLessEqual(assisted["video_speed_ratio"], 1.38)
+        self.assertAlmostEqual(assisted["video_hold_duration"], 0.0, places=3)
+
+    def test_longer_voiceover_uses_bounded_end_hold_instead_of_rejecting_the_reel(self):
         clip_duration = 3.375
         audio_duration = clip_duration * 1.50 - 0.08
-        with self.assertRaisesRegex(RuntimeError, "outside the bounded voice-timing repair window"):
-            producer.fit_ai_scene_timing(audio_duration, clip_duration, allow_tiny_audio_tempo_fit=True)
+        timing = producer.fit_ai_scene_timing(
+            audio_duration, clip_duration, allow_tiny_audio_tempo_fit=True
+        )
+        self.assertEqual(timing["audio_tempo"], 1.0)
+        self.assertLessEqual(timing["video_speed_ratio"], 1.38)
+        self.assertGreater(timing["video_hold_duration"], 0.0)
+        self.assertLessEqual(timing["video_hold_duration"], 1.20)
+        self.assertAlmostEqual(
+            timing["target_duration"],
+            timing["rendered_audio_duration"] + timing["audio_pad_duration"],
+            places=3,
+        )
+
+    def test_short_voiceover_keeps_ai_scene_at_natural_speed_and_pads_audio(self):
+        clip_duration = 3.375
+        audio_duration = 2.0
+        timing = producer.fit_ai_scene_timing(audio_duration, clip_duration)
+        self.assertEqual(timing["video_speed_ratio"], 1.0)
+        self.assertEqual(timing["target_duration"], clip_duration)
+        self.assertEqual(timing["video_hold_duration"], 0.0)
+        self.assertGreater(timing["audio_pad_duration"], 1.0)
+
+    def test_extreme_voiceover_mismatch_still_fails_closed(self):
+        with self.assertRaisesRegex(RuntimeError, "above the 1.20s quality limit"):
+            producer.fit_ai_scene_timing(8.0, 3.375, allow_tiny_audio_tempo_fit=True)
 
     def test_probe_media_accepts_native_24_fps_for_ai_and_30_fps_for_smoke(self):
         body = {"streams": [

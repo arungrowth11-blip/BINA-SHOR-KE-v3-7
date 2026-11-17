@@ -22,6 +22,7 @@
 - Indic-Speak/Indic Parler जैसे TTS विकल्पों को कम से कम 20 real Hindi scripts पर सुनकर compare करें; सिर्फ़ benchmark score के आधार पर voice न बदलें।
 
 ## Failure पर
+- अगर सिर्फ़ narration/video timing पर Reel reject हुई हो, तो GPU output COMPLETE होने की पुष्टि के बाद `rebuild-rejected-timing` एक बार चलाएँ। यह पुराने scenes reuse करता है; visual defect या missing/short scene पर इसे न चलाएँ।
 - `dispatch_unknown`: Kaggle की private kernel run/version history जाँचें। Run मौजूद है तो poll workflow में `resolve-dispatch-running`; कोई नया run शुरू नहीं हुआ है तभी `resolve-dispatch-not-started`। अंदाज़ से न चुनें।
 - `finalize_failed`: transient issue ठीक करके `retry-finalize` चलाएँ।
 - `qa_rejected`: पुराना output publish न करें और retry-finalize न चलाएँ; नया `plan-one` बनाएँ।
