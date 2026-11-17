@@ -444,6 +444,13 @@ class FactoryLogicTests(unittest.TestCase):
         record_again = producer._parse_published_message("/published title=एक अलग कहानी", history)
         self.assertTrue(record_again["already_published"])
 
+    def test_final_audio_mix_applies_integrated_loudness_and_true_peak_mastering(self):
+        filter_graph = producer.final_audio_mix_filter()
+        self.assertIn("amix=inputs=2:duration=first", filter_graph)
+        self.assertIn("volume=0.22[bed]", filter_graph)
+        self.assertIn("loudnorm=I=-16:TP=-1.5:LRA=11", filter_graph)
+        self.assertIn("alimiter=limit=0.84[a]", filter_graph)
+
     def test_sound_bed_has_valid_stereo_wave(self):
         with tempfile.TemporaryDirectory() as folder:
             target = Path(folder) / "bed.wav"
