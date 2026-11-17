@@ -1392,6 +1392,15 @@ def create_original_sound_bed(destination: Path, duration: float, pillar: str) -
             wav_file.writeframesraw(block)
 
 
+def final_audio_mix_filter() -> str:
+    """Mix the restrained original ambience, then master the complete Reel audio."""
+    return (
+        "[1:a]volume=0.22[bed];"
+        "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+        "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.84[a]"
+    )
+
+
 def probe_duration(path: Path) -> float:
     result = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", str(path)], text=True, capture_output=True, timeout=30)
     if result.returncode != 0:
@@ -1949,7 +1958,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     mixed_path = reel_dir / "reel_with_sound_bed.mp4"
     run_cmd([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path), "-i", str(bed_path),
-        "-filter_complex", "[1:a]volume=0.22[bed];[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.96[a]",
+        "-filter_complex", final_audio_mix_filter(),
         "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(mixed_path),
     ], timeout=300)
     if not mixed_path.exists() or mixed_path.stat().st_size < 100_000:
