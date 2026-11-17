@@ -307,15 +307,73 @@ def node_prompt(objects, node_type, inputs):
     return {'class_type': node_type, 'inputs': inputs}
 
 
+SHOT_COVERAGE = {
+    1: (
+        "ESTABLISHING COVERAGE: use a medium-wide or wide vertical composition to establish the real location, "
+        "the main subject or meaningful object, and the opening action. Keep the subject readable against the environment."
+    ),
+    2: (
+        "ACTION COVERAGE: move to a medium or compatible over-shoulder composition that brings the viewer closer "
+        "to the same subject and the next causal action. Do not invent a second person or new event."
+    ),
+    3: (
+        "DETAIL INSERT: use a close detail of the story-bearing object, practical action or restrained hand gesture "
+        "that adds new information. Do not create readable writing, phone UI or extra props."
+    ),
+    4: (
+        "CONSEQUENCE COVERAGE: show the consequence or changed relationship through a compatible medium-close, "
+        "profile, silhouette or environmental composition. Keep the same people, clothing and location."
+    ),
+    5: (
+        "TURNING-POINT COVERAGE: use a tighter reaction or meaningful gesture to make the choice visible; "
+        "keep acting restrained and physically natural, with no exaggerated facial performance."
+    ),
+    6: (
+        "PAYOFF / VISUAL ECHO: compose a deliberate closing image that echoes the opening subject, object or space "
+        "with its meaning changed by the story. Resolve the beat; do not introduce an unrelated final scene."
+    ),
+}
+
+
+def shot_coverage_instruction(scene_index, total_scenes):
+    """Return camera grammar for the six-beat story without changing its events or characters."""
+    if isinstance(scene_index, bool) or not isinstance(scene_index, int):
+        raise ValueError("scene_index must be an integer.")
+    if isinstance(total_scenes, bool) or not isinstance(total_scenes, int) or total_scenes < 1:
+        raise ValueError("total_scenes must be a positive integer.")
+    if not 1 <= scene_index <= total_scenes:
+        raise ValueError(f"scene_index {scene_index} is outside 1..{total_scenes}.")
+    if total_scenes == 6:
+        return SHOT_COVERAGE[scene_index]
+    if scene_index == 1:
+        return "ESTABLISHING COVERAGE: choose a clear wide or medium-wide composition that introduces this story."
+    if scene_index == total_scenes:
+        return "CLOSING COVERAGE: choose a deliberate visual payoff that resolves this story without adding events."
+    return (
+        "INTERMEDIATE COVERAGE: choose a distinct, beat-appropriate shot size and camera angle; "
+        "preserve the same subject, clothing, setting and physical action."
+    )
+
+
 def build_api_workflow(objects, beat, story, scene_index, prefix):
     prompt_text = str(beat['video_prompt']).strip()
     bible = str(story.get('visual_bible', '')).strip()
+    total_scenes = len(story.get('beats', [])) or 6
+    coverage = shot_coverage_instruction(scene_index, total_scenes)
     style = (
         'Photoreal live-action cinema, physically plausible natural movement, realistic skin and material texture, '
         'subtle sensor grain, practical motivated lighting, restrained film colour science, natural imperfect detail. '
         'Vertical 9:16 composition, one clear action, clean visual hierarchy. No text or typography is to appear in-frame. '
     )
-    full_prompt = f"{style}\nCONTINUITY / LOOK BIBLE: {bible}\nSHOT {scene_index}: {prompt_text}\nNo readable text, subtitles, logos or watermarks."
+    full_prompt = (
+        f"{style}\nCONTINUITY / LOOK BIBLE: {bible}"
+        f"\nSHOT FUNCTION / CAMERA COVERAGE: {coverage}"
+        f"\nSHOT {scene_index}: {prompt_text}"
+        "\nCamera coverage is guidance only: preserve the exact beat, action and subject from the shot prompt. "
+        "Do not add people, props, dialogue or events merely to satisfy the shot function. "
+        "Keep the same character appearance, clothing, environment and restrained visual treatment across scenes. "
+        "No readable text, subtitles, logos or watermarks."
+    )
     seed = int(hashlib.sha256(f"{MANIFEST.get('job_id')}|{story['reel_id']}|{scene_index}|{prompt_text}".encode()).hexdigest()[:15], 16) % (2**63 - 1)
 
     g = {}
