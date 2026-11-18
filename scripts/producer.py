@@ -234,7 +234,6 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
         "temperature": temperature,
         "max_completion_tokens": 5000,
         "response_format": {"type": "json_object"},
-        "reasoning_format": "hidden",
         "stream": False,
     }
     response = requests.post(
