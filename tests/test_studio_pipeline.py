@@ -182,6 +182,13 @@ class StudioPipelineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '61..193'):
             runner.build_api_workflow(objects, too_long, story, 1, 'bsk/test/scene_01')
 
+    def test_kaggle_cli_uses_active_python_interpreter(self):
+        command = studio_pipeline.kaggle_cli_command("kernels", "status", "owner/kernel")
+        self.assertEqual(command[0], studio_pipeline.sys.executable)
+        self.assertEqual(command[1], "-c")
+        self.assertIn("from kaggle.cli import main", command[2])
+        self.assertEqual(command[3:], ["kernels", "status", "owner/kernel"])
+
     def test_kaggle_incomplete_does_not_match_complete(self):
         with patch.object(studio_pipeline, "configure_kaggle_cli"), patch.object(
             studio_pipeline.subprocess, "run", return_value=Mock(returncode=0, stdout="KernelWorkerStatus.INCOMPLETE", stderr="")
