@@ -12,6 +12,12 @@ on:
           - "preflight"
           - "plan-one"
           - "plan-week"
+          - "live-tts-smoke"
+      confirm_free_tier_only:
+        description: "Confirm the Gemini API project/key is on Free Tier and paid billing is disabled. This makes two short voice requests."
+        required: true
+        type: boolean
+        default: false
   schedule:
     - cron: "37 7 * * 6"
       timezone: "Asia/Kolkata"
@@ -46,6 +52,7 @@ jobs:
       GEMINI_TEXT_MODEL: gemini-3.8-flash
       GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
       TTS_VOICE: Kore
+      TTS_MIN_INTERVAL_SECONDS: "21"
     steps:
       - name: Checkout private repository
         uses: actions/checkout@v4
@@ -66,6 +73,7 @@ jobs:
           python-version: "3.11"
 
       - name: Install FFmpeg and Devanagari fonts
+        if: env.RUN_MODE != 'live-tts-smoke'
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
@@ -75,10 +83,36 @@ jobs:
       - name: Install free workflow dependencies
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
-          python -m pip install --disable-pip-version-check kaggle
+          if [[ "$RUN_MODE" != "live-tts-smoke" ]]; then
+            python -m pip install --disable-pip-version-check kaggle
+          fi
 
       - name: Run logic tests
         run: python -m unittest discover -s tests -v
+
+      - name: Require explicit free-tier-only confirmation for live TTS
+        if: env.RUN_MODE == 'live-tts-smoke'
+        env:
+          FREE_TIER_ACK: ${{ inputs.confirm_free_tier_only }}
+        shell: bash
+        run: |
+          if [[ "$FREE_TIER_ACK" != "true" ]]; then
+            echo "Stopped safely. Confirm the Gemini project/key is Free Tier with paid billing disabled, then rerun and tick the confirmation."
+            exit 1
+          fi
+
+      - name: Generate and validate two real Hindi TTS speaker WAVs
+        if: env.RUN_MODE == 'live-tts-smoke'
+        run: python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke
+
+      - name: Upload live TTS samples for human listening review
+        if: always() && env.RUN_MODE == 'live-tts-smoke'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bina-shor-ke-live-tts-${{ github.run_number }}
+          path: artifacts/tts-smoke/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Offline preflight — no network, API, or GPU use
         if: env.RUN_MODE == 'preflight'
