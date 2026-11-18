@@ -278,15 +278,6 @@ jobs:
           restore-keys: |
             bsk-tts-${{ runner.os }}-
 
-      - name: Restore validated narration cache
-        if: steps.work.outputs.finalize == 'true'
-        uses: actions/cache/restore@v4
-        with:
-          path: data/tts_cache
-          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
-          restore-keys: |
-            bsk-tts-${{ runner.os }}-
-
       - name: Install FFmpeg and Devanagari fonts
         if: steps.work.outputs.finalize == 'true'
         run: |
