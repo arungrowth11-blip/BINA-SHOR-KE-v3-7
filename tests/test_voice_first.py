@@ -96,15 +96,57 @@ class VoiceFirstTests(unittest.TestCase):
             first, second, combined = root / "one.wav", root / "two.wav", root / "combined.wav"
             self.write_wav(first, 1.25)
             self.write_wav(second, 2.0)
-            duration = voice_first.assemble_dialogue_wav([first, second], combined, gap_seconds=0.2)
-            self.assertAlmostEqual(duration, 3.45, places=2)
-            self.assertAlmostEqual(voice_first.wav_duration(combined), 3.45, places=2)
+            duration = voice_first.assemble_dialogue_wav(
+                [first, second], combined, gap_seconds=0.2,
+                leading_silence_seconds=0.08,
+            )
+            self.assertAlmostEqual(duration, 3.53, places=2)
+            self.assertAlmostEqual(voice_first.wav_duration(combined), 3.53, places=2)
 
     def test_silent_visual_beat_can_have_a_valid_audio_timeline(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "silence.wav"
             voice_first.write_silence_wav(path, 2.6)
             self.assertAlmostEqual(voice_first.wav_duration(path), 2.6, places=2)
+
+
+    def test_duplicate_segment_ids_are_rejected(self):
+        concept = {
+            "characters": [{"character_id": "a1", "display_name": "A"}],
+            "beats": [],
+        }
+        for _ in range(6):
+            concept["beats"].append({
+                "speech_segments": [{
+                    "segment_id": "same_line",
+                    "speaker_id": "a1",
+                    "text": "यह संवाद पूरी तरह से स्वाभाविक है।",
+                }]
+            })
+        with self.assertRaisesRegex(ValueError, "Duplicate speech segment id"):
+            voice_first.normalise_screenplay(concept)
+
+    def test_new_reel_identity_does_not_reuse_previous_story_cast(self):
+        first = {
+            "title": "एक कहानी", "theme": "एक ही विषय",
+            "story_instance_id": "reel_0001",
+            "characters": [{"character_id": "protagonist", "display_name": "A"}],
+            "beats": [],
+        }
+        second = {
+            "title": "एक कहानी", "theme": "एक ही विषय",
+            "story_instance_id": "reel_0002",
+            "characters": [{"character_id": "protagonist", "display_name": "A"}],
+            "beats": [],
+        }
+        for concept in (first, second):
+            concept["beats"] = [{
+                "speech_segments": [{
+                    "speaker_id": "protagonist", "text": "यह एक सामान्य संवाद है।"
+                }]
+            } for _ in range(6)]
+            voice_first.normalise_screenplay(concept)
+        self.assertNotEqual(first["characters"][0]["character_id"], second["characters"][0]["character_id"])
 
     def test_wav_format_gate_rejects_wrong_sample_rate(self):
         with tempfile.TemporaryDirectory() as folder:
