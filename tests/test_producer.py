@@ -322,10 +322,11 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder) / "voice.wav"
             with patch.object(producer.requests, "post", return_value=response) as mocked:
-                producer.tts_wav("यह केवल बोली जाने वाली पंक्ति है।", out, voice_direction="धीमे बोलें; आखिरी शब्द में हल्की नरमी रखें।")
+                producer.tts_wav("यह केवल बोली जाने वाली पंक्ति है।", out, voice_direction="धीमे बोलें; आखिरी शब्द में हल्की नरमी रखें।", voice_name="Puck")
             payload = mocked.call_args.kwargs["json"]
             self.assertEqual(payload["input"][0]["content"][0]["text"], "यह केवल बोली जाने वाली पंक्ति है।")
             self.assertEqual(payload["response_format"]["mime_type"], "audio/l16")
+            self.assertEqual(payload["generation_config"]["speech_config"][0]["voice"], "Puck")
             style = payload["input"][0]["content"][0]["annotations"][0]["style"]
             self.assertIn("धीमे बोलें", style)
             self.assertTrue(style.startswith("Natural Hindi; warm, grounded, restrained, clear diction."))
@@ -384,7 +385,7 @@ class FactoryLogicTests(unittest.TestCase):
                         wav_file.writeframes(b"\x00\x00" * 24000)
                 with patch.object(producer, "tts_wav", side_effect=fake_tts):
                     self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
-                cache_material = text + "\n[voice_direction=]"
+                cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
                 digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav").exists())
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav.sha256").exists())
