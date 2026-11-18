@@ -1855,14 +1855,50 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                 raise RuntimeError(f"AI scene {clip.name} is missing, too small or too short; refusing to spend TTS quota on an invalid batch.")
 
     for i, beat in enumerate(concept["beats"]):
-        log(f"[{concept['title']}] Voice + original visual {i+1}/{len(concept['beats'])}: {beat['visual_query']}")
+        log(f"[{concept['title']}] Voice-first render {i+1}/{len(concept['beats'])}: {beat['visual_query']}")
         audio_path = voice_dir / f"beat_{i+1:02d}.wav"
-        ensure_tts_wav(beat["voiceover"], audio_path, voice_direction=beat.get("voice_direction"))
+        speech_segments = beat.get("speech_segments")
+        if isinstance(speech_segments, list):
+            line_paths: list[Path] = []
+            spoken_seconds = 0.0
+            for line_index, line in enumerate(speech_segments, start=1):
+                speaker_id = str(line["speaker_id"])
+                segment_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(line.get("segment_id") or f"beat_{i+1:02d}_line_{line_index:02d}"))
+                line_path = voice_dir / f"{segment_id}_{speaker_id}.wav"
+                voice_direction = (
+                    str(line.get("voice_direction") or "Natural Hindi dialogue.")
+                    + " Performance emotion: " + str(line.get("emotion") or "natural, restrained")
+                )
+                ensure_tts_wav(
+                    str(line["text"]), line_path,
+                    voice_direction=voice_direction,
+                    voice_name=str(line.get("gemini_voice") or TTS_VOICE),
+                )
+                measured = voice_first.wav_duration(line_path)
+                expected = line.get("duration_seconds")
+                if expected is not None and abs(measured - float(expected)) > 0.15:
+                    raise RuntimeError(
+                        f"Voice cache mismatch for {segment_id}: planned {float(expected):.3f}s, "
+                        f"finalizer has {measured:.3f}s. Refusing to render out of sync."
+                    )
+                line["duration_seconds"] = round(measured, 4)
+                spoken_seconds += measured
+                line_paths.append(line_path)
+            if not line_paths:
+                planned_scene = float((beat.get("voice_timing") or {}).get("target_duration_seconds", 2.5))
+                voice_first.write_silence_wav(audio_path, max(2.5, planned_scene))
+                audio_duration = voice_first.wav_duration(audio_path)
+            else:
+                audio_duration = voice_first.assemble_dialogue_wav(line_paths, audio_path)
+            total_voice_seconds += spoken_seconds
+        else:
+            # Backward compatibility for an older pending manifest or a hand-authored test concept.
+            ensure_tts_wav(beat["voiceover"], audio_path, voice_direction=beat.get("voice_direction"))
+            audio_duration = probe_duration(audio_path)
+            total_voice_seconds += audio_duration
         voice_audio_paths.append(audio_path)
-        audio_duration = probe_duration(audio_path)
-        if not 1.0 <= audio_duration <= 8.0:
-            raise RuntimeError(f"TTS beat {i+1} length {audio_duration:.2f}s is outside expected range; quality gate stopped rendering.")
-        total_voice_seconds += audio_duration
+        if not 1.0 <= audio_duration <= 12.0:
+            raise RuntimeError(f"Rendered dialogue beat {i+1} length {audio_duration:.2f}s is outside the 1–12s safety range; storyboard must split the scene, never shorten its words.")
         rendered_audio_duration = audio_duration
         target_duration = audio_duration + 0.08
         audio_tempo = 1.0
