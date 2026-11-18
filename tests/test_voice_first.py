@@ -43,7 +43,11 @@ class VoiceFirstTests(unittest.TestCase):
         concept = {
             "characters": [
                 {"character_id": "arjun", "display_name": "अर्जुन", "gender_presentation": "male", "age_band": "young_adult"},
-                {"character_id": "meera", "display_name": "मीरा", "gender_presentation": "female", "age_band": "adult"},
+                {
+                    "character_id": "meera", "display_name": "मीरा",
+                    "gender_presentation": "female", "age_band": "adult",
+                    "voice_direction": "Make her sound like a much older woman.",
+                },
             ],
             "beats": [{
                 "speech_segments": [
@@ -56,6 +60,10 @@ class VoiceFirstTests(unittest.TestCase):
         lines = result["beats"][0]["speech_segments"]
         self.assertEqual(lines[0]["gemini_voice"], "Puck")
         self.assertEqual(lines[1]["gemini_voice"], "Aoede")
+        self.assertEqual(
+            result["characters"][1]["voice_direction"],
+            voice_first.resolve_voice_profile("hi_female_adult_aoede")["direction"],
+        )
         self.assertEqual(result["characters"][1]["visual_age_description"], voice_first.visual_age_description("adult"))
         self.assertTrue(lines[0]["speaker_id"].endswith("_arjun"))
         self.assertTrue(lines[1]["speaker_id"].endswith("_meera"))
