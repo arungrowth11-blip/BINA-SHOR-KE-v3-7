@@ -106,7 +106,8 @@ class StudioPipelineTests(unittest.TestCase):
             result = studio_pipeline.prepare_voice_first_plan(concept, "reel_01_voice_test")
 
         self.assertEqual(len(calls), 6)
-        self.assertEqual(registry_write.call_count, 2)
+        # Do not save a cast until the voice-aware storyboard has passed.
+        self.assertEqual(registry_write.call_count, 0)
         self.assertEqual(result["voice_first_plan"]["status"], "voice_measured_before_video")
         self.assertFalse(result["voice_first_plan"]["dialogue_truncated"])
         self.assertEqual(calls[0][2], "Puck")
@@ -117,6 +118,19 @@ class StudioPipelineTests(unittest.TestCase):
             self.assertEqual((beat["target_frames"] - 1) % 4, 0)
             self.assertGreaterEqual(beat["target_frames"] / 24.0, 3.0)
 
+
+
+    def test_character_cast_is_persisted_only_after_storyboard_acceptance(self):
+        concept = {
+            "characters": [
+                {"character_id": "story_abc12345_arjun", "display_name": "अर्जुन"},
+                {"character_id": "story_abc12345_meera", "display_name": "मीरा"},
+            ]
+        }
+        with patch.object(studio_pipeline.character_library, "upsert_character") as upsert:
+            count = studio_pipeline.persist_character_cast(concept)
+        self.assertEqual(count, 2)
+        self.assertEqual(upsert.call_count, 2)
 
     def test_wan_graph_uses_voice_measured_dynamic_frame_count(self):
         runner = load_runner_module()
