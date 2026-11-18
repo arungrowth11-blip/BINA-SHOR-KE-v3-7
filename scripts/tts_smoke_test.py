@@ -37,11 +37,11 @@ SAMPLES = (
         "direction": "Natural conversational Hindi; young adult masculine delivery, restrained and sincere.",
     },
     {
-        "sample_id": "meera_older_female",
-        "filename": "meera_gacrux.wav",
-        "profile_id": "hi_female_older_gacrux",
+        "sample_id": "meera_adult_female",
+        "filename": "meera_aoede.wav",
+        "profile_id": "hi_female_adult_aoede",
         "text": "अर्जुन, हर जवाब तुरंत देना ज़रूरी नहीं होता। कभी-कभी ध्यान से सुनना भी काफ़ी है।",
-        "direction": "Natural conversational Hindi; mature feminine delivery, calm, warm and gently assertive.",
+        "direction": "Natural conversational Hindi; adult feminine delivery, warm and expressive without an older/elderly timbre.",
     },
 )
 
