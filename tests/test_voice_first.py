@@ -27,10 +27,17 @@ class VoiceFirstTests(unittest.TestCase):
         concept = {"beats": [{"voiceover": source} for _ in range(6)]}
         result = voice_first.normalise_screenplay(concept)
         self.assertEqual(result["screenplay_schema_version"], 2)
-        self.assertEqual(result["characters"][0]["character_id"], "narrator")
+        self.assertTrue(result["characters"][0]["character_id"].endswith("_narrator"))
+        self.assertEqual(
+            result["beats"][0]["speech_segments"][0]["speaker_id"],
+            result["characters"][0]["character_id"],
+        )
         self.assertEqual(result["beats"][0]["speech_segments"][0]["text"], source)
         self.assertEqual(result["beats"][0]["voiceover"], source)
         self.assertEqual(result["beats"][0]["speech_segments"][0]["gemini_voice"], "Kore")
+        # Normalisation is safe to run again before dispatch/finalization.
+        again = voice_first.normalise_screenplay(result)
+        self.assertEqual(again["characters"][0]["character_id"], result["characters"][0]["character_id"])
 
     def test_two_character_script_assigns_distinct_gender_age_voice_presets(self):
         concept = {
@@ -49,8 +56,8 @@ class VoiceFirstTests(unittest.TestCase):
         lines = result["beats"][0]["speech_segments"]
         self.assertEqual(lines[0]["gemini_voice"], "Puck")
         self.assertEqual(lines[1]["gemini_voice"], "Gacrux")
-        self.assertEqual(lines[0]["speaker_id"], "arjun")
-        self.assertEqual(lines[1]["speaker_id"], "meera")
+        self.assertTrue(lines[0]["speaker_id"].endswith("_arjun"))
+        self.assertTrue(lines[1]["speaker_id"].endswith("_meera"))
         self.assertEqual(result["beats"][0]["voiceover"], "तुमने मेरी बात सुनी ही नहीं। मैं जवाब देने से पहले सोच रही थी।")
 
     def test_unknown_speaker_fails_closed(self):
