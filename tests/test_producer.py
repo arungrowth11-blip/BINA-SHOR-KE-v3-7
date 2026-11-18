@@ -70,7 +70,10 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(mocked.call_args.args[0], "https://api.groq.com/openai/v1/chat/completions")
         self.assertEqual(mocked.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")
         self.assertEqual(mocked.call_args.kwargs["json"]["model"], producer.GROQ_TEXT_MODEL)
-        self.assertEqual(mocked.call_args.kwargs["json"]["max_completion_tokens"], 2600)
+        payload = mocked.call_args.kwargs["json"]
+        self.assertEqual(payload["max_completion_tokens"], 5000)
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertNotIn("reasoning_format", payload)
 
     def test_mistral_free_mode_uses_chat_completions_endpoint(self):
         response = Mock()
@@ -81,7 +84,35 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         self.assertEqual(mocked.call_args.args[0], "https://api.mistral.ai/v1/chat/completions")
         self.assertEqual(mocked.call_args.kwargs["headers"]["Authorization"], "Bearer test-mistral-key")
-        self.assertEqual(mocked.call_args.kwargs["json"]["model"], "ministral-8b-latest")
+        payload = mocked.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "ministral-8b-latest")
+        self.assertEqual(payload["max_tokens"], 5000)
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+
+    def test_openai_json_completion_rejects_truncated_output(self):
+        body = {
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": '{"title":"incomplete'},
+            }]
+        }
+        with self.assertRaisesRegex(RuntimeError, "refusing to parse truncated JSON"):
+            producer._openai_json_completion(body, "Groq", 5000)
+
+    def test_openai_json_completion_accepts_mistral_text_content_blocks(self):
+        body = {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": [{"type": "text", "text": '{"ok": true}'}]},
+            }]
+        }
+        self.assertEqual(producer._openai_json_completion(body, "Mistral", 5000), {"ok": True})
+
+    def test_invalid_provider_json_disables_that_provider_for_current_run(self):
+        error = json.JSONDecodeError("Unterminated string", '{"title":"broken', 9)
+        producer._provider_failure_cooldown("groq", error)
+        self.assertFalse(producer._provider_available("groq"))
+        self.assertTrue(producer._provider_available("mistral"))
 
     def test_cloudflare_is_disabled_without_explicit_free_only_flag(self):
         with patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "CF_ACCOUNT_ID", "account"), patch.object(producer, "CF_API_TOKEN", "token"), patch.object(producer.requests, "post") as mocked:
