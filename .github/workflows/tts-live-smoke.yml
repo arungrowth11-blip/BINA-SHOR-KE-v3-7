@@ -1,0 +1,59 @@
+name: BINA SHOR KE — Live Gemini Hindi TTS Qualification
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_free_tier_only:
+        description: "Confirm the Gemini API project/key is on Free Tier and paid billing is disabled. This test makes two short TTS sample requests."
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: bina-shor-ke-live-tts-qualification
+  cancel-in-progress: false
+
+jobs:
+  live-tts-qualification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      GEMINI_API_KEY: \${{ secrets.GEMINI_API_KEY }}
+      GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
+      TTS_MIN_INTERVAL_SECONDS: "21"
+    steps:
+      - name: Require explicit free-tier-only confirmation
+        env:
+          FREE_TIER_ACK: \${{ inputs.confirm_free_tier_only }}
+        shell: bash
+        run: |
+          if [[ "$FREE_TIER_ACK" != "true" ]]; then
+            echo "Stopped safely. Confirm the Gemini project/key is Free Tier with paid billing disabled, then manually rerun and tick the confirmation."
+            exit 1
+          fi
+
+      - name: Checkout selected feature branch
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install repository runtime dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Generate and validate two real Hindi speaker WAVs
+        run: python scripts/tts_smoke_test.py --output-dir artifacts/tts-smoke
+
+      - name: Upload WAVs and machine qualification report for human listening review
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bina-shor-ke-live-tts-\${{ github.run_number }}
+          path: artifacts/tts-smoke/
+          retention-days: 7
+          if-no-files-found: ignore
