@@ -134,12 +134,17 @@ def add_character(name: str, x: float, skin, shirt, hair, eye, mouth_mat, audio_
     sphere(f"{name}_body", (x, 0.0, 0.88), (0.54, 0.36, 0.72), shirt)
     cylinder(f"{name}_neck", (x, -0.015, 1.48), 0.17, 0.28, skin)
     head = sphere(f"{name}_head", (x, 0.0, 1.98), (0.44, 0.38, 0.50), skin)
-    sphere(f"{name}_hair", (x, 0.035, 2.34), (0.455, 0.39, 0.20), hair)
-    sphere(f"{name}_nose", (x, -0.365, 1.96), (0.075, 0.085, 0.10), skin)
+    face_parts = []
+    face_parts.append(sphere(f"{name}_hair", (x, 0.035, 2.34), (0.455, 0.39, 0.20), hair))
+    face_parts.append(sphere(f"{name}_nose", (x, -0.365, 1.96), (0.075, 0.085, 0.10), skin))
     for side in (-1, 1):
-        sphere(f"{name}_eye_{side}", (x + side * 0.145, -0.34, 2.11), (0.061, 0.035, 0.071), eye)
-        sphere(f"{name}_eye_glint_{side}", (x + side * 0.16, -0.374, 2.135), (0.018, 0.012, 0.02), material(f"{name}_glint_{side}", (1.0, 0.97, 0.88, 1.0), 0.2))
+        face_parts.append(sphere(f"{name}_eye_{side}", (x + side * 0.145, -0.34, 2.11), (0.061, 0.035, 0.071), eye))
+        face_parts.append(sphere(f"{name}_eye_glint_{side}", (x + side * 0.16, -0.374, 2.135), (0.018, 0.012, 0.02), material(f"{name}_glint_{side}", (1.0, 0.97, 0.88, 1.0), 0.2)))
     mouth = sphere(f"{name}_mouth", (x, -0.375, 1.84), (0.115, 0.035, 0.035), mouth_mat)
+    face_parts.append(mouth)
+    for part in face_parts:
+        part.parent = head
+        part.matrix_parent_inverse = head.matrix_world.inverted()
     envelope = load_amplitude_envelope(audio_path, frames, fps) if audio_path else []
     animate_mouth(mouth, envelope, frames, fps, fallback_speaking=fallback_speaking)
     # Small head nod to make the test visibly animated; the rig is intentionally simple.
@@ -186,7 +191,7 @@ def build_scene(args):
     frames = max(2, math.ceil(args.duration * args.fps))
     scene.frame_start = 1
     scene.frame_end = frames
-    scene.render.image_settings.color_mode = "RGBA"
+    scene.render.image_settings.color_mode = "RGB"
     scene.render.film_transparent = False
     scene.render.image_settings.file_format = "FFMPEG"
     scene.render.ffmpeg.format = "MPEG4"
@@ -226,7 +231,7 @@ def build_scene(args):
     for x in (-0.42, 0.42):
         cylinder(f"Table leg {x}", (x, 0.2, 0.28), 0.045, 0.55, table_mat)
 
-    add_character("Arjun", -0.83, skin_a, shirt_a, hair_a, eye_mat, mouth_mat, args.audio_left, frames, args.fps, True)
+    add_character("Arjun", -0.83, skin_a, shirt_a, hair_a, eye_mat, mouth_mat, args.audio_left, frames, args.fps, not bool(args.audio_left or args.audio_right))
     add_character("Meera", 0.83, skin_b, shirt_b, hair_b, eye_mat, mouth_mat, args.audio_right, frames, args.fps, False)
 
     bpy.ops.object.camera_add(location=(0, -8.7, 2.65))
