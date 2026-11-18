@@ -84,7 +84,13 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
           if [[ "$RUN_MODE" != "live-tts-smoke" ]]; then
-            python -m pip install --disable-pip-version-check "six>=1.16.0,<2" kaggle
+            python -m pip install --disable-pip-version-check --upgrade --no-cache-dir "six>=1.16.0,<2" kaggle
+            python - <<'PY'
+          import sys
+          import six
+          from kaggle.cli import main
+          print(f"Kaggle CLI import preflight passed: python={sys.executable}, six={six.__version__}")
+          PY
           fi
 
       - name: Run logic tests
