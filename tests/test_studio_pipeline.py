@@ -5,6 +5,7 @@ import json
 import sys
 import tempfile
 import unittest
+import wave
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -66,6 +67,53 @@ class StudioPipelineTests(unittest.TestCase):
         prompt = runner.node_prompt(objects, 'KSampler', inputs)
         self.assertNotIn('control_after_generate', prompt['inputs'])
         self.assertEqual(prompt['inputs']['seed'], 123)
+
+
+    def test_voice_first_plan_generates_measured_audio_before_gpu_timing(self):
+        concept = {
+            "title": "दो दोस्तों की बात",
+            "theme": "एक बातचीत में दो दोस्तों के बीच की गलतफहमी साफ होती है।",
+            "characters": [
+                {"character_id": "arjun", "display_name": "अर्जुन", "gender_presentation": "male", "age_band": "young_adult"},
+                {"character_id": "meera", "display_name": "मीरा", "gender_presentation": "female", "age_band": "older_adult"},
+            ],
+            "beats": [],
+        }
+        for index in range(6):
+            concept["beats"].append({
+                "speech_segments": [{
+                    "segment_id": f"beat_{index+1:02d}_line_01",
+                    "speaker_id": "arjun" if index % 2 == 0 else "meera",
+                    "text": "मैंने सोचा तुम मेरी बात समझोगे।",
+                    "emotion": "restrained and conversational",
+                }]
+            })
+
+        calls = []
+        def fake_tts(text, destination, voice_direction=None, voice_name=None):
+            calls.append((text, voice_direction, voice_name))
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with wave.open(str(destination), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(24000)
+                output.writeframes(b"\\x00\\x00" * (3 * 24000))
+
+        with patch.object(studio_pipeline.character_library, "upsert_character") as registry_write, \\
+             patch.object(studio_pipeline.producer, "ensure_tts_wav", side_effect=fake_tts):
+            result = studio_pipeline.prepare_voice_first_plan(concept, "reel_01_voice_test")
+
+        self.assertEqual(len(calls), 6)
+        self.assertEqual(registry_write.call_count, 2)
+        self.assertEqual(result["voice_first_plan"]["status"], "voice_measured_before_video")
+        self.assertFalse(result["voice_first_plan"]["dialogue_truncated"])
+        self.assertEqual(calls[0][2], "Puck")
+        self.assertEqual(calls[1][2], "Gacrux")
+        for beat in result["beats"]:
+            self.assertEqual(beat["voice_timing"]["timing_source"], "measured_tts_wav_before_gpu")
+            self.assertEqual(beat["voice_timing"]["speech_duration_seconds"], 3.0)
+            self.assertEqual((beat["target_frames"] - 1) % 4, 0)
+            self.assertGreaterEqual(beat["target_frames"] / 24.0, 3.0)
 
     def test_kaggle_incomplete_does_not_match_complete(self):
         with patch.object(studio_pipeline, "configure_kaggle_cli"), patch.object(
