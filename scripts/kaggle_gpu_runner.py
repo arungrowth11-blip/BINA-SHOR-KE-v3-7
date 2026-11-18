@@ -522,7 +522,7 @@ def main():
                 transcode_scene(source, final_out)
                 result_manifest['scenes'].append({
                     'reel_id': reel_id, 'scene_index': i, 'path': str(final_out.relative_to(WORK)),
-                    'bytes': final_out.stat().st_size, 'duration_seconds_target': target_frames / 24.0,
+                    'bytes': final_out.stat().st_size, 'duration_seconds_target': float(beat.get('target_frames', 81)) / 24.0,
                     'generation_elapsed_seconds': round(time.monotonic() - scene_started, 2),
                     'prompt_id': prompt_id, 'comfy_history_status': history.get('status', {}),
                 })
