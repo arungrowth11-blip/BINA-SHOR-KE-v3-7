@@ -339,7 +339,7 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_tts_cache_reuses_exact_text_and_valid_wav_across_reruns(self):
         text = "एक छोटी कहानी की परीक्षण पंक्ति।"
-        cache_material = text + "\n[voice_direction=]"
+        cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
         digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -364,6 +364,16 @@ class FactoryLogicTests(unittest.TestCase):
             finally:
                 producer.TTS_CACHE_DIR = old_cache
 
+
+    def test_tts_cache_identity_includes_voice_and_performance_direction(self):
+        text = "यह एक छोटी सी परीक्षण पंक्ति है।"
+        common = text + "\n[voice_direction=calm]"
+        first = producer.hashlib.sha256((common + "\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
+        second = producer.hashlib.sha256((common + "\n[gemini_voice=Gacrux]").encode("utf-8")).hexdigest()
+        third = producer.hashlib.sha256((text + "\n[voice_direction=angry]\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, third)
+
     def test_tts_cache_marks_new_audio_for_cross_run_persistence(self):
         text = "नया ऑडियो कैश परीक्षण।"
         with tempfile.TemporaryDirectory() as folder:
@@ -376,7 +386,7 @@ class FactoryLogicTests(unittest.TestCase):
             producer._LAST_TTS_REQUEST_AT = 0
             try:
                 out = root / "render" / "voice.wav"
-                def fake_tts(line, destination, voice_direction=None):
+                def fake_tts(line, destination, voice_direction=None, voice_name=None):
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     with wave.open(str(destination), "wb") as wav_file:
                         wav_file.setnchannels(1)
