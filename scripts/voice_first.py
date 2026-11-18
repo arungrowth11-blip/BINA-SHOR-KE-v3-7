@@ -54,6 +54,7 @@ VOICE_PROFILES: dict[str, dict[str, str]] = {
     },
 }
 DEFAULT_VOICE_PROFILE_ID = "hi_narrator_kore"
+_SOURCE_CHARACTER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
 _CHARACTER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 
 
@@ -108,9 +109,10 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(raw, dict):
             raise ValueError("Each screenplay character must be an object.")
         char = dict(raw)
-        char_id = str(char.get("character_id", "")).strip().lower()
-        if not _CHARACTER_ID.fullmatch(char_id):
-            raise ValueError(f"Invalid character_id: {char_id!r}")
+        char_id = str(char.get("source_character_id") or char.get("character_id", "")).strip().lower()
+        if not _SOURCE_CHARACTER_ID.fullmatch(char_id):
+            raise ValueError(f"Invalid source character_id: {char_id!r}")
+        char["source_character_id"] = char_id
         if char_id in seen:
             raise ValueError(f"Duplicate character_id: {char_id}")
         seen.add(char_id)
@@ -138,10 +140,9 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
     story_seed = hashlib.sha256(story_identity.encode("utf-8")).hexdigest()[:8]
     remap: dict[str, str] = {}
     for char in clean_characters:
-        original_id = char["character_id"]
+        original_id = str(char.get("source_character_id") or char["character_id"])
         reuse_id = str(char.get("reuse_character_id") or "").strip().lower()
-        already_namespaced = original_id.startswith(f"story_{story_seed}_")
-        final_id = reuse_id if reuse_id else (original_id if already_namespaced else f"story_{story_seed}_{original_id}"[:48])
+        final_id = reuse_id if reuse_id else f"story_{story_seed}_{original_id}"
         if not _CHARACTER_ID.fullmatch(final_id):
             raise ValueError(f"Invalid reused character_id: {final_id!r}")
         remap[original_id] = final_id
@@ -169,7 +170,8 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(raw_segment, dict):
                 raise ValueError(f"Beat {beat_index} line {line_index} must be an object.")
             segment = dict(raw_segment)
-            source_speaker_id = str(segment.get("speaker_id", "")).strip().lower()
+            source_speaker_id = str(segment.get("source_speaker_id") or segment.get("speaker_id", "")).strip().lower()
+            segment["source_speaker_id"] = source_speaker_id
             speaker_id = remap.get(source_speaker_id, source_speaker_id)
             if speaker_id not in characters_by_id:
                 raise ValueError(f"Beat {beat_index} references unknown speaker_id {speaker_id!r}.")
