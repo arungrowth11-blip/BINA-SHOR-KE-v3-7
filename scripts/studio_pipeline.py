@@ -174,8 +174,10 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
 
 def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
     """Generate and measure every character turn before spending any video-GPU time."""
-    if concept.get('screenplay_schema_version') != 2:
-        voice_first.normalise_screenplay(concept)
+    # Bind every generated cast to this Reel instance. Repeated story titles should not
+    # accidentally reuse another Reel's saved character identity.
+    concept['story_instance_id'] = reel_id
+    voice_first.normalise_screenplay(concept)
     characters = concept.get('characters', [])
     if not characters:
         raise RuntimeError('Voice-first screenplay has no cast; refusing GPU dispatch.')
