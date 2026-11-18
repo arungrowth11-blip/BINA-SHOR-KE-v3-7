@@ -99,3 +99,20 @@ The feature-branch mode `live-tts-smoke` in the existing `.github/workflows/week
 The same guarded test can be run locally with `python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke` after installing `requirements.txt` and setting `GEMINI_API_KEY`. The explicit flag is required; it must not be used unless the Gemini project/key is on the Free Tier and paid billing is disabled.
 
 **Qualification status:** adding this mode does not itself mean TTS has been auditioned. Until a successful live run artifact is produced and both samples are human-reviewed, TTS remains **blocked pending live run and listening review**. Do not launch `plan-one` or `plan-week` as a substitute for this gate.
+
+## Release-readiness evidence register
+
+Last repository verification: 2026-11-18, PR head `b24a7896371f9a7912488af046a222ba8c6a6da8`.
+
+| Gate | Evidence status | Exact remaining action |
+|---|---|---|
+| Offline code, regression tests and workflow syntax | **Verified pass** — GitHub Offline Quality Gates run #47 completed successfully: compileall, 152 unit tests and all six workflow YAML files passed. | Re-run automatically on every PR head update; investigate any new failure from its logs. |
+| Live Gemini Hindi TTS | **Implemented, live run blocked** — the real adapter is wired into `live-tts-smoke`; offline tests cover format, silence rejection and report integrity. No live audio has yet been generated. | Manually run the existing Director/AI Reel Dispatch workflow on this feature branch with mode `live-tts-smoke`, after confirming Free Tier and disabled paid billing. Download and listen to both WAVs. |
+| Human voice approval | **Not performed** — machine format/non-silence checks cannot judge Hindi pronunciation, naturalness or acting. | Listen to `arjun_puck.wav` and `meera_gacrux.wav`; record accept/reject and specific defects. |
+| Wan2.2 variable-duration Kaggle render | **Not yet verified live** — frame/timing logic and workflow orchestration pass offline tests, but no real Kaggle worker result is attached to this head. | After TTS approval, run exactly one `plan-one` Reel. Confirm Kaggle job identity/status, six expected scene clips, manifest SHA locks, measured durations, final technical/visual QA and Telegram review package. Do not launch a 3-Reel week before one-Reel qualification. |
+| Blender Kaggle pilot | **Blocked: execution path missing** — `scripts/blender_pilot.py` is a real isolated Blender script, but the current Kaggle worker and GPU workflows contain no Blender installation or launch step. | Build a separate, isolated Kaggle Blender runner/job that installs or verifies Blender, supplies the two validated WAVs, renders the pilot, and returns MP4 + runtime/environment diagnostics. Then perform human visual review. Do not replace Wan2.2. |
+| Human visual/video review | **Not performed** — no actual Blender/Kaggle pilot render or end-to-end Reel is available for review. | Review framing, anatomy, eye-lines, character consistency, mouth timing, lighting, motion artefacts and 9:16 composition after a real render exists. |
+| Telegram delivery and end-to-end Reel | **Not verified live on this PR head** — implementation and mocked/offline tests are not a delivery receipt. | After the one-Reel GPU/QA gate, verify the actual video, cover, message and publish-kit receipt in the pinned Telegram chat. Facebook publication remains manual. |
+| Production promotion | **Blocked by policy** — Wan2.2 remains production; Blender stays experimental. | Complete the documented paired-sample/three-shadow-Reel quality programme and obtain explicit owner approval before any renderer promotion. |
+
+A successful offline run must never be substituted for a live API, Kaggle, Blender, human review or Telegram receipt. A gate stays blocked until its own evidence is recorded.
