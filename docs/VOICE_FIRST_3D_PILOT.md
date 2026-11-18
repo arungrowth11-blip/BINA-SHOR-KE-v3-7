@@ -88,14 +88,14 @@ Wan2.2 remains the active video backend. Older pending manifests without speaker
 
 ## Live Hindi TTS qualification
 
-The manual workflow `.github/workflows/tts-live-smoke.yml` is the real API qualification step for speaker audio. It is separate from offline CI and from the production Reel/GPU workflows.
+The feature-branch mode `live-tts-smoke` in the existing `.github/workflows/weekly-factory.yml` is the real API qualification step. Reusing the already-registered workflow keeps manual dispatch available without merging this PR.
 
-1. In GitHub Actions, select **BINA SHOR KE — Live Gemini Hindi TTS Qualification** and choose branch `feature/voice-first-3d-foundation`.
+1. In GitHub Actions, select **BINA SHOR KE — Director and AI Reel Dispatch**, choose branch `feature/voice-first-3d-foundation`, then choose mode `live-tts-smoke`.
 2. Run it only after confirming that the configured Gemini project/key is on the Free Tier and paid billing is disabled. The required confirmation input defaults to false.
-3. The workflow calls the same production adapter, `producer.tts_wav`, for two short Hindi samples using the Puck and Gacrux profiles. It does not use mocks, send a Reel to Kaggle, run Blender, or contact Telegram/Facebook.
+3. This mode skips FFmpeg/font setup and Kaggle installation, then calls the same production adapter, `producer.tts_wav`, for two short Hindi samples using the Puck and Gacrux profiles. It does not plan a Reel, push a Kaggle kernel, run Blender, or contact Telegram/Facebook.
 4. Download the `bina-shor-ke-live-tts-<run>` artifact. It contains `arjun_puck.wav`, `meera_gacrux.wav`, and `report.json` when both samples succeed. The report records the model, WAV format, duration, signal level, file size and SHA-256.
 5. Listen to both files and record a separate human decision for pronunciation, naturalness, voice distinction, emotion and audio artefacts. A successful workflow proves only live API response and machine WAV checks; it does not pass the human listening gate.
 
-The same guarded test can be run locally with `python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke` after installing `requirements.txt` and setting `GEMINI_API_KEY`. The explicit flag is required; it must not be used unless paid billing is disabled.
+The same guarded test can be run locally with `python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke` after installing `requirements.txt` and setting `GEMINI_API_KEY`. The explicit flag is required; it must not be used unless the Gemini project/key is on the Free Tier and paid billing is disabled.
 
-**Qualification status:** adding this workflow does not itself mean TTS has been auditioned. Until a successful live run artifact is produced and both samples are human-reviewed, TTS remains **blocked pending live run and listening review**. Do not launch `plan-one` or `plan-week` as a substitute for this gate.
+**Qualification status:** adding this mode does not itself mean TTS has been auditioned. Until a successful live run artifact is produced and both samples are human-reviewed, TTS remains **blocked pending live run and listening review**. Do not launch `plan-one` or `plan-week` as a substitute for this gate.
