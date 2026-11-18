@@ -825,6 +825,132 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
         raise ValueError("Hook must be a clear 3–10-word first-screen line and under 70 characters.")
 
 
+
+def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
+    """Author final shot prompts only after speaker WAVs and exact durations are locked."""
+    if concept.get("voice_first_plan", {}).get("status") != "voice_measured_before_video":
+        raise RuntimeError("Voice-aware storyboard requires measured TTS audio before any video prompt is finalized.")
+    characters = concept.get("characters", [])
+    cast = {
+        str(item["character_id"]): {
+            "display_name": item.get("display_name", item["character_id"]),
+            "role": item.get("role", "supporting"),
+            "appearance": item.get("appearance", ""),
+            "personality": item.get("personality", ""),
+            "gender_presentation": item.get("gender_presentation", "unspecified"),
+            "age_band": item.get("age_band", "adult"),
+            "voice_profile_id": item.get("voice_profile_id", ""),
+            "voice_style": item.get("voice_direction", ""),
+        }
+        for item in characters
+    }
+    brief = []
+    for index, beat in enumerate(concept.get("beats", []), start=1):
+        timing = beat.get("voice_timing")
+        if not isinstance(timing, dict) or timing.get("timing_source") != "measured_tts_wav_before_gpu":
+            raise RuntimeError(f"Beat {index} is missing its measured voice timeline; refusing to guess scene duration.")
+        turns = []
+        placed_by_id = {str(item["segment_id"]): item for item in timing.get("segments", [])}
+        for segment in beat.get("speech_segments", []):
+            speaker = cast.get(str(segment.get("speaker_id")), {})
+            placed = placed_by_id.get(str(segment.get("segment_id")), {})
+            turns.append({
+                "speaker_id": segment.get("speaker_id"),
+                "speaker_name": speaker.get("display_name"),
+                "appearance": speaker.get("appearance"),
+                "personality": speaker.get("personality"),
+                "voice_profile_id": speaker.get("voice_profile_id"),
+                "spoken_dialogue": segment.get("text"),
+                "emotion": segment.get("emotion"),
+                "audio_start_seconds": placed.get("start_seconds"),
+                "audio_end_seconds": placed.get("end_seconds"),
+                "actual_audio_duration_seconds": segment.get("duration_seconds"),
+            })
+        brief.append({
+            "beat_index": index,
+            "target_duration_seconds": timing["target_duration_seconds"],
+            "target_frames": timing["target_frames"],
+            "fps": timing["fps"],
+            "visual_direction": beat.get("visual_direction", ""),
+            "visual_query": beat.get("visual_query", ""),
+            "visual_bible": concept.get("visual_bible", ""),
+            "spoken_turns_in_exact_audio_order": turns,
+            "initial_visual_prompt_for_reference_only": beat.get("video_prompt", ""),
+        })
+
+    system = (
+        "You are the animation director and shot designer for a premium Hindi short-film studio. "
+        "The screenplay and all character voices are already final and measured. You are writing the "
+        "FINAL video-generation shot prompts AFTER audio lock. Never rewrite dialogue, change the cast, "
+        "add a character, add a prop, invent an event, or change the established story outcome. "
+        "Match each shot's exact duration and its speaker turn timestamps. For dialogue, make the correct "
+        "speaker visibly speak during their own audio interval; show natural mouth/jaw motion, eye focus, "
+        "micro-expressions and restrained gestures. For the listener, use a believable reaction without "
+        "moving the mouth as if speaking. If there are multiple turns, plan a clear camera cut or deliberate "
+        "shot composition that follows the turn order; the final editor will preserve the full audio timeline. "
+        "Use the visual bible and character appearance verbatim for continuity. One clear physical action per "
+        "shot, plausible anatomy and physics, purposeful camera coverage, natural lighting and readable "
+        "silhouette. Never put any readable text, subtitles, logo or watermark inside the generated video. "
+        "Do not shorten any line or force every beat to the same length. Return valid JSON only."
+    )
+    user_prompt = f"""Create exactly six FINAL video shot prompts from this voice-locked Hindi screenplay.
+
+TITLE: {concept.get("title", "")}
+STYLE / VISUAL BIBLE: {concept.get("visual_bible", "")}
+CAST (immutable): {json.dumps(cast, ensure_ascii=False)}
+MEASURED AUDIO AND BEAT STORYBOARDS:
+{json.dumps(brief, ensure_ascii=False)}
+
+Return exactly:
+{{"shots":[
+  {{"beat_index":1,"video_prompt":"100–160 concrete English words. Describe the exact characters, shot size, camera placement/movement, physical action, speaker/listener facial acting and mouth motion, lighting, environment, material detail and continuity. The shot is exactly the supplied target duration."}}
+]}}
+Rules:
+- Exactly one entry for every beat_index 1 through 6, no missing or duplicate indices.
+- The video_prompt is final and must be 55–180 whitespace-separated words, <=1600 characters.
+- The measured target_duration_seconds and target_frames are authoritative; do not change them.
+- If a beat is silent, do not invent dialogue or fake speech mouth motion.
+- Do not convert this story to a different genre or add characters merely to improve a shot.
+- Do not return or modify any Hindi script, dialogue, captions or voice metadata.
+Return JSON only."""
+    response = text_json(system, user_prompt, temperature=0.45, timeout=150)
+    shots = response.get("shots")
+    if not isinstance(shots, list) or len(shots) != 6:
+        raise ValueError("Voice-aware storyboard must return exactly six shot prompts.")
+    by_index: dict[int, str] = {}
+    for shot in shots:
+        if not isinstance(shot, dict):
+            raise ValueError("Each voice-aware storyboard shot must be an object.")
+        try:
+            index = int(shot.get("beat_index"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Every storyboard shot needs an integer beat_index.") from exc
+        if index in by_index or index not in range(1, 7):
+            raise ValueError(f"Duplicate or out-of-range storyboard beat_index: {index}")
+        prompt = str(shot.get("video_prompt") or "").strip()
+        word_count = len(prompt.split())
+        if not 55 <= word_count <= 180 or len(prompt) > 1600:
+            raise ValueError(f"Final shot {index} has {word_count} words / {len(prompt)} characters; expected 55–180 words and <=1600 characters.")
+        lowered = prompt.lower()
+        for forbidden in ("subtitle overlay", "watermark text", "show the words", "write a caption"):
+            if forbidden in lowered:
+                raise ValueError(f"Final shot {index} risks generated text artifacts: {forbidden}.")
+        by_index[index] = prompt
+    if set(by_index) != set(range(1, 7)):
+        raise ValueError("Final storyboard is missing one or more beat indices.")
+    for index, beat in enumerate(concept["beats"], start=1):
+        beat["video_prompt"] = by_index[index]
+    concept["voice_aware_storyboard"] = {
+        "status": "generated_after_voice_lock",
+        "timing_basis": "measured_tts_wav_before_gpu",
+        "shot_count": 6,
+        "dialogue_rewritten": False,
+        "target_frames_changed": False,
+    }
+    log("Final six-shot storyboard generated from the measured speaker WAV timelines; screenplay and audio remain locked.")
+    return concept
+
+
 def judge_concept(concept: dict[str, Any]) -> dict[str, Any]:
     system = (
         "You are an independent Hindi short-film story editor, dialogue doctor, "
