@@ -43,6 +43,80 @@ ACTIVE_GPU_STATES = {
 }
 
 
+def terminal_finalization_qa_reason(pending: dict) -> str:
+    """Return a reason only for the known, non-retryable end-hold QA rejection."""
+    if pending.get('status') != 'finalize_failed':
+        return ''
+    error = str(pending.get('finalize_error') or '').strip()
+    if (
+        'AI scene needs' in error
+        and 'end hold' in error
+        and 'above the 1.20s quality limit' in error
+    ):
+        return error
+    return ''
+
+
+def archive_completed_qa_rejection(pending: dict, reason: str) -> dict:
+    """Archive a terminal QA-rejected batch only after Kaggle confirms its GPU run is COMPLETE.
+
+    Unknown/transient finalization errors are deliberately not eligible. This preserves the
+    retry-finalize path for recoverable failures and never releases an active/ambiguous GPU job.
+    """
+    if pending.get('status') != 'finalize_failed' or not reason:
+        raise RuntimeError('Only a classified terminal finalization QA rejection can be archived.')
+    job_id = str(pending.get('job_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', job_id):
+        raise RuntimeError('Cannot archive terminal QA batch: job_id is missing or invalid.')
+    kernel_id = str(pending.get('kaggle_kernel_id') or '').strip()
+    if not kernel_id or '/' not in kernel_id:
+        raise RuntimeError('Cannot archive terminal QA batch: saved Kaggle kernel identity is missing.')
+    manifest_reels = (pending.get('manifest') or {}).get('reels')
+    if not isinstance(manifest_reels, list) or not manifest_reels:
+        raise RuntimeError('Cannot archive terminal QA batch: saved manifest has no Reel list.')
+    if any(not isinstance(reel, dict) or len(reel.get('beats') or []) != 6 for reel in manifest_reels):
+        raise RuntimeError('Cannot archive terminal QA batch: manifest does not contain six scenes for every Reel.')
+
+    remote_status, remote_output = kaggle_status(kernel_id)
+    if remote_status != 'COMPLETE':
+        detail = str(remote_output or '').strip()[-700:]
+        raise RuntimeError(
+            f'Old batch {job_id} is not proven terminal in Kaggle (status={remote_status}); '
+            f'keeping the pending lock. Inspect the original Kaggle run before starting another GPU job. {detail}'
+        )
+
+    archive_dir = DATA / 'job_archive'
+    archive_path = archive_dir / f'{job_id}.json'
+    if archive_path.exists():
+        existing = load_json(archive_path, {}) or {}
+        if existing.get('job_id') != job_id or existing.get('status') != 'finalize_failed':
+            raise RuntimeError(f'Archive path already contains a different record: {archive_path}')
+    else:
+        archived = json.loads(json.dumps(pending, ensure_ascii=False))
+        archived['archive_metadata'] = {
+            'archived_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+            'archive_reason': 'terminal_qa_rejection_after_completed_gpu_render',
+            'final_qa_rejection_reason': reason,
+            'kaggle_kernel_id': kernel_id,
+            'verified_kaggle_status': remote_status,
+            'verified_kaggle_output': str(remote_output or '')[-1200:],
+        }
+        write_json(archive_path, archived)
+
+    pending['status'] = 'qa_rejected'
+    pending['qa_rejection_reason'] = reason
+    pending['finalization_resolution'] = {
+        'status': 'archived_terminal_qa_rejection',
+        'resolved_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'archive_path': str(archive_path.relative_to(ROOT)),
+        'kaggle_kernel_id': kernel_id,
+        'verified_kaggle_status': remote_status,
+        'new_gpu_dispatch_required': False,
+    }
+    write_json(PENDING, pending)
+    return pending
+
+
 def log(msg: str):
     print(f"[{datetime.now(TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}] {msg}", flush=True)
 
@@ -237,6 +311,13 @@ def plan_week(reel_count: int = 3) -> int:
     producer.require_env()
     configure_kaggle_cli()
     prior = load_json(PENDING, {}) or {}
+    terminal_qa_reason = terminal_finalization_qa_reason(prior)
+    if terminal_qa_reason:
+        prior = archive_completed_qa_rejection(prior, terminal_qa_reason)
+        log(
+            f"Archived old batch {prior.get('job_id')} as a terminal QA rejection after Kaggle "
+            "confirmed COMPLETE. Its existing scenes will not be reused; a fresh one-Reel plan may proceed."
+        )
     if prior.get('status') in ACTIVE_GPU_STATES:
         raise RuntimeError(f"There is already an unfinished GPU batch ({prior.get('job_id')}, status={prior.get('status')}). The system will not queue a duplicate batch; run poll-finalize or inspect the previous Kaggle job first.")
 
