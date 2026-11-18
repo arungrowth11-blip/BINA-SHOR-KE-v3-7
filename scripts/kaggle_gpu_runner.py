@@ -143,7 +143,7 @@ def restore_checkpoint_dataset(result_manifest: dict):
         restored.append({
             'reel_id': reel_id, 'scene_index': scene_index,
             'path': str(dest.relative_to(WORK)), 'bytes': dest.stat().st_size,
-            'duration_seconds_target': float(target_frames) / 24.0, 'generation_elapsed_seconds': float(item.get('generation_elapsed_seconds', 0) or 0),
+            'duration_seconds_target': float(item.get('duration_seconds_target', duration)), 'generation_elapsed_seconds': float(item.get('generation_elapsed_seconds', 0) or 0),
             'prompt_id': item.get('prompt_id'), 'restored_from_checkpoint': True,
         })
     result_manifest['scenes'].extend(restored)
