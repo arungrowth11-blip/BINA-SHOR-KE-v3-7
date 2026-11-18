@@ -5,6 +5,7 @@ before GPU dispatch; this module never shortens dialogue to fit a pre-existing v
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import re
@@ -16,7 +17,8 @@ FPS = 24
 WAN_FRAME_MULTIPLE = 4
 MIN_SCENE_SECONDS = 2.5
 HEAD_HANDLE_SECONDS = 0.08
-TAIL_HANDLE_SECONDS = 0.18
+TAIL_HANDLE_SECONDS = 0.08
+MAX_SCENE_SECONDS = 8.0
 DEFAULT_DIALOGUE_GAP_SECONDS = 0.18
 
 # Voice names are current Gemini prebuilt voice IDs. The profile direction controls
@@ -74,6 +76,12 @@ def resolve_voice_profile(profile_id: str) -> dict[str, str]:
     return dict(VOICE_PROFILES[key])
 
 
+def segment_voice_direction(segment: dict[str, Any]) -> str:
+    direction = str(segment.get("voice_direction") or "Natural Hindi dialogue.")
+    emotion = str(segment.get("emotion") or "natural, restrained")
+    return direction + " Performance emotion: " + emotion
+
+
 def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
     """Upgrade legacy single-narrator concepts and validate explicit multi-speaker scripts."""
     if not isinstance(concept, dict):
@@ -120,6 +128,21 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
         char["personality"] = str(char.get("personality") or "").strip()
         clean_characters.append(char)
 
+    # Character IDs are namespaced by story so generic labels such as "protagonist"
+    # never overwrite an unrelated person's saved identity. Explicit library reuse is
+    # the only way to retain an existing ID.
+    story_seed = hashlib.sha256(
+        (str(concept.get("title", "")) + "|" + str(concept.get("theme", ""))).encode("utf-8")
+    ).hexdigest()[:8]
+    remap: dict[str, str] = {}
+    for char in clean_characters:
+        original_id = char["character_id"]
+        reuse_id = str(char.get("reuse_character_id") or "").strip().lower()
+        final_id = reuse_id if reuse_id else f"story_{story_seed}_{original_id}"[:48]
+        if not _CHARACTER_ID.fullmatch(final_id):
+            raise ValueError(f"Invalid reused character_id: {final_id!r}")
+        remap[original_id] = final_id
+        char["character_id"] = final_id
     characters_by_id = {char["character_id"]: char for char in clean_characters}
     for beat_index, beat in enumerate(beats, start=1):
         if not isinstance(beat, dict):
@@ -142,7 +165,8 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             if not isinstance(raw_segment, dict):
                 raise ValueError(f"Beat {beat_index} line {line_index} must be an object.")
             segment = dict(raw_segment)
-            speaker_id = str(segment.get("speaker_id", "")).strip().lower()
+            source_speaker_id = str(segment.get("speaker_id", "")).strip().lower()
+            speaker_id = remap.get(source_speaker_id, source_speaker_id)
             if speaker_id not in characters_by_id:
                 raise ValueError(f"Beat {beat_index} references unknown speaker_id {speaker_id!r}.")
             text = str(segment.get("text") or "").strip()
@@ -227,6 +251,11 @@ def build_scene_timing_plan(
     requested = max(MIN_SCENE_SECONDS, speech_end + float(tail_handle_seconds))
     frames = frames_for_duration(requested, fps=fps)
     render_duration = frames / float(fps)
+    if render_duration > MAX_SCENE_SECONDS:
+        raise ValueError(
+            f"Beat voice track requires {render_duration:.2f}s. Split the storyboard into additional "
+            "camera shots before GPU dispatch; do not shorten or accelerate dialogue."
+        )
     return {
         "fps": fps,
         "speech_duration_seconds": round(sum(float(durations[item["segment_id"]]) for item in segments), 4),
