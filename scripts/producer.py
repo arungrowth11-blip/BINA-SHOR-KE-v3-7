@@ -1889,7 +1889,10 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                 voice_first.write_silence_wav(audio_path, max(2.5, planned_scene))
                 audio_duration = voice_first.wav_duration(audio_path)
             else:
-                audio_duration = voice_first.assemble_dialogue_wav(line_paths, audio_path)
+                audio_duration = voice_first.assemble_dialogue_wav(
+                    line_paths, audio_path,
+                    leading_silence_seconds=voice_first.HEAD_HANDLE_SECONDS,
+                )
             total_voice_seconds += spoken_seconds
         else:
             # Backward compatibility for an older pending manifest or a hand-authored test concept.
