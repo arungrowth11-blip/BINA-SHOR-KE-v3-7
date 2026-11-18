@@ -61,6 +61,8 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertEqual(body.count(expected), 2)
         self.assertIn('Quick remote Kaggle status check (minimal CLI only)', body)
         self.assertIn('Install dependencies and configure private Kaggle CLI', body)
+        director = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
+        self.assertIn('python -m pip install --disable-pip-version-check "six>=1.16.0,<2" kaggle', director)
 
     def test_scene6_voiceover_repair_is_strictly_guarded_and_reuses_existing_scenes(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')

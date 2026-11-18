@@ -84,7 +84,7 @@ jobs:
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
           if [[ "$RUN_MODE" != "live-tts-smoke" ]]; then
-            python -m pip install --disable-pip-version-check kaggle
+            python -m pip install --disable-pip-version-check "six>=1.16.0,<2" kaggle
           fi
 
       - name: Run logic tests
