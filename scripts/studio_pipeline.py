@@ -105,10 +105,14 @@ def archive_completed_qa_rejection(pending: dict, reason: str) -> dict:
 
     pending['status'] = 'qa_rejected'
     pending['qa_rejection_reason'] = reason
+    try:
+        archive_location = archive_path.relative_to(ROOT).as_posix()
+    except ValueError:
+        archive_location = str(archive_path)
     pending['finalization_resolution'] = {
         'status': 'archived_terminal_qa_rejection',
         'resolved_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
-        'archive_path': str(archive_path.relative_to(ROOT)),
+        'archive_path': archive_location,
         'kaggle_kernel_id': kernel_id,
         'verified_kaggle_status': remote_status,
         'new_gpu_dispatch_required': False,
