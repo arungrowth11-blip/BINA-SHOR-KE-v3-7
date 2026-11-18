@@ -25,19 +25,27 @@ The character registry stores metadata only. Binary Blender rigs, meshes, textur
 
 ## Speaker voice profiles
 
-The initial mapping is a starting cast palette, not a promise that a model voice will sound exactly the listed age. Audition Hindi output before promoting any mapping:
+The mapping is a controlled casting rule, not an age guarantee from the model. Select the character's visible age first; the same canonical age band determines both the visual-age anchor and the TTS profile. The final shot prompt receives this immutable age anchor. An explicit profile that conflicts with gender/age metadata is rejected before TTS or GPU dispatch. Voice timbre still requires human audition:
 
 | Profile ID | Gemini voice | Intended direction |
 |---|---|---|
 | hi_narrator_kore | Kore | Restrained narrator |
-| hi_male_young_puck | Puck | Young adult masculine |
-| hi_female_young_leda | Leda | Young adult feminine |
-| hi_male_adult_charon | Charon | Mature masculine |
-| hi_female_adult_aoede | Aoede | Mature feminine |
-| hi_male_older_algenib | Algenib | Older masculine, slightly gravelly |
-| hi_female_older_gacrux | Gacrux | Older feminine, measured |
+| hi_male_young_puck | Puck | Young adult masculine (18–29 visual band) |
+| hi_female_young_leda | Leda | Young adult feminine (18–29 visual band) |
+| hi_male_adult_charon | Charon | Adult masculine (30–54 visual band) |
+| hi_female_adult_aoede | Aoede | Adult feminine (30–54 visual band) |
+| hi_male_older_algenib | Algenib | Older adult / elder masculine (55+ visual bands) |
+| hi_female_older_gacrux | Gacrux | Older adult / elder feminine (55+ visual bands) |
 
 Voice gender/character direction and actual Hindi acting quality require a human listening test. A text transcription pass is not a naturalness or acting test.
+
+### Age-to-voice lock
+
+- The normalized age band is the source of truth for both the canonical visual-age description and the voice profile. The final storyboard receives that same immutable age anchor with the cast and each speaking turn.
+- Adult feminine characters use Aoede. Gacrux is reserved for visibly older-adult/elder feminine characters; an adult woman must not be given an older-sounding profile just because it is available.
+- The male profiles follow the same age bands: Puck for young adults, Charon for adults, and Algenib for older adults/elders.
+- Child and teen characters may appear as silent characters, with their visible age preserved. No child/teen Hindi TTS profile has passed qualification; assigning dialogue to them is rejected rather than silently using an adult voice.
+- Explicit voice-profile overrides that conflict with the character's age/gender metadata fail closed before speaker audio, storyboard finalization or GPU dispatch. If the visual age changes, cast metadata and voice must be regenerated together.
 
 ## Character identity and reuse
 
@@ -92,13 +100,13 @@ The feature-branch mode `live-tts-smoke` in the existing `.github/workflows/week
 
 1. In GitHub Actions, select **BINA SHOR KE — Director and AI Reel Dispatch**, choose branch `feature/voice-first-3d-foundation`, then choose mode `live-tts-smoke`.
 2. Run it only after confirming that the configured Gemini project/key is on the Free Tier and paid billing is disabled. The required confirmation input defaults to false.
-3. This mode skips FFmpeg/font setup and Kaggle installation, then calls the same production adapter, `producer.tts_wav`, for two short Hindi samples using the Puck and Gacrux profiles. It does not plan a Reel, push a Kaggle kernel, run Blender, or contact Telegram/Facebook.
-4. Download the `bina-shor-ke-live-tts-<run>` artifact. It contains `arjun_puck.wav`, `meera_gacrux.wav`, and `report.json` when both samples succeed. The report records the model, WAV format, duration, signal level, file size and SHA-256.
-5. Listen to both files and record a separate human decision for pronunciation, naturalness, voice distinction, emotion and audio artefacts. A successful workflow proves only live API response and machine WAV checks; it does not pass the human listening gate.
+3. This mode skips FFmpeg/font setup and Kaggle installation, then calls the same production adapter, `producer.tts_wav`, for two short Hindi samples using the Puck and Aoede profiles (young adult masculine + adult feminine). It does not plan a Reel, push a Kaggle kernel, run Blender, or contact Telegram/Facebook.
+4. Download the `bina-shor-ke-live-tts-<run>` artifact. It contains `arjun_puck.wav`, `meera_aoede.wav`, and `report.json` when both samples succeed. The report records the model, WAV format, duration, signal level, file size and SHA-256.
+5. Listen to both files and compare each voice against the character's visible age in the storyboard/reference frame. Record accept/reject, pronunciation, naturalness, voice distinction, emotion and any age mismatch. A successful workflow proves only live API response and machine WAV checks; it does not pass the human listening gate.
 
 The same guarded test can be run locally with `python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke` after installing `requirements.txt` and setting `GEMINI_API_KEY`. The explicit flag is required; it must not be used unless the Gemini project/key is on the Free Tier and paid billing is disabled.
 
-**Qualification status:** adding this mode does not itself mean TTS has been auditioned. Until a successful live run artifact is produced and both samples are human-reviewed, TTS remains **blocked pending live run and listening review**. Do not launch `plan-one` or `plan-week` as a substitute for this gate.
+**Qualification status:** adding this mode does not itself mean TTS has been auditioned. Until a successful live run artifact is produced and both age-aligned samples are human-reviewed, TTS remains **blocked pending live run and listening review**. Do not launch `plan-one` or `plan-week` as a substitute for this gate.
 
 ## Release-readiness evidence register
 
@@ -108,7 +116,7 @@ Last repository verification: 2026-11-18, PR head `b24a7896371f9a7912488af046a22
 |---|---|---|
 | Offline code, regression tests and workflow syntax | **Verified pass** — GitHub Offline Quality Gates run #47 completed successfully: compileall, 152 unit tests and all six workflow YAML files passed. | Re-run automatically on every PR head update; investigate any new failure from its logs. |
 | Live Gemini Hindi TTS | **Implemented, live run blocked** — the real adapter is wired into `live-tts-smoke`; offline tests cover format, silence rejection and report integrity. No live audio has yet been generated. | Manually run the existing Director/AI Reel Dispatch workflow on this feature branch with mode `live-tts-smoke`, after confirming Free Tier and disabled paid billing. Download and listen to both WAVs. |
-| Human voice approval | **Not performed** — machine format/non-silence checks cannot judge Hindi pronunciation, naturalness or acting. | Listen to `arjun_puck.wav` and `meera_gacrux.wav`; record accept/reject and specific defects. |
+| Human voice approval | **Not performed** — machine format/non-silence checks cannot judge Hindi pronunciation, naturalness or acting. | Listen to `arjun_puck.wav` and `meera_aoede.wav`; record accept/reject and specific defects. |
 | Wan2.2 variable-duration Kaggle render | **Not yet verified live** — frame/timing logic and workflow orchestration pass offline tests, but no real Kaggle worker result is attached to this head. | After TTS approval, run exactly one `plan-one` Reel. Confirm Kaggle job identity/status, six expected scene clips, manifest SHA locks, measured durations, final technical/visual QA and Telegram review package. Do not launch a 3-Reel week before one-Reel qualification. |
 | Blender Kaggle pilot | **Blocked: execution path missing** — `scripts/blender_pilot.py` is a real isolated Blender script, but the current Kaggle worker and GPU workflows contain no Blender installation or launch step. | Build a separate, isolated Kaggle Blender runner/job that installs or verifies Blender, supplies the two validated WAVs, renders the pilot, and returns MP4 + runtime/environment diagnostics. Then perform human visual review. Do not replace Wan2.2. |
 | Human visual/video review | **Not performed** — no actual Blender/Kaggle pilot render or end-to-end Reel is available for review. | Review framing, anatomy, eye-lines, character consistency, mouth timing, lighting, motion artefacts and 9:16 composition after a real render exists. |
