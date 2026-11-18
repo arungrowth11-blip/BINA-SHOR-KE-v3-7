@@ -143,7 +143,7 @@ def restore_checkpoint_dataset(result_manifest: dict):
         restored.append({
             'reel_id': reel_id, 'scene_index': scene_index,
             'path': str(dest.relative_to(WORK)), 'bytes': dest.stat().st_size,
-            'duration_seconds_target': 81/24, 'generation_elapsed_seconds': float(item.get('generation_elapsed_seconds', 0) or 0),
+            'duration_seconds_target': float(target_frames) / 24.0, 'generation_elapsed_seconds': float(item.get('generation_elapsed_seconds', 0) or 0),
             'prompt_id': item.get('prompt_id'), 'restored_from_checkpoint': True,
         })
     result_manifest['scenes'].extend(restored)
@@ -358,6 +358,18 @@ def shot_coverage_instruction(scene_index, total_scenes):
 def build_api_workflow(objects, beat, story, scene_index, prefix):
     prompt_text = str(beat['video_prompt']).strip()
     bible = str(story.get('visual_bible', '')).strip()
+    voice_timing = beat.get('voice_timing') if isinstance(beat.get('voice_timing'), dict) else {}
+    target_frames = beat.get('target_frames', voice_timing.get('target_frames', 81))
+    if isinstance(target_frames, bool) or not isinstance(target_frames, int):
+        raise ValueError(f"Scene {scene_index} target_frames must be an integer.")
+    if target_frames < 61 or target_frames > 193 or (target_frames - 1) % 4:
+        raise ValueError(
+            f"Scene {scene_index} target_frames={target_frames} is outside Wan's qualified "
+            "61..193 frame, 4n+1 window. Dialogue must be re-storyboarded; never shortened."
+        )
+    fps = int(voice_timing.get('fps', 24))
+    if fps != 24:
+        raise ValueError("Voice-first Wan scenes must use the qualified 24 FPS timeline.")
     total_scenes = len(story.get('beats', [])) or 6
     coverage = shot_coverage_instruction(scene_index, total_scenes)
     style = (
@@ -386,7 +398,7 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     g['6'] = node_prompt(objects, 'CLIPTextEncode', {'text': full_prompt, 'clip': ['38', 0]})
     g['7'] = node_prompt(objects, 'CLIPTextEncode', {'text': NEGATIVE, 'clip': ['38', 0]})
     g['55'] = node_prompt(objects, 'Wan22ImageToVideoLatent', {
-        'width': 704, 'height': 1280, 'length': 81, 'batch_size': 1, 'vae': ['39', 0]
+        'width': 704, 'height': 1280, 'length': target_frames, 'batch_size': 1, 'vae': ['39', 0]
     })
     # The ComfyUI API KSampler schema exposes `seed` but not the UI-only
     # `control_after_generate` widget value. Determinism is already guaranteed by
@@ -510,7 +522,7 @@ def main():
                 transcode_scene(source, final_out)
                 result_manifest['scenes'].append({
                     'reel_id': reel_id, 'scene_index': i, 'path': str(final_out.relative_to(WORK)),
-                    'bytes': final_out.stat().st_size, 'duration_seconds_target': 81/24,
+                    'bytes': final_out.stat().st_size, 'duration_seconds_target': target_frames / 24.0,
                     'generation_elapsed_seconds': round(time.monotonic() - scene_started, 2),
                     'prompt_id': prompt_id, 'comfy_history_status': history.get('status', {}),
                 })
