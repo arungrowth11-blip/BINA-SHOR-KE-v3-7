@@ -778,6 +778,92 @@ class StudioPipelineTests(unittest.TestCase):
             finally:
                 studio_pipeline.PENDING = old_pending
 
+    def test_terminal_end_hold_qa_failure_is_archived_after_kaggle_complete(self):
+        old_pending = studio_pipeline.PENDING
+        old_data = studio_pipeline.DATA
+        with tempfile.TemporaryDirectory() as folder:
+            data_dir = Path(folder) / "data"
+            studio_pipeline.DATA = data_dir
+            studio_pipeline.PENDING = data_dir / "pending_gpu_job.json"
+            pending = {
+                "job_id": "job-qa-1",
+                "status": "finalize_failed",
+                "kaggle_kernel_id": "owner/worker",
+                "finalize_error": (
+                    "RuntimeError: AI scene needs a 1.34s end hold, "
+                    "above the 1.20s quality limit; regenerate a longer scene or shorten the narration."
+                ),
+                "manifest": {
+                    "job_id": "job-qa-1",
+                    "reels": [{"reel_id": "reel-1", "beats": [{}, {}, {}, {}, {}, {}]}],
+                },
+                "reels": [{"reel_id": "reel-1", "delivery_status": "planned"}],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, pending)
+            try:
+                with patch.object(
+                    studio_pipeline, "kaggle_status",
+                    return_value=("COMPLETE", "KernelWorkerStatus.COMPLETE"),
+                ) as status:
+                    resolved = studio_pipeline.archive_completed_qa_rejection(
+                        pending,
+                        studio_pipeline.terminal_finalization_qa_reason(pending),
+                    )
+                status.assert_called_once_with("owner/worker")
+                self.assertEqual(resolved["status"], "qa_rejected")
+                self.assertEqual(resolved["finalization_resolution"]["verified_kaggle_status"], "COMPLETE")
+                archive = data_dir / "job_archive" / "job-qa-1.json"
+                archived = studio_pipeline.load_json(archive)
+                self.assertEqual(archived["status"], "finalize_failed")
+                self.assertIn("1.34s end hold", archived["finalize_error"])
+                self.assertEqual(archived["archive_metadata"]["verified_kaggle_status"], "COMPLETE")
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.DATA = old_data
+
+    def test_terminal_qa_failure_is_not_archived_when_kaggle_is_not_complete(self):
+        old_pending = studio_pipeline.PENDING
+        old_data = studio_pipeline.DATA
+        with tempfile.TemporaryDirectory() as folder:
+            data_dir = Path(folder) / "data"
+            studio_pipeline.DATA = data_dir
+            studio_pipeline.PENDING = data_dir / "pending_gpu_job.json"
+            pending = {
+                "job_id": "job-qa-2",
+                "status": "finalize_failed",
+                "kaggle_kernel_id": "owner/worker",
+                "finalize_error": (
+                    "RuntimeError: AI scene needs a 1.34s end hold, above the 1.20s quality limit."
+                ),
+                "manifest": {
+                    "reels": [{"reel_id": "reel-2", "beats": [{}, {}, {}, {}, {}, {}]}],
+                },
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, pending)
+            try:
+                with patch.object(
+                    studio_pipeline, "kaggle_status",
+                    return_value=("RUNNING", "KernelWorkerStatus.RUNNING"),
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "keeping the pending lock"):
+                        studio_pipeline.archive_completed_qa_rejection(
+                            pending,
+                            studio_pipeline.terminal_finalization_qa_reason(pending),
+                        )
+                current = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(current["status"], "finalize_failed")
+                self.assertFalse((data_dir / "job_archive" / "job-qa-2.json").exists())
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.DATA = old_data
+
+    def test_unknown_finalization_failure_is_not_classified_as_terminal_qa_rejection(self):
+        pending = {
+            "status": "finalize_failed",
+            "finalize_error": "RuntimeError: Telegram API timeout while sending delivery message.",
+        }
+        self.assertEqual(studio_pipeline.terminal_finalization_qa_reason(pending), "")
+
     def test_offline_graph_has_native_t2v_shape(self):
         self.assertEqual(studio_pipeline.self_test(), 0)
 
