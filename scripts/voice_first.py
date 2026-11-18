@@ -168,6 +168,16 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
         char["age_band"] = normalise_age_band(char.get("age_band") or "adult")
         char["visual_age_description"] = visual_age_description(char["age_band"])
         requested_profile = str(char.get("voice_profile_id") or "").strip()
+        if requested_profile and requested_profile not in VOICE_PROFILES:
+            # Models sometimes return the Gemini display voice (for example "Puck")
+            # instead of the canonical, age-bound profile ID. Accept only an exact
+            # display-name alias here; the age/gender gate below still decides whether
+            # that voice is valid for this character.
+            display_aliases = {
+                profile["gemini_voice"].casefold(): profile_id
+                for profile_id, profile in VOICE_PROFILES.items()
+            }
+            requested_profile = display_aliases.get(requested_profile.casefold(), requested_profile)
         if char["age_band"] in {"child", "teen"}:
             if requested_profile:
                 raise ValueError(
