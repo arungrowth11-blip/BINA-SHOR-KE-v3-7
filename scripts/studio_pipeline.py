@@ -37,6 +37,18 @@ def configured_kaggle_slug(value=None) -> str:
 
 KAGGLE_SLUG = configured_kaggle_slug()
 
+# Invoke Kaggle through the exact interpreter running this pipeline. This avoids
+# PATH/shebang drift between pip's Python and a stale global `kaggle` launcher.
+KAGGLE_CLI_BOOTSTRAP = (
+    "import sys; from kaggle.cli import main; "
+    "sys.argv = ['kaggle', *sys.argv[1:]]; main()"
+)
+
+
+def kaggle_cli_command(*arguments: str) -> list[str]:
+    return [sys.executable, '-c', KAGGLE_CLI_BOOTSTRAP, *arguments]
+
+
 ACTIVE_GPU_STATES = {
     'dispatching', 'dispatch_unknown', 'gpu_running', 'gpu_complete',
     'finalizing', 'finalize_failed', 'gpu_checkpoint_saved',
@@ -433,7 +445,7 @@ def plan_week(reel_count: int = 3) -> int:
         kernel_dir = build_kaggle_kernel(manifest)
         configure_kaggle_cli()
         push_started = True
-        result = subprocess.run(['kaggle', 'kernels', 'push', '-p', str(kernel_dir)], text=True, capture_output=True, timeout=900)
+        result = subprocess.run(kaggle_cli_command('kernels', 'push', '-p', str(kernel_dir)), text=True, capture_output=True, timeout=900)
         console = (result.stdout or '') + '\n' + (result.stderr or '')
         if result.returncode:
             raise RuntimeError('Kaggle kernel push returned a non-zero exit code: ' + console[-3000:])
@@ -481,7 +493,7 @@ def plan_week(reel_count: int = 3) -> int:
 
 def kaggle_status(kernel_id: str) -> tuple[str, str]:
     configure_kaggle_cli()
-    p = subprocess.run(['kaggle', 'kernels', 'status', kernel_id], text=True, capture_output=True, timeout=180)
+    p = subprocess.run(kaggle_cli_command('kernels', 'status', kernel_id), text=True, capture_output=True, timeout=180)
     output = (p.stdout or '') + '\n' + (p.stderr or '')
     if p.returncode:
         lower = output.lower()
