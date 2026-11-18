@@ -1,7 +1,7 @@
 {
   "job_id": "20261031_115742",
   "created_at_ist": "2026-10-31T11:59:19+05:30",
-  "status": "finalize_failed",
+  "status": "qa_rejected",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261031_115742",
@@ -300,5 +300,14 @@
     "final_qa_rejection_reason": ""
   },
   "finalize_error": "RuntimeError: AI scene needs a 1.34s end hold, above the 1.20s quality limit; regenerate a longer scene or shorten the narration.",
-  "finalize_failed_at_ist": "2026-11-18T08:40:23+05:30"
+  "finalize_failed_at_ist": "2026-11-18T08:40:23+05:30",
+  "qa_rejection_reason": "RuntimeError: AI scene needs a 1.34s end hold, above the 1.20s quality limit; regenerate a longer scene or shorten the narration.",
+  "finalization_resolution": {
+    "status": "archived_terminal_qa_rejection",
+    "resolved_at_ist": "2026-11-18T22:31:08+05:30",
+    "archive_path": "data/job_archive/20261031_115742.json",
+    "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
+    "verified_kaggle_status": "COMPLETE",
+    "new_gpu_dispatch_required": false
+  }
 }
