@@ -70,6 +70,13 @@ class LiveTtsSmokeValidationTests(unittest.TestCase):
             self.assertEqual(json.loads(path.read_text(encoding="utf-8"))["note"], "हिंदी")
             self.assertFalse(path.with_suffix(".json.tmp").exists())
 
+    def test_live_audition_uses_young_male_and_adult_female_profiles(self):
+        samples = {sample["sample_id"]: sample for sample in tts_smoke_test.SAMPLES}
+        self.assertEqual(samples["arjun_young_male"]["profile_id"], "hi_male_young_puck")
+        self.assertEqual(samples["meera_adult_female"]["profile_id"], "hi_female_adult_aoede")
+        self.assertEqual(samples["meera_adult_female"]["filename"], "meera_aoede.wav")
+        self.assertNotIn("older", samples["meera_adult_female"]["profile_id"])
+
     def test_error_output_redacts_configured_api_key(self):
         key = "AIza0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         previous = tts_smoke_test.producer.GEMINI_API_KEY
