@@ -323,7 +323,7 @@ def assemble_dialogue_wav(
             chunks.append(source.readframes(source.getnframes()))
     assert params is not None
     silence = b"\x00\x00" * round(gap_seconds * params.framerate)
-    combined = bytearray(b"\\x00\\x00" * round(leading_silence_seconds * params.framerate))
+    combined = bytearray(b"\x00\x00" * round(leading_silence_seconds * params.framerate))
     for index, chunk in enumerate(chunks):
         if index:
             combined.extend(silence)
