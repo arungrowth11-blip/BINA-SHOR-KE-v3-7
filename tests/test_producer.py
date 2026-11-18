@@ -154,7 +154,11 @@ class FactoryLogicTests(unittest.TestCase):
             )
         self.assertEqual(len(result["beats"]), 6)
         self.assertIn("exactly 6 beats", mocked.call_args.args[1])
-        self.assertIn(feedback, mocked.call_args.args[1])
+        prompt = mocked.call_args.args[1]
+        self.assertIn(feedback, prompt)
+        self.assertIn("young_adult male=hi_male_young_puck", prompt)
+        self.assertIn("adult male=hi_male_adult_charon", prompt)
+        self.assertIn("Never put the Gemini display name", prompt)
 
     def test_transient_provider_outage_stops_redundant_second_candidate(self):
         failure = RuntimeError(
