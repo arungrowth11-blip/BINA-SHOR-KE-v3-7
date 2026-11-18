@@ -272,6 +272,8 @@ def plan_week(reel_count: int = 3) -> int:
         reel_id = f"reel_{i+1:02d}_{job_id[-6:]}"
         concept['reel_id'] = reel_id
         concept = prepare_voice_first_plan(concept, reel_id)
+        # Create the final shot prompts only after all speaker WAV durations are measured.
+        concept = producer.generate_voice_aware_storyboard(concept)
         concept['editorial_review'] = concept.get('editorial_review') or {
             'scores': review.get('scores', {}), 'approved': review.get('approved', False)
         }
@@ -279,8 +281,12 @@ def plan_week(reel_count: int = 3) -> int:
         for j, beat in enumerate(beats, start=1):
             # Model text rendering is unreliable. On-screen Hindi text is always added by FFmpeg after generation.
             prompt = str(beat.get('video_prompt', '')).strip()
-            if len(prompt) < 45:
-                raise RuntimeError(f"Reel {i+1}, scene {j}: missing a useful cinematic video prompt. No GPU run was queued.")
+            prompt_words = len(prompt.split())
+            if not 55 <= prompt_words <= 180 or len(prompt) > 1600:
+                raise RuntimeError(
+                    f"Reel {i+1}, scene {j}: final voice-aware shot prompt is invalid "
+                    f"({prompt_words} words / {len(prompt)} characters). No GPU run was queued."
+                )
             beat['scene_index'] = j
         planned.append({
             'reel_id': reel_id,
