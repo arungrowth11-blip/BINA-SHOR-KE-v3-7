@@ -11,7 +11,7 @@ import math
 import re
 import wave
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 FPS = 24
 WAN_FRAME_MULTIPLE = 4
@@ -54,7 +54,7 @@ VOICE_PROFILES: dict[str, dict[str, str]] = {
     },
 }
 DEFAULT_VOICE_PROFILE_ID = "hi_narrator_kore"
-_CHARACTER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
+_CHARACTER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 
 
 def infer_voice_profile(gender_presentation: str, age_band: str) -> str:
@@ -131,9 +131,11 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
     # Character IDs are namespaced by story so generic labels such as "protagonist"
     # never overwrite an unrelated person's saved identity. Explicit library reuse is
     # the only way to retain an existing ID.
-    story_seed = hashlib.sha256(
-        (str(concept.get("title", "")) + "|" + str(concept.get("theme", ""))).encode("utf-8")
-    ).hexdigest()[:8]
+    story_identity = str(
+        concept.get("story_instance_id") or concept.get("reel_id")
+        or (str(concept.get("title", "")) + "|" + str(concept.get("theme", "")))
+    )
+    story_seed = hashlib.sha256(story_identity.encode("utf-8")).hexdigest()[:8]
     remap: dict[str, str] = {}
     for char in clean_characters:
         original_id = char["character_id"]
@@ -145,6 +147,7 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
         remap[original_id] = final_id
         char["character_id"] = final_id
     characters_by_id = {char["character_id"]: char for char in clean_characters}
+    seen_segment_ids: set[str] = set()
     for beat_index, beat in enumerate(beats, start=1):
         if not isinstance(beat, dict):
             raise ValueError(f"Beat {beat_index} must be an object.")
@@ -174,6 +177,11 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             if not text:
                 raise ValueError(f"Beat {beat_index} line {line_index} has empty speech text.")
             segment["segment_id"] = str(segment.get("segment_id") or f"beat_{beat_index:02d}_line_{line_index:02d}")
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,80}", segment["segment_id"]):
+                raise ValueError(f"Beat {beat_index} line {line_index} has an invalid segment_id.")
+            if segment["segment_id"] in seen_segment_ids:
+                raise ValueError(f"Duplicate speech segment id: {segment['segment_id']}")
+            seen_segment_ids.add(segment["segment_id"])
             segment["speaker_id"] = speaker_id
             segment["text"] = text
             segment["emotion"] = str(segment.get("emotion") or "natural, restrained delivery")
@@ -290,9 +298,12 @@ def assemble_dialogue_wav(
     destination: Path,
     *,
     gap_seconds: float = DEFAULT_DIALOGUE_GAP_SECONDS,
+    leading_silence_seconds: float = HEAD_HANDLE_SECONDS,
     minimum_duration_seconds: float = 0.0,
 ) -> float:
-    """Concatenate validated line WAVs and small natural gaps without tempo changes."""
+    """Concatenate validated line WAVs, a sync handle and natural dialogue gaps."""
+    if gap_seconds < 0 or leading_silence_seconds < 0:
+        raise ValueError("Dialogue gap and leading silence cannot be negative.")
     if not source_paths:
         write_silence_wav(destination, max(0.1, minimum_duration_seconds))
         return wav_duration(destination)
@@ -310,7 +321,7 @@ def assemble_dialogue_wav(
             chunks.append(source.readframes(source.getnframes()))
     assert params is not None
     silence = b"\x00\x00" * round(gap_seconds * params.framerate)
-    combined = bytearray()
+    combined = bytearray(b"\\x00\\x00" * round(leading_silence_seconds * params.framerate))
     for index, chunk in enumerate(chunks):
         if index:
             combined.extend(silence)
