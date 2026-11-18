@@ -26,6 +26,8 @@ TOOLCHAIN_LOCK = DATA / 'toolchain_lock.json'
 TZ = ZoneInfo('Asia/Kolkata')
 sys.path.insert(0, str(ROOT / 'scripts'))
 import producer  # noqa: E402
+import voice_first  # noqa: E402
+import character_library  # noqa: E402
 
 DEFAULT_KAGGLE_SLUG = 'bina-shor-ke-studio-video'
 
@@ -169,6 +171,60 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
             f'{estimated_hours:.1f} hours. Keep one-Reel jobs only; no paid fallback will be used.'
         )
 
+
+def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
+    """Generate and measure every character turn before spending any video-GPU time."""
+    if concept.get('screenplay_schema_version') != 2:
+        voice_first.normalise_screenplay(concept)
+    characters = concept.get('characters', [])
+    if not characters:
+        raise RuntimeError('Voice-first screenplay has no cast; refusing GPU dispatch.')
+    # Persist identity, appearance and voice metadata independently of any one Reel.
+    # Binary .blend/texture assets are added only after the 3D pilot proves its asset pipeline.
+    for character in characters:
+        character_library.upsert_character(character)
+
+    with tempfile.TemporaryDirectory(prefix='bsk-voice-preflight-') as temp_root:
+        temp_root = Path(temp_root)
+        for beat_index, beat in enumerate(concept['beats'], start=1):
+            segments = beat.get('speech_segments')
+            if not isinstance(segments, list):
+                raise RuntimeError(f'Beat {beat_index} has no structured speech_segments array.')
+            measured = {}
+            for line_index, segment in enumerate(segments, start=1):
+                segment_id = str(segment.get('segment_id') or f'beat_{beat_index:02d}_line_{line_index:02d}')
+                segment['segment_id'] = segment_id
+                voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
+                voice_direction = voice_first.segment_voice_direction(segment)
+                destination = temp_root / f'{reel_id}_{segment_id}_{segment.get("speaker_id", "speaker")}.wav'
+                # Cache key includes transcript, performance direction and voice identity.
+                producer.ensure_tts_wav(
+                    str(segment['text']), destination,
+                    voice_direction=voice_direction, voice_name=voice_name,
+                )
+                duration = voice_first.wav_duration(destination)
+                segment['duration_seconds'] = round(duration, 4)
+                measured[segment_id] = duration
+                log(f'[{concept.get("title", reel_id)}] Voice locked: {segment_id} / {voice_name} / {duration:.2f}s')
+            timing = voice_first.build_scene_timing_plan(segments, measured)
+            beat['voice_timing'] = timing
+            beat['target_frames'] = timing['target_frames']
+            log(
+                f'[{concept.get("title", reel_id)}] Scene {beat_index} timing locked: '
+                f'{timing["target_frames"]} frames / {timing["target_duration_seconds"]:.2f}s; '
+                f'{len(segments)} speaker turn(s), no dialogue truncation.'
+            )
+    concept['voice_first_plan'] = {
+        'status': 'voice_measured_before_video',
+        'audio_model': producer.GEMINI_TTS_MODEL,
+        'cache_key_version': 2,
+        'scene_count': len(concept['beats']),
+        'dialogue_truncated': False,
+        'video_duration_source': 'measured_voice_audio',
+    }
+    return concept
+
+
 def plan_week(reel_count: int = 3) -> int:
     if reel_count not in (1, 3):
         raise ValueError('This zero-spend workflow supports a one-Reel test or a 3-Reel weekly batch only.')
@@ -213,6 +269,7 @@ def plan_week(reel_count: int = 3) -> int:
         concept, review = producer.acquire_approved_concept(local_history, pillar, slot, i)
         reel_id = f"reel_{i+1:02d}_{job_id[-6:]}"
         concept['reel_id'] = reel_id
+        concept = prepare_voice_first_plan(concept, reel_id)
         concept['editorial_review'] = concept.get('editorial_review') or {
             'scores': review.get('scores', {}), 'approved': review.get('approved', False)
         }
@@ -231,7 +288,13 @@ def plan_week(reel_count: int = 3) -> int:
             'planned_publish_at': slot.isoformat(),
             'planned_publish_label': slot.strftime('%a %d %b, %I:%M %p IST'),
             'concept': concept,
-            'beats': [{'video_prompt': b['video_prompt'], 'visual_direction': b['visual_direction'], 'scene_index': b['scene_index']} for b in beats],
+            'beats': [{
+                'video_prompt': b['video_prompt'],
+                'visual_direction': b['visual_direction'],
+                'scene_index': b['scene_index'],
+                'voice_timing': b['voice_timing'],
+                'target_frames': b['target_frames'],
+            } for b in beats],
             'delivery_status': 'planned',
         })
         local_history.setdefault('topics', []).append({
@@ -253,6 +316,8 @@ def plan_week(reel_count: int = 3) -> int:
         'created_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
         'status': 'dispatching',
         'toolchain_lock': toolchain_lock,
+        'screenplay_schema_version': 2,
+        'audio_before_video': True,
         'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader',
         'reels': [{
             'reel_id': r['reel_id'], 'title': r['title'], 'pillar': r['pillar'],
