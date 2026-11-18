@@ -312,6 +312,61 @@ class FactoryLogicTests(unittest.TestCase):
             self.assertIn("नया संदर्भ", content)
             self.assertIn("02 / 06", content)
 
+
+    def test_final_storyboard_is_generated_from_locked_speaker_audio_timeline(self):
+        prompt = "A vertical cinematic animated shot with two friends in a modest Indian kitchen. " + " ".join(
+            ["Show the correct speaker's natural mouth movement, the listener's reaction, expressive eyes, a measured camera move, realistic cloth, warm practical window light and consistent character appearance."] * 4
+        )
+        concept = {
+            "title": "दो दोस्तों की बात",
+            "visual_bible": "Consistent two-person character design, warm muted cinematic lighting.",
+            "characters": [
+                {"character_id": "story_12345678_arjun", "display_name": "अर्जुन", "appearance": "Young man in blue shirt.", "personality": "Impatient", "voice_profile_id": "hi_male_young_puck", "voice_direction": "Young masculine Hindi."},
+                {"character_id": "story_12345678_meera", "display_name": "मीरा", "appearance": "Older woman in green shawl.", "personality": "Patient", "voice_profile_id": "hi_female_older_gacrux", "voice_direction": "Mature feminine Hindi."},
+            ],
+            "voice_first_plan": {"status": "voice_measured_before_video"},
+            "beats": [],
+        }
+        for i in range(6):
+            sid = f"beat_{i+1:02d}_line_01"
+            speaker_id = concept["characters"][i % 2]["character_id"]
+            concept["beats"].append({
+                "visual_query": "two friends kitchen conversation",
+                "visual_direction": "A small misunderstanding becomes clear through a quiet response.",
+                "video_prompt": "Initial prompt, replaced after voice lock.",
+                "speech_segments": [{
+                    "segment_id": sid,
+                    "speaker_id": speaker_id,
+                    "text": "मैंने तुम्हारी बात सुनी थी।",
+                    "duration_seconds": 2.35,
+                }],
+                "voice_timing": {
+                    "timing_source": "measured_tts_wav_before_gpu",
+                    "target_duration_seconds": 2.625,
+                    "target_frames": 63,
+                    "fps": 24,
+                    "segments": [{
+                        "segment_id": sid,
+                        "speaker_id": speaker_id,
+                        "start_seconds": 0.08,
+                        "end_seconds": 2.43,
+                    }],
+                },
+            })
+        response = {"shots": [{"beat_index": i, "video_prompt": prompt} for i in range(1, 7)]}
+        with patch.object(producer, "text_json", return_value=response) as mocked:
+            result = producer.generate_voice_aware_storyboard(concept)
+        self.assertEqual(result["voice_aware_storyboard"]["status"], "generated_after_voice_lock")
+        self.assertEqual(result["beats"][0]["video_prompt"], prompt)
+        self.assertEqual(result["beats"][0]["speech_segments"][0]["text"], "मैंने तुम्हारी बात सुनी थी।")
+        self.assertEqual(result["beats"][0]["target_frames"] if "target_frames" in result["beats"][0] else result["beats"][0]["voice_timing"]["target_frames"], 63)
+        self.assertIn("actual_audio_duration_seconds", mocked.call_args.args[1])
+        self.assertIn("target_duration_seconds", mocked.call_args.args[1])
+
+    def test_final_storyboard_refuses_to_run_before_voice_lock(self):
+        with self.assertRaisesRegex(RuntimeError, "requires measured TTS audio"):
+            producer.generate_voice_aware_storyboard({"beats": [], "characters": []})
+
     def test_tts_payload_keeps_spoken_text_separate_and_wraps_pcm(self):
         raw_pcm = (b"\x01\x00" * 24000)  # 1 sec, 24 kHz, mono, signed 16-bit samples
         encoded = base64.b64encode(raw_pcm).decode("ascii")
