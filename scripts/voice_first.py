@@ -189,7 +189,10 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             char["voice_profile_id"] = expected_profile
             profile = resolve_voice_profile(expected_profile)
             char["gemini_voice"] = profile["gemini_voice"]
-            char["voice_direction"] = str(char.get("voice_direction") or profile["direction"])
+            # Voice timbre/age direction is authoritative from the locked profile.
+            # Character-specific emotion remains on each speech segment, not as a
+            # free-form override that could make an adult sound elderly (or vice versa).
+            char["voice_direction"] = profile["direction"]
         char["appearance"] = str(char.get("appearance") or "").strip()
         char["personality"] = str(char.get("personality") or "").strip()
         clean_characters.append(char)
