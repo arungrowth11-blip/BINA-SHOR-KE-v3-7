@@ -18,7 +18,7 @@ WAN_FRAME_MULTIPLE = 4
 MIN_SCENE_SECONDS = 2.5
 HEAD_HANDLE_SECONDS = 0.08
 TAIL_HANDLE_SECONDS = 0.08
-MAX_SCENE_SECONDS = 8.0
+MAX_SCENE_SECONDS = 8.1
 DEFAULT_DIALOGUE_GAP_SECONDS = 0.18
 
 # Voice names are current Gemini prebuilt voice IDs. The profile direction controls
