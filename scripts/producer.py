@@ -33,6 +33,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
+import voice_first
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output"
@@ -624,6 +625,8 @@ Return one JSON object with exactly these fields:
 Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 beats, target 22–32 seconds and 45–72 spoken Hindi words; don't stretch the story to hit a duration. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately. Return JSON only."""
 
     concept = text_json(system, user, temperature=0.85)
+    # Upgrade legacy narrator concepts or validate an explicit multi-speaker screenplay.
+    concept = voice_first.normalise_screenplay(concept)
     # Normalize stable required fields, then locally validate shape.
     concept["pillar"] = pillar
     concept["series_name"] = SERIES_BY_PILLAR[pillar]
@@ -672,6 +675,10 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
     invalid_lines = []
     for i, beat in enumerate(beats):
         if not isinstance(beat, dict):
+            continue
+        # Structured dialogue is validated as one complete screenplay below.
+        # Never rewrite or shorten individual turns merely to fit a fixed-duration clip.
+        if isinstance(beat.get("speech_segments"), list):
             continue
         voiceover = beat.get("voiceover")
         if not isinstance(voiceover, str):
@@ -747,16 +754,35 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
     if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
         raise ValueError("Reel must contain exactly 6 beats (one cinematic shot per beat; weekly GPU budget is 18 shots max).")
     allowed_overlay_types = {"message", "note", "step", "contrast", "keyword"}
+    structured_script = all(isinstance(beat.get("speech_segments"), list) for beat in concept["beats"] if isinstance(beat, dict))
+    character_ids = {
+        str(item.get("character_id", "")) for item in concept.get("characters", [])
+        if isinstance(item, dict)
+    }
+    if structured_script and not character_ids:
+        raise ValueError("Structured screenplay requires at least one cast character.")
     for i, beat in enumerate(concept["beats"]):
-        beat.setdefault("voice_direction", "Natural, calm Hindi narration; restrained and conversational.")
-        for key in ("voiceover", "screen_text", "visual_query", "visual_direction", "video_prompt", "overlay_text", "overlay_type"):
+        beat.setdefault("voice_direction", "Natural Hindi; restrained and conversational.")
+        for key in ("screen_text", "visual_query", "visual_direction", "video_prompt", "overlay_text", "overlay_type"):
             if not isinstance(beat.get(key), str) or not beat[key].strip():
                 raise ValueError(f"Beat {i+1} misses {key}.")
+        if not structured_script and (not isinstance(beat.get("voiceover"), str) or not beat["voiceover"].strip()):
+            raise ValueError(f"Beat {i+1} misses voiceover.")
         if beat["overlay_type"] not in allowed_overlay_types:
             raise ValueError(f"Beat {i+1} has an unsupported overlay_type.")
-        spoken_words = len(beat["voiceover"].split())
-        if not 7 <= spoken_words <= 12:
-            raise ValueError(f"Beat {i+1} narration has {spoken_words} words; use 7–12 words so the spoken line fits a short cinematic shot.")
+        if structured_script:
+            if not isinstance(beat.get("speech_segments"), list):
+                raise ValueError(f"Beat {i+1} speech_segments must be a list.")
+            for line_index, segment in enumerate(beat["speech_segments"], start=1):
+                if not isinstance(segment, dict) or str(segment.get("speaker_id", "")) not in character_ids:
+                    raise ValueError(f"Beat {i+1} line {line_index} references an unknown speaker.")
+                if not isinstance(segment.get("text"), str) or not segment["text"].strip():
+                    raise ValueError(f"Beat {i+1} line {line_index} has no dialogue text.")
+            beat["voiceover"] = " ".join(segment["text"] for segment in beat["speech_segments"])
+        else:
+            spoken_words = len(beat["voiceover"].split())
+            if not 7 <= spoken_words <= 12:
+                raise ValueError(f"Beat {i+1} narration has {spoken_words} words; use 7–12 words so the spoken line fits a short cinematic shot.")
         if len(beat["screen_text"]) > 70 or len(beat["overlay_text"]) > 42:
             raise ValueError(f"Beat {i+1} text exceeds mobile-safe limits.")
         prompt_words = len(beat["video_prompt"].split())
@@ -790,7 +816,7 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
     concept["hashtags"] = [str(t).strip().replace(" ", "") for t in concept["hashtags"]]
     total_words = len(" ".join(b.get("voiceover", "") for b in concept["beats"]).split())
     if not 45 <= total_words <= 72:
-        raise ValueError(f"Voice-over has {total_words} words; the production range is 45–72 natural spoken words (target 48–60).")
+        raise ValueError(f"Complete screenplay has {total_words} spoken words; the production range is 45–72 natural Hindi words (target 48–60).")
     hook_word_count = len(str(concept["hook"]).split())
     if len(concept["hook"]) > 70 or not 3 <= hook_word_count <= 10:
         raise ValueError("Hook must be a clear 3–10-word first-screen line and under 70 characters.")
@@ -1023,10 +1049,18 @@ def download_file(url: str, destination: Path, max_bytes: int = 150 * 1024 * 102
         raise RuntimeError("Downloaded video is unexpectedly small or invalid.")
 
 
-def tts_wav(text: str, destination: Path, voice_direction: str | None = None) -> None:
-    """Generate Hindi speech using the free-tier TTS model and save valid 24 kHz mono WAV."""
+def tts_wav(
+    text: str,
+    destination: Path,
+    voice_direction: str | None = None,
+    voice_name: str | None = None,
+) -> None:
+    """Generate one speaker's Hindi turn using free-tier TTS and save 24 kHz mono WAV."""
     url = "https://generativelanguage.googleapis.com/v1beta/interactions"
     direction = (voice_direction or "").strip()
+    selected_voice = str(voice_name or TTS_VOICE).strip()
+    if not selected_voice:
+        raise ValueError("A non-empty Gemini TTS voice name is required.")
     speech_style = (
         "Natural Hindi; warm, grounded, restrained, clear diction. "
         "Line direction: " + direction[:120]
@@ -1044,7 +1078,7 @@ def tts_wav(text: str, destination: Path, voice_direction: str | None = None) ->
             }],
         }],
         "response_format": {"type": "audio", "mime_type": "audio/l16", "sample_rate": 24000},
-        "generation_config": {"speech_config": [{"voice": TTS_VOICE}]},
+        "generation_config": {"speech_config": [{"voice": selected_voice}]},
     }
     global _LAST_TTS_REQUEST_AT
     last_error = None
@@ -1110,13 +1144,19 @@ def _valid_tts_wav(path: Path) -> bool:
         return False
 
 
-def ensure_tts_wav(text: str, destination: Path, voice_direction: str | None = None) -> str:
+def ensure_tts_wav(
+    text: str,
+    destination: Path,
+    voice_direction: str | None = None,
+    voice_name: str | None = None,
+) -> str:
     """Reuse only a validated WAV whose SHA-256 sidecar matches this exact narration text.
 
     The repository-wide cache is restored by GitHub Actions so transient finalization
     retries do not regenerate identical voice lines and burn additional free-tier quota.
     """
-    cache_material = text + "\n[voice_direction=" + (voice_direction or "") + "]"
+    selected_voice = str(voice_name or TTS_VOICE).strip()
+    cache_material = text + "\n[voice_direction=" + (voice_direction or "") + "]\n[gemini_voice=" + selected_voice + "]"
     digest = hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
     sidecar_suffix = ".wav.sha256"
     cached_audio = TTS_CACHE_DIR / f"{digest}.wav"
@@ -1147,7 +1187,7 @@ def ensure_tts_wav(text: str, destination: Path, voice_direction: str | None = N
 
     destination.unlink(missing_ok=True)
     local_sidecar.unlink(missing_ok=True)
-    tts_wav(text, destination, voice_direction=voice_direction)
+    tts_wav(text, destination, voice_direction=voice_direction, voice_name=selected_voice)
     if not _valid_tts_wav(destination):
         raise RuntimeError("TTS result failed cache-format/duration validation.")
 
