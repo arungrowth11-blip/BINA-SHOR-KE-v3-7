@@ -602,7 +602,7 @@ Return one JSON object with exactly these fields:
 {{
   "title": "short distinct internal title",
   "characters": [
-    {{"character_id":"protagonist","display_name":"natural Hindi name","role":"protagonist|supporting|narrator","gender_presentation":"male|female|unspecified","age_band":"young_adult|adult|older_adult|elder","appearance":"specific visual identity, species if non-human, face/body/clothing anchors","personality":"brief behaviour traits","voice_profile_id":"hi_male_young_puck|hi_female_young_leda|hi_male_adult_charon|hi_female_adult_aoede|hi_male_older_algenib|hi_female_older_gacrux|hi_narrator_kore","voice_direction":"natural Hindi performance direction for this character"}}
+    {{"character_id":"protagonist","display_name":"natural Hindi name","role":"protagonist|supporting|narrator","gender_presentation":"male|female|unspecified","age_band":"child|teen|young_adult|adult|older_adult|elder","visual_age_description":"visible age anchor consistent with age_band; normalized by the pipeline","appearance":"specific visual identity and exact age-consistent face/body/clothing anchors","personality":"brief behaviour traits","voice_profile_id":"derive exactly: young_adult male=Puck/female=Leda; adult male=Charon/female=Aoede; older_adult or elder male=Algenib/female=Gacrux; narrator=Kore; child/teen=empty because no qualified age-appropriate voice is available","voice_direction":"natural Hindi performance direction for this character"}}
   ],
   "pillar": "{pillar}",
   "series_name": "one of the brand's three editorial series; it will be normalized from the pillar",
@@ -625,7 +625,9 @@ Return one JSON object with exactly these fields:
   "posting_note": "one sentence explaining the test hypothesis for this reel"
 }}
 
-Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 beats and 45–72 total spoken Hindi words. speech_segments is the source of truth; voiceover must be the exact joined text of those segments and may be empty only when speech_segments is empty. Never impose 7–12 words on each beat. Audio is generated before video; the video renderer reads measured audio duration. Do not compress or shorten dialogue to fit a generated clip. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately. Return JSON only."""
+Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 beats and 45–72 total spoken Hindi words. speech_segments is the source of truth; voiceover must be the exact joined text of those segments and may be empty only when speech_segments is empty. Never impose 7–12 words on each beat. Audio is generated before video; the video renderer reads measured audio duration. Do not compress or shorten dialogue to fit a generated clip. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately.
+
+CAST AGE/VOICE HARD GATE: visible age is selected first and is immutable. The age_band controls the canonical visual_age_description and the voice profile; the appearance description must visibly agree with it. Adult women use Aoede, not Gacrux. Gacrux is only for older-adult/elder women; apply the equivalent age mapping to male profiles. Child/teen characters may appear silently, but no speech segment may be assigned to them until a dedicated age-appropriate Hindi voice has been auditioned. Never make a child/teen sound adult, and never age a character up/down just to fit a voice. The pipeline rejects an explicit voice-profile mismatch before TTS/GPU work. Return JSON only."""
 
     concept = text_json(system, user, temperature=0.85)
     # Upgrade legacy narrator concepts or validate an explicit multi-speaker screenplay.
@@ -839,6 +841,7 @@ def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
             "personality": item.get("personality", ""),
             "gender_presentation": item.get("gender_presentation", "unspecified"),
             "age_band": item.get("age_band", "adult"),
+            "visual_age_description": item.get("visual_age_description") or voice_first.visual_age_description(item.get("age_band", "adult")),
             "voice_profile_id": item.get("voice_profile_id", ""),
             "voice_style": item.get("voice_direction", ""),
         }
@@ -858,6 +861,7 @@ def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
                 "speaker_id": segment.get("speaker_id"),
                 "speaker_name": speaker.get("display_name"),
                 "appearance": speaker.get("appearance"),
+                "visual_age_description": speaker.get("visual_age_description"),
                 "personality": speaker.get("personality"),
                 "voice_profile_id": speaker.get("voice_profile_id"),
                 "spoken_dialogue": segment.get("text"),
@@ -888,7 +892,9 @@ def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
         "micro-expressions and restrained gestures. For the listener, use a believable reaction without "
         "moving the mouth as if speaking. If there are multiple turns, plan a clear camera cut or deliberate "
         "shot composition that follows the turn order; the final editor will preserve the full audio timeline. "
-        "Use the visual bible and character appearance verbatim for continuity. One clear physical action per "
+        "Use the visual bible, canonical visual_age_description and character appearance verbatim for continuity. "
+        "The visible age/gender presentation of every speaker must match that speaker's locked voice profile; "
+        "never age a character up or down to fit a voice. One clear physical action per "
         "shot, plausible anatomy and physics, purposeful camera coverage, natural lighting and readable "
         "silhouette. Never put any readable text, subtitles, logo or watermark inside the generated video. "
         "Do not shorten any line or force every beat to the same length. Return valid JSON only."
@@ -910,6 +916,8 @@ Rules:
 - The video_prompt is final and must be 55–180 whitespace-separated words, <=1600 characters.
 - The measured target_duration_seconds and target_frames are authoritative; do not change them.
 - If a beat is silent, do not invent dialogue or fake speech mouth motion.
+- Keep every character's visible age exactly aligned with the canonical visual_age_description and age_band in CAST; never de-age or age-up a speaker.
+- Adult feminine speakers must look adult and use the adult profile; reserve older/elder appearance and Gacrux for older_adult/elder characters only.
 - Do not convert this story to a different genre or add characters merely to improve a shot.
 - Do not return or modify any Hindi script, dialogue, captions or voice metadata.
 Return JSON only."""
