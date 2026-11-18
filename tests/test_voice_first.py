@@ -43,7 +43,7 @@ class VoiceFirstTests(unittest.TestCase):
         concept = {
             "characters": [
                 {"character_id": "arjun", "display_name": "अर्जुन", "gender_presentation": "male", "age_band": "young_adult"},
-                {"character_id": "meera", "display_name": "मीरा", "gender_presentation": "female", "age_band": "older_adult"},
+                {"character_id": "meera", "display_name": "मीरा", "gender_presentation": "female", "age_band": "adult"},
             ],
             "beats": [{
                 "speech_segments": [
@@ -55,10 +55,56 @@ class VoiceFirstTests(unittest.TestCase):
         result = voice_first.normalise_screenplay(concept)
         lines = result["beats"][0]["speech_segments"]
         self.assertEqual(lines[0]["gemini_voice"], "Puck")
-        self.assertEqual(lines[1]["gemini_voice"], "Gacrux")
+        self.assertEqual(lines[1]["gemini_voice"], "Aoede")
+        self.assertEqual(result["characters"][1]["visual_age_description"], voice_first.visual_age_description("adult"))
         self.assertTrue(lines[0]["speaker_id"].endswith("_arjun"))
         self.assertTrue(lines[1]["speaker_id"].endswith("_meera"))
         self.assertEqual(result["beats"][0]["voiceover"], "तुमने मेरी बात सुनी ही नहीं। मैं जवाब देने से पहले सोच रही थी।")
+
+
+    def test_conflicting_explicit_voice_profile_is_rejected_against_visual_age(self):
+        concept = {
+            "characters": [{
+                "character_id": "meera", "display_name": "मीरा",
+                "gender_presentation": "female", "age_band": "adult",
+                "voice_profile_id": "hi_female_older_gacrux",
+            }],
+            "beats": [{"speech_segments": []} for _ in range(6)],
+        }
+        with self.assertRaisesRegex(ValueError, "requires voice_profile_id 'hi_female_adult_aoede'"):
+            voice_first.normalise_screenplay(concept)
+
+    def test_silent_child_keeps_child_visual_age_without_an_adult_voice(self):
+        concept = {
+            "characters": [{
+                "character_id": "child1", "display_name": "बच्चा",
+                "gender_presentation": "male", "age_band": "child",
+                "appearance": "A school-age child in a blue sweater.",
+            }],
+            "beats": [{"speech_segments": []} for _ in range(6)],
+        }
+        result = voice_first.normalise_screenplay(concept)
+        character = result["characters"][0]
+        self.assertEqual(character["age_band"], "child")
+        self.assertEqual(character["voice_profile_id"], "")
+        self.assertIn("child", character["visual_age_description"])
+
+    def test_child_speaker_fails_closed_without_a_qualified_child_voice(self):
+        concept = {
+            "characters": [{
+                "character_id": "child1", "display_name": "बच्चा",
+                "gender_presentation": "male", "age_band": "child",
+            }],
+            "beats": [{"speech_segments": [
+                {"speaker_id": "child1", "text": "मैं भी साथ चलूँगा।"}
+            ]} for _ in range(6)],
+        }
+        with self.assertRaisesRegex(ValueError, "no age-appropriate Hindi TTS profile is qualified"):
+            voice_first.normalise_screenplay(concept)
+
+    def test_teen_is_not_silently_cast_with_a_young_adult_voice(self):
+        with self.assertRaisesRegex(ValueError, "No age-appropriate Hindi TTS profile is qualified"):
+            voice_first.infer_voice_profile("female", "teen")
 
     def test_unknown_speaker_fails_closed(self):
         concept = {
