@@ -97,7 +97,7 @@ class StudioPipelineTests(unittest.TestCase):
                 output.setnchannels(1)
                 output.setsampwidth(2)
                 output.setframerate(24000)
-                output.writeframes(b"\\x00\\x00" * (3 * 24000))
+                output.writeframes(b"\x00\x00" * (3 * 24000))
 
         with patch.object(studio_pipeline.character_library, "upsert_character") as registry_write, \\
              patch.object(studio_pipeline.producer, "ensure_tts_wav", side_effect=fake_tts):
@@ -114,6 +114,57 @@ class StudioPipelineTests(unittest.TestCase):
             self.assertEqual(beat["voice_timing"]["speech_duration_seconds"], 3.0)
             self.assertEqual((beat["target_frames"] - 1) % 4, 0)
             self.assertGreaterEqual(beat["target_frames"] / 24.0, 3.0)
+
+
+    def test_wan_graph_uses_voice_measured_dynamic_frame_count(self):
+        runner = load_runner_module()
+        schema = {
+            'UnetLoaderGGUF': ['unet_name'],
+            'CLIPLoader': ['clip_name', 'type', 'device'],
+            'VAELoader': ['vae_name'],
+            'ModelSamplingSD3': ['model', 'shift'],
+            'CLIPTextEncode': ['text', 'clip'],
+            'Wan22ImageToVideoLatent': ['width', 'height', 'length', 'batch_size', 'vae', 'start_image'],
+            'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+            'VAEDecode': ['samples', 'vae'],
+            'CreateVideo': ['images', 'fps'],
+            'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
+        }
+        objects = {}
+        for node, keys in schema.items():
+            required = [key for key in keys if not (node == 'Wan22ImageToVideoLatent' and key == 'start_image')]
+            optional = ['start_image'] if node == 'Wan22ImageToVideoLatent' else []
+            objects[node] = {'input': {'required': {key: [] for key in required}, 'optional': {key: [] for key in optional}}}
+        beat = {
+            'video_prompt': 'Vertical cinematic shot of two friends in a small kitchen, natural acting, warm light, clear camera direction and realistic materials.',
+            'target_frames': 109,
+            'voice_timing': {'target_frames': 109, 'fps': 24},
+        }
+        story = {'reel_id': 'reel_voice_test', 'visual_bible': 'Same two characters, consistent wardrobe.', 'beats': [beat] * 6}
+        graph = runner.build_api_workflow(objects, beat, story, 1, 'bsk/reel_voice_test/scene_01')
+        self.assertEqual(graph['55']['inputs']['length'], 109)
+        self.assertEqual(graph['57']['inputs']['fps'], 24)
+
+    def test_wan_graph_rejects_invalid_frame_shape_and_unsupported_duration(self):
+        runner = load_runner_module()
+        schema = {
+            'UnetLoaderGGUF': ['unet_name'],
+            'CLIPLoader': ['clip_name', 'type', 'device'], 'VAELoader': ['vae_name'],
+            'ModelSamplingSD3': ['model', 'shift'], 'CLIPTextEncode': ['text', 'clip'],
+            'Wan22ImageToVideoLatent': ['width', 'height', 'length', 'batch_size', 'vae'],
+            'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+            'VAEDecode': ['samples', 'vae'], 'CreateVideo': ['images', 'fps'],
+            'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
+        }
+        objects = {node: {'input': {'required': {key: [] for key in keys}, 'optional': {}}} for node, keys in schema.items()}
+        story = {'reel_id': 'reel_voice_test', 'visual_bible': 'Same character.', 'beats': [{}] * 6}
+        base_prompt = 'Vertical cinematic scene with one clear action, same character and practical lighting.'
+        bad_shape = {'video_prompt': base_prompt, 'target_frames': 110, 'voice_timing': {'fps': 24}}
+        too_long = {'video_prompt': base_prompt, 'target_frames': 197, 'voice_timing': {'fps': 24}}
+        with self.assertRaisesRegex(ValueError, r'4n\+1'):
+            runner.build_api_workflow(objects, bad_shape, story, 1, 'bsk/test/scene_01')
+        with self.assertRaisesRegex(ValueError, '61..193'):
+            runner.build_api_workflow(objects, too_long, story, 1, 'bsk/test/scene_01')
 
     def test_kaggle_incomplete_does_not_match_complete(self):
         with patch.object(studio_pipeline, "configure_kaggle_cli"), patch.object(
