@@ -210,12 +210,22 @@ def run(output_dir: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
+        "--confirm-free-tier-only",
+        action="store_true",
+        help="Confirm the selected Gemini project/key is Free Tier and paid billing is disabled.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=ROOT / "artifacts" / "tts-smoke",
         help="Directory for the generated WAV samples and qualification report.",
     )
     args = parser.parse_args()
+    if not args.confirm_free_tier_only:
+        parser.error(
+            "Live TTS is opt-in. Pass --confirm-free-tier-only only after confirming "
+            "the Gemini project/key is Free Tier with paid billing disabled."
+        )
     return run(args.output_dir.resolve())
 
 
