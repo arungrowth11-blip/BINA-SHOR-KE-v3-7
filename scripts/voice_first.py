@@ -138,7 +138,8 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
     for char in clean_characters:
         original_id = char["character_id"]
         reuse_id = str(char.get("reuse_character_id") or "").strip().lower()
-        final_id = reuse_id if reuse_id else f"story_{story_seed}_{original_id}"[:48]
+        already_namespaced = original_id.startswith(f"story_{story_seed}_")
+        final_id = reuse_id if reuse_id else (original_id if already_namespaced else f"story_{story_seed}_{original_id}"[:48])
         if not _CHARACTER_ID.fullmatch(final_id):
             raise ValueError(f"Invalid reused character_id: {final_id!r}")
         remap[original_id] = final_id
