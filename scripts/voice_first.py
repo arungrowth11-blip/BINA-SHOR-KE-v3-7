@@ -58,14 +58,55 @@ _SOURCE_CHARACTER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,47}$")
 _CHARACTER_ID = re.compile(r"^[a-z][a-z0-9_-]{1,63}$")
 
 
+AGE_BAND_ALIASES = {
+    "child": "child",
+    "teen": "teen",
+    "young": "young_adult",
+    "young_adult": "young_adult",
+    "adult": "adult",
+    "older": "older_adult",
+    "older_adult": "older_adult",
+    "senior": "older_adult",
+    "elder": "elder",
+}
+VISUAL_AGE_DESCRIPTIONS = {
+    "child": "Visibly a child (under 13); preserve childlike proportions and do not age the character up.",
+    "teen": "Visibly a teenager (13–17); do not depict the character as an adult.",
+    "young_adult": "Visibly a young adult (18–29); do not depict as a child, middle-aged or older adult.",
+    "adult": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+    "older_adult": "Visibly an older adult (55–69); do not depict as a young or middle-aged adult.",
+    "elder": "Visibly an elder (70+); preserve clearly elderly features and do not de-age.",
+}
+
+
+def normalise_age_band(age_band: str) -> str:
+    """Return the canonical visual age band or fail on an ambiguous age label."""
+    raw = str(age_band or "adult").strip().lower().replace("-", "_").replace(" ", "_")
+    try:
+        return AGE_BAND_ALIASES[raw]
+    except KeyError as exc:
+        allowed = ", ".join(AGE_BAND_ALIASES)
+        raise ValueError(f"Unsupported age_band {raw!r}; use one of: {allowed}.") from exc
+
+
+def visual_age_description(age_band: str) -> str:
+    """Return the canonical visual-age lock shared by casting and shot generation."""
+    return VISUAL_AGE_DESCRIPTIONS[normalise_age_band(age_band)]
+
+
 def infer_voice_profile(gender_presentation: str, age_band: str) -> str:
     gender = str(gender_presentation or "").strip().lower()
-    age = str(age_band or "").strip().lower()
+    age = normalise_age_band(age_band)
+    if age in {"child", "teen"}:
+        raise ValueError(
+            f"No age-appropriate Hindi TTS profile is qualified for {age} characters; "
+            "do not assign an adult/young-adult voice or age the character up."
+        )
     if gender not in {"male", "female"}:
         return DEFAULT_VOICE_PROFILE_ID
-    if age in {"child", "young", "young_adult", "teen"}:
+    if age == "young_adult":
         return "hi_male_young_puck" if gender == "male" else "hi_female_young_leda"
-    if age in {"older", "older_adult", "elder", "senior"}:
+    if age in {"older_adult", "elder"}:
         return "hi_male_older_algenib" if gender == "male" else "hi_female_older_gacrux"
     return "hi_male_adult_charon" if gender == "male" else "hi_female_adult_aoede"
 
@@ -118,14 +159,37 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
         seen.add(char_id)
         char["character_id"] = char_id
         char["display_name"] = str(char.get("display_name") or char_id).strip()
-        char["gender_presentation"] = str(char.get("gender_presentation") or "unspecified").lower()
-        char["age_band"] = str(char.get("age_band") or "adult").lower()
-        char["voice_profile_id"] = str(
-            char.get("voice_profile_id") or infer_voice_profile(char["gender_presentation"], char["age_band"])
-        )
-        profile = resolve_voice_profile(char["voice_profile_id"])
-        char["gemini_voice"] = profile["gemini_voice"]
-        char["voice_direction"] = str(char.get("voice_direction") or profile["direction"])
+        char["gender_presentation"] = str(char.get("gender_presentation") or "unspecified").strip().lower()
+        if char["gender_presentation"] not in {"male", "female", "unspecified"}:
+            raise ValueError(
+                f"Character {char_id} has unsupported gender_presentation "
+                f"{char['gender_presentation']!r}."
+            )
+        char["age_band"] = normalise_age_band(char.get("age_band") or "adult")
+        char["visual_age_description"] = visual_age_description(char["age_band"])
+        requested_profile = str(char.get("voice_profile_id") or "").strip()
+        if char["age_band"] in {"child", "teen"}:
+            if requested_profile:
+                raise ValueError(
+                    f"Character {char_id} is {char['age_band']} but voice_profile_id "
+                    f"{requested_profile!r} is not age-qualified. Keep this character non-speaking "
+                    "until a dedicated child/teen Hindi voice is auditioned."
+                )
+            char["voice_profile_id"] = ""
+            char["gemini_voice"] = ""
+            char["voice_direction"] = ""
+        else:
+            expected_profile = infer_voice_profile(char["gender_presentation"], char["age_band"])
+            if requested_profile and requested_profile != expected_profile:
+                raise ValueError(
+                    f"Character {char_id} age/gender metadata requires voice_profile_id "
+                    f"{expected_profile!r}; received {requested_profile!r}. Correct the visible "
+                    "age/gender cast metadata or remove the conflicting override."
+                )
+            char["voice_profile_id"] = expected_profile
+            profile = resolve_voice_profile(expected_profile)
+            char["gemini_voice"] = profile["gemini_voice"]
+            char["voice_direction"] = str(char.get("voice_direction") or profile["direction"])
         char["appearance"] = str(char.get("appearance") or "").strip()
         char["personality"] = str(char.get("personality") or "").strip()
         clean_characters.append(char)
@@ -188,6 +252,12 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             segment["text"] = text
             segment["emotion"] = str(segment.get("emotion") or "natural, restrained delivery")
             speaker = characters_by_id[speaker_id]
+            if not speaker.get("voice_profile_id") or not speaker.get("gemini_voice"):
+                raise ValueError(
+                    f"Beat {beat_index} assigns dialogue to {speaker['display_name']!r}, "
+                    f"whose visual age band is {speaker['age_band']!r}; no age-appropriate "
+                    "Hindi TTS profile is qualified. Keep this character non-speaking."
+                )
             segment["voice_profile_id"] = speaker["voice_profile_id"]
             segment["gemini_voice"] = speaker["gemini_voice"]
             segment["voice_direction"] = speaker["voice_direction"]
@@ -346,18 +416,36 @@ def registry_character_record(character: dict[str, Any], *, asset_root: str = "c
     char_id = str(character.get("character_id", "")).strip().lower()
     if not _CHARACTER_ID.fullmatch(char_id):
         raise ValueError(f"Invalid character_id: {char_id!r}")
-    profile_id = str(character.get("voice_profile_id") or DEFAULT_VOICE_PROFILE_ID)
-    profile = resolve_voice_profile(profile_id)
+    gender = str(character.get("gender_presentation") or "unspecified").strip().lower()
+    if gender not in {"male", "female", "unspecified"}:
+        raise ValueError(f"Unsupported gender_presentation for {char_id}: {gender!r}")
+    age_band = normalise_age_band(character.get("age_band") or "adult")
+    expected_profile = "" if age_band in {"child", "teen"} else infer_voice_profile(gender, age_band)
+    requested_profile = str(character.get("voice_profile_id") or "").strip()
+    if expected_profile and requested_profile and requested_profile != expected_profile:
+        raise ValueError(
+            f"Character {char_id} age/gender metadata requires voice_profile_id "
+            f"{expected_profile!r}; received {requested_profile!r}."
+        )
+    if not expected_profile and requested_profile:
+        raise ValueError(
+            f"Character {char_id} is {age_band}; no age-qualified voice profile is available. "
+            "Do not assign an adult voice."
+        )
+    profile_id = expected_profile
+    profile = resolve_voice_profile(profile_id) if profile_id else {"gemini_voice": ""}
     return {
         "character_id": char_id,
         "display_name": str(character.get("display_name") or char_id).strip(),
         "role": str(character.get("role") or "supporting"),
-        "gender_presentation": str(character.get("gender_presentation") or "unspecified"),
-        "age_band": str(character.get("age_band") or "adult"),
+        "gender_presentation": gender,
+        "age_band": age_band,
+        "visual_age_description": visual_age_description(age_band),
         "appearance": str(character.get("appearance") or ""),
         "personality": str(character.get("personality") or ""),
         "voice_profile_id": profile_id,
         "gemini_voice": profile["gemini_voice"],
+        "voice_status": "age_aligned_profile" if profile_id else "no_age_qualified_profile_non_speaking_only",
         "asset_folder": f"{asset_root}/{char_id}",
         "asset_status": "metadata_only_pending_3d_pilot",
         "licence_review": {"source": None, "licence": None, "commercial_use_verified": False},
