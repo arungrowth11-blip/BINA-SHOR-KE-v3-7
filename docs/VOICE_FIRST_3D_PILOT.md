@@ -85,3 +85,17 @@ The weekly planning workflow and the later GPU finalizer are separate GitHub Act
 ## Rollback and current limitations
 
 Wan2.2 remains the active video backend. Older pending manifests without speaker segments keep their legacy single-narrator TTS path. The new voice-first path is guarded by offline tests, but this branch still requires a real free-tier TTS audition, a successful Kaggle Wan duration-variable render, and a separate Blender Kaggle pilot before it can be considered production-qualified.
+
+## Live Hindi TTS qualification
+
+The manual workflow `.github/workflows/tts-live-smoke.yml` is the real API qualification step for speaker audio. It is separate from offline CI and from the production Reel/GPU workflows.
+
+1. In GitHub Actions, select **BINA SHOR KE — Live Gemini Hindi TTS Qualification** and choose branch `feature/voice-first-3d-foundation`.
+2. Run it only after confirming that the configured Gemini project/key is on the Free Tier and paid billing is disabled. The required confirmation input defaults to false.
+3. The workflow calls the same production adapter, `producer.tts_wav`, for two short Hindi samples using the Puck and Gacrux profiles. It does not use mocks, send a Reel to Kaggle, run Blender, or contact Telegram/Facebook.
+4. Download the `bina-shor-ke-live-tts-<run>` artifact. It contains `arjun_puck.wav`, `meera_gacrux.wav`, and `report.json` when both samples succeed. The report records the model, WAV format, duration, signal level, file size and SHA-256.
+5. Listen to both files and record a separate human decision for pronunciation, naturalness, voice distinction, emotion and audio artefacts. A successful workflow proves only live API response and machine WAV checks; it does not pass the human listening gate.
+
+The same guarded test can be run locally with `python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke` after installing `requirements.txt` and setting `GEMINI_API_KEY`. The explicit flag is required; it must not be used unless paid billing is disabled.
+
+**Qualification status:** adding this workflow does not itself mean TTS has been auditioned. Until a successful live run artifact is produced and both samples are human-reviewed, TTS remains **blocked pending live run and listening review**. Do not launch `plan-one` or `plan-week` as a substitute for this gate.
