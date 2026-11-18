@@ -99,8 +99,10 @@ class StudioPipelineTests(unittest.TestCase):
                 output.setframerate(24000)
                 output.writeframes(b"\x00\x00" * (3 * 24000))
 
-        with patch.object(studio_pipeline.character_library, "upsert_character") as registry_write, \\
-             patch.object(studio_pipeline.producer, "ensure_tts_wav", side_effect=fake_tts):
+        with (
+            patch.object(studio_pipeline.character_library, "upsert_character") as registry_write,
+            patch.object(studio_pipeline.producer, "ensure_tts_wav", side_effect=fake_tts),
+        ):
             result = studio_pipeline.prepare_voice_first_plan(concept, "reel_01_voice_test")
 
         self.assertEqual(len(calls), 6)
