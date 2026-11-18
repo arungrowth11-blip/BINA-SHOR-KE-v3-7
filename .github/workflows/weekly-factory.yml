@@ -52,6 +52,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Restore previously measured voice WAVs
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tts_cache
+          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            bsk-tts-${{ runner.os }}-
+
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -99,13 +107,32 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Detect and save voice WAVs generated before GPU dispatch
+        id: voice_cache_changed
+        if: always() && (env.RUN_MODE == 'plan-one' || env.RUN_MODE == 'plan-week')
+        shell: bash
+        run: |
+          if [ -f data/tts_cache/.dirty ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            rm -f data/tts_cache/.dirty
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save measured speaker WAV cache for the separate GPU finalizer workflow
+        if: always() && steps.voice_cache_changed.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/tts_cache
+          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+
       - name: Persist anti-repeat history and job state
         if: always() && (env.RUN_MODE == 'plan-week' || env.RUN_MODE == 'plan-one')
         continue-on-error: true
         run: |
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
-          git add data/history.json data/telegram_state.json data/pending_gpu_job.json
+          git add data/history.json data/telegram_state.json data/pending_gpu_job.json data/characters/registry.json
           if ! git diff --cached --quiet; then
             git commit -m "Record BSK plan and GPU dispatch state [skip ci]"
             git push
