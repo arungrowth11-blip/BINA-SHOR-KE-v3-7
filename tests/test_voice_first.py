@@ -70,6 +70,35 @@ class VoiceFirstTests(unittest.TestCase):
         self.assertEqual(result["beats"][0]["voiceover"], "तुमने मेरी बात सुनी ही नहीं। मैं जवाब देने से पहले सोच रही थी।")
 
 
+    def test_matching_gemini_display_voice_alias_normalizes_to_canonical_profile_id(self):
+        concept = {
+            "characters": [{
+                "character_id": "arjun", "display_name": "अर्जुन",
+                "gender_presentation": "male", "age_band": "young_adult",
+                "voice_profile_id": "Puck",
+            }],
+            "beats": [{"speech_segments": []} for _ in range(6)],
+        }
+        result = voice_first.normalise_screenplay(concept)
+        character = result["characters"][0]
+        self.assertEqual(character["voice_profile_id"], "hi_male_young_puck")
+        self.assertEqual(character["gemini_voice"], "Puck")
+
+    def test_wrong_gemini_display_voice_alias_still_fails_age_voice_gate(self):
+        concept = {
+            "characters": [{
+                "character_id": "arjun", "display_name": "अर्जुन",
+                "gender_presentation": "male", "age_band": "young_adult",
+                "voice_profile_id": "Charon",
+            }],
+            "beats": [{"speech_segments": []} for _ in range(6)],
+        }
+        with self.assertRaisesRegex(
+            ValueError,
+            "requires voice_profile_id 'hi_male_young_puck'.*received 'hi_male_adult_charon'",
+        ):
+            voice_first.normalise_screenplay(concept)
+
     def test_conflicting_explicit_voice_profile_is_rejected_against_visual_age(self):
         concept = {
             "characters": [{
