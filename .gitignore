@@ -13,3 +13,6 @@ data/tts_cache/
 .cache/
 Thumbs.db
 .DS_Store
+
+# Binary character rigs, textures and rendered caches stay outside Git.
+assets/characters/
