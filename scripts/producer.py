@@ -196,6 +196,31 @@ def gemini_json(system: str, user_prompt: str, temperature: float = 0.8, timeout
     raise RuntimeError(f"Gemini text request failed after bounded retries: {last_error}")
 
 
+def _openai_json_completion(body: dict[str, Any], provider: str, max_output_tokens: int) -> dict[str, Any]:
+    """Validate a completed OpenAI-compatible JSON response without repairing broken model output."""
+    choices = body.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"{provider} returned no choices: {str(body)[:300]}")
+    choice = choices[0]
+    finish_reason = str(choice.get("finish_reason") or "").lower()
+    if finish_reason in {"length", "max_tokens"}:
+        raise RuntimeError(
+            f"{provider} output reached its {max_output_tokens}-token limit "
+            f"(finish_reason={finish_reason}); refusing to parse truncated JSON."
+        )
+    message = choice.get("message") or {}
+    content = message.get("content", "")
+    if isinstance(content, list):
+        content = "".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type", "text") == "text"
+        )
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError(f"{provider} returned an empty or unsupported message content.")
+    return extract_json(content)
+
+
 def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
     """Groq OpenAI-compatible JSON route; only used when GROQ_API_KEY is configured."""
     if not GROQ_API_KEY:
@@ -207,7 +232,9 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
             {"role": "user", "content": user_prompt},
         ],
         "temperature": temperature,
-        "max_completion_tokens": 2600,
+        "max_completion_tokens": 5000,
+        "response_format": {"type": "json_object"},
+        "reasoning_format": "hidden",
         "stream": False,
     }
     response = requests.post(
@@ -218,14 +245,7 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Groq HTTP {response.status_code}: {response.text[:300]}")
-    body = response.json()
-    choices = body.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"Groq returned no choices: {str(body)[:300]}")
-    content = (choices[0].get("message") or {}).get("content", "")
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Groq returned an empty message.")
-    return extract_json(content)
+    return _openai_json_completion(response.json(), "Groq", 5000)
 
 
 
@@ -240,7 +260,8 @@ def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeou
             {"role": "user", "content": user_prompt},
         ],
         "temperature": temperature,
-        "max_tokens": 2600,
+        "max_tokens": 5000,
+        "response_format": {"type": "json_object"},
         "stream": False,
     }
     response = requests.post(
@@ -251,14 +272,7 @@ def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeou
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Mistral HTTP {response.status_code}: {response.text[:300]}")
-    body = response.json()
-    choices = body.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"Mistral returned no choices: {str(body)[:300]}")
-    content = (choices[0].get("message") or {}).get("content", "")
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Mistral returned an empty message.")
-    return extract_json(content)
+    return _openai_json_completion(response.json(), "Mistral", 5000)
 
 def cloudflare_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
     """Optional Cloudflare Workers AI tertiary route; requires explicit free-plan opt-in."""
@@ -303,6 +317,12 @@ def _provider_failure_cooldown(name: str, exc: Exception) -> None:
     elif any(token in message for token in ("http 429", "quota", "rate limit", "resource_exhausted")):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 900
         log(f"Provider circuit opened for {name} for 15 minutes (quota/rate-limit response).")
+    elif any(token in message for token in (
+        "jsondecodeerror", "unterminated string", "expecting ',' delimiter",
+        "output reached its", "invalid json", "empty or unsupported message content",
+    )):
+        _PROVIDER_DISABLED_THIS_RUN.add(name)
+        log(f"Provider circuit opened for {name} for the remainder of this run (invalid or truncated structured output).")
     elif any(token in message for token in ("http 500", "http 502", "http 503", "http 504", "timeout", "connection", "temporarily unavailable")):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 120
         log(f"Provider circuit opened for {name} for 2 minutes (transient failure).")
@@ -1036,6 +1056,8 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
                 "http 429", "http 500", "http 502", "http 503", "http 504",
                 "quota exceeded", "rate limit", "temporarily unavailable",
                 "timed out", "timeout", "connection error",
+                "jsondecodeerror", "unterminated string", "expecting ',' delimiter",
+                "output reached its", "invalid json",
             ))
             if provider_unavailable:
                 raise RuntimeError(
