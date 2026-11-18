@@ -181,11 +181,7 @@ def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
     characters = concept.get('characters', [])
     if not characters:
         raise RuntimeError('Voice-first screenplay has no cast; refusing GPU dispatch.')
-    # Persist identity, appearance and voice metadata independently of any one Reel.
-    # Binary .blend/texture assets are added only after the 3D pilot proves its asset pipeline.
-    for character in characters:
-        character_library.upsert_character(character)
-
+    # Character metadata is persisted only after the complete voice-first storyboard passes.
     with tempfile.TemporaryDirectory(prefix='bsk-voice-preflight-') as temp_root:
         temp_root = Path(temp_root)
         for beat_index, beat in enumerate(concept['beats'], start=1):
@@ -225,6 +221,14 @@ def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
         'video_duration_source': 'measured_voice_audio',
     }
     return concept
+
+
+def persist_character_cast(concept: dict) -> int:
+    """Persist only cast records belonging to a fully voice-locked storyboard."""
+    characters = concept.get('characters', [])
+    for character in characters:
+        character_library.upsert_character(character)
+    return len(characters)
 
 
 def plan_week(reel_count: int = 3) -> int:
@@ -274,6 +278,8 @@ def plan_week(reel_count: int = 3) -> int:
         concept = prepare_voice_first_plan(concept, reel_id)
         # Create the final shot prompts only after all speaker WAV durations are measured.
         concept = producer.generate_voice_aware_storyboard(concept)
+        persisted_cast = persist_character_cast(concept)
+        log(f'Persisted {persisted_cast} character metadata record(s) after voice/storyboard validation.')
         concept['editorial_review'] = concept.get('editorial_review') or {
             'scores': review.get('scores', {}), 'approved': review.get('approved', False)
         }
