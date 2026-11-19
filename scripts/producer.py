@@ -1364,6 +1364,21 @@ def ensure_tts_wav(
     return "generated"
 
 
+def _scene_audio_filter(audio_tempo: float, audio_pad_duration: float, *, has_speech: bool) -> str:
+    """Build a finite-safe scene audio chain; loudnorm is undefined for all-silence audio."""
+    if not math.isfinite(audio_tempo) or audio_tempo <= 0:
+        raise ValueError("Scene audio tempo must be finite and positive.")
+    if not math.isfinite(audio_pad_duration) or audio_pad_duration < 0:
+        raise ValueError("Scene audio padding must be finite and non-negative.")
+    filters: list[str] = []
+    if audio_tempo > 1.000001:
+        filters.append(f"atempo={audio_tempo:.6f}")
+    filters.append(f"apad=pad_dur={audio_pad_duration:.3f}")
+    # FFmpeg loudnorm on digital silence can produce NaN/Inf and break AAC encoding.
+    filters.append("loudnorm=I=-16:TP=-1.5:LRA=11" if has_speech else "anull")
+    return ",".join(filters)
+
+
 def run_cmd(args: list[str], timeout: int = 240) -> None:
     proc = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
     if proc.returncode != 0:
@@ -2162,10 +2177,8 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         segment_path = segments_dir / f"segment_{i+1:02d}.mp4"
         duration = target_duration
         audio_pad_duration = timing["audio_pad_duration"] if ai_clip.exists() else 0.08
-        audio_filter = (
-            (f"atempo={audio_tempo:.6f}," if audio_tempo > 1.000001 else "")
-            + f"apad=pad_dur={audio_pad_duration:.3f},loudnorm=I=-16:TP=-1.5:LRA=11"
-        )
+        has_speech = bool(speech_segments) or bool(str(beat.get("voiceover") or "").strip())
+        audio_filter = _scene_audio_filter(audio_tempo, audio_pad_duration, has_speech=has_speech)
         run_cmd([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *input_args,
             "-vf", video_filter, "-map", "0:v:0", "-map", "1:a:0",
