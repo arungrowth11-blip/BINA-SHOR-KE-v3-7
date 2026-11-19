@@ -44,7 +44,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'poll' }}
+      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || 'poll') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
@@ -197,7 +197,12 @@ jobs:
               and state["reels"][0].get("reel_id") == state.get("active_finalizing_reel_id")
               and state["reels"][0].get("delivery_status") != "delivered"
           )
-          gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
+          gpu_error_raw = state.get("gpu_error", "")
+          try:
+              gpu_error_payload = json.loads(gpu_error_raw) if isinstance(gpu_error_raw, str) else gpu_error_raw
+          except (TypeError, ValueError):
+              gpu_error_payload = {}
+          gpu_error_text = json.dumps(gpu_error_raw, ensure_ascii=False).lower()
           known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
                                     or "control_after_generate" in gpu_error_text)
           known_hf_revision_failure = (
@@ -205,12 +210,22 @@ jobs:
               and ("invalid rev id: text_encoders" in gpu_error_text
                    or "invalid rev id: vae" in gpu_error_text)
           )
+          known_comfyui_timeout = (
+              isinstance(gpu_error_payload, dict)
+              and gpu_error_payload.get("error_type") == "TimeoutError"
+              and "ComfyUI scene generation timed out after 2700s" in str(gpu_error_payload.get("error", ""))
+              and gpu_error_payload.get("stage") == "kaggle_gpu_render"
+              and gpu_error_payload.get("manifest_id") == state.get("job_id")
+          )
+          gpu_retry_attempts = int(state.get("gpu_retry_attempts", 0) or 0)
+          first_retry_ok = gpu_retry_attempts == 0 and (known_ksampler_failure or known_hf_revision_failure)
+          timeout_retry_ok = gpu_retry_attempts == 1 and known_comfyui_timeout
           retry_gpu_ok = (state.get("status") == "gpu_failed"
-                          and (known_ksampler_failure or known_hf_revision_failure)
+                          and (first_retry_ok or timeout_retry_ok)
                           and not state.get("resume_dataset_id")
                           and int(state.get("resume_scene_count", 0) or 0) == 0
                           and not state.get("checkpoint_save_error")
-                          and int(state.get("gpu_retry_attempts", 0) or 0) < 1)
+                          and gpu_retry_attempts < 2)
           resolve_states = {"dispatch_unknown"}
           resume_states = {"gpu_checkpoint_saved"}
           if action == "retry-finalize":
@@ -345,7 +360,7 @@ jobs:
         if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'rebuild-rejected-timing'
         run: python scripts/studio_pipeline.py rebuild-rejected-timing
 
-      - name: Retry the same Reel after the KSampler schema fix
+      - name: Retry the same Reel after a narrowly classified worker fix
         if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'retry-gpu'
         run: python scripts/studio_pipeline.py retry-gpu
 
