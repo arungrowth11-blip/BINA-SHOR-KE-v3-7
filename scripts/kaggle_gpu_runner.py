@@ -194,6 +194,37 @@ def runtime_package_versions() -> dict[str, str]:
             observed[package] = "not-installed"
     return observed
 
+def hf_cache_revision(path) -> str:
+    """Extract the immutable Hugging Face snapshot SHA, not the model subfolder name."""
+    candidate = os.path.abspath(os.fspath(path))
+
+    def from_snapshot(raw_path: str) -> str | None:
+        parts = Path(raw_path).parts
+        for index, part in enumerate(parts[:-1]):
+            if part == 'snapshots':
+                revision = parts[index + 1]
+                if re.fullmatch(r'[0-9a-f]{40}', revision):
+                    return revision
+                raise RuntimeError(
+                    f'Hugging Face cache snapshot has an invalid revision component: {revision!r}'
+                )
+        return None
+
+    revision = from_snapshot(candidate)
+    if revision:
+        return revision
+    if os.path.islink(candidate):
+        target = os.readlink(candidate)
+        if not os.path.isabs(target):
+            target = os.path.join(os.path.dirname(candidate), target)
+        revision = from_snapshot(os.path.abspath(target))
+        if revision:
+            return revision
+    raise RuntimeError(
+        f'Could not determine a 40-character Hugging Face snapshot SHA from model path: {candidate}'
+    )
+
+
 def install_comfyui():
     import torch
     if not torch.cuda.is_available():
@@ -238,26 +269,41 @@ def install_comfyui():
     from huggingface_hub import hf_hub_download
     paths = {
         'unet': ('timfromhcs/Wan2.2-TI2V-5B-GGUF', 'Wan2.2-TI2V-5B-Q4_K_M.gguf', COMFY / 'models' / 'unet' / 'Wan2.2-TI2V-5B-Q4_K_M.gguf'),
-        'clip': ('Comfy-Org/Wan_2.1_ComfyUI_repackaged', 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', COMFY / 'models' / 'text_encoders' / 'umt5_xxl_fp8_e4m3fn_scaled.safetensors'),
+        # The Wan2.2 repackaged snapshot contains the compatible UMT5 text encoder and Wan2.2 VAE.
+        'clip': ('Comfy-Org/Wan_2.2_ComfyUI_Repackaged', 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', COMFY / 'models' / 'text_encoders' / 'umt5_xxl_fp8_e4m3fn_scaled.safetensors'),
         'vae': ('Comfy-Org/Wan_2.2_ComfyUI_Repackaged', 'split_files/vae/wan2.2_vae.safetensors', COMFY / 'models' / 'vae' / 'wan2.2_vae.safetensors'),
     }
     model_revisions = {}
     locked_revisions = lock.get('model_revisions') if isinstance(lock.get('model_revisions'), dict) else {}
     for key, (repo, filename, dest) in paths.items():
         dest.parent.mkdir(parents=True, exist_ok=True)
+        revision = locked_revisions.get(key)
+        if revision and not re.fullmatch(r'[0-9a-f]{40}', str(revision)):
+            raise RuntimeError(
+                f'Invalid locked Hugging Face revision for {key}: {revision!r}. '
+                'Expected an immutable 40-character snapshot commit SHA, not a model folder name.'
+            )
         if dest.exists() or dest.is_symlink():
-            # This worker starts fresh each run; a pre-existing link is unexpected and must not silently change revision.
+            # Reuse only a real snapshot link whose immutable commit can be independently recovered.
             if dest.is_symlink():
-                model_revisions[key] = Path(dest.resolve()).parent.name
+                model_revisions[key] = hf_cache_revision(dest)
+                if revision and model_revisions[key] != revision:
+                    raise RuntimeError(
+                        f'Existing {key} model symlink resolves to {model_revisions[key]}, '
+                        f'but the manifest locks {revision}.'
+                    )
                 continue
             raise RuntimeError(f'Model path already exists as a non-symlink; refusing to guess revision: {dest}')
-        revision = locked_revisions.get(key)
         print(f'Downloading model component: {key} ({repo}/{filename})' + (f' at locked revision {revision}' if revision else ' at current revision for first lock'))
         kwargs = {'repo_id': repo, 'filename': filename, 'cache_dir': str(HF_CACHE)}
         if revision:
             kwargs['revision'] = revision
         cached = Path(hf_hub_download(**kwargs))
-        model_revisions[key] = cached.parent.name
+        model_revisions[key] = hf_cache_revision(cached)
+        if revision and model_revisions[key] != revision:
+            raise RuntimeError(
+                f'Downloaded {key} snapshot {model_revisions[key]} does not match the locked SHA {revision}.'
+            )
         dest.symlink_to(cached)
     return {
         'gpu': gpu_name,
