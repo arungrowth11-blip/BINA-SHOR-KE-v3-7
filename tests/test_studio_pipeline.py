@@ -343,6 +343,75 @@ class StudioPipelineTests(unittest.TestCase):
                 studio_pipeline.PENDING = old_pending
                 studio_pipeline.TOOLCHAIN_LOCK = old_lock
 
+    def test_retry_gpu_allows_one_guarded_timeout_retry_after_queue_aware_fix(self):
+        old_pending = studio_pipeline.PENDING
+        old_lock = studio_pipeline.TOOLCHAIN_LOCK
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            studio_pipeline.PENDING = root / 'pending_gpu_job.json'
+            studio_pipeline.TOOLCHAIN_LOCK = root / 'toolchain_lock.json'
+            comfy_sha = '1' * 40
+            gguf_sha = '2' * 40
+            saved_lock = {
+                'status': 'locked',
+                'comfyui_commit': comfy_sha,
+                'comfyui_gguf_commit': gguf_sha,
+                'model_revisions': {
+                    'unet': 'e1701a0fc7a708f6459531776ee6e08111417d49',
+                    'clip': 'c4f60d30c55a624e35427060fdd217579a6c1d77',
+                    'vae': 'c4f60d30c55a624e35427060fdd217579a6c1d77',
+                },
+            }
+            studio_pipeline.write_json(studio_pipeline.TOOLCHAIN_LOCK, saved_lock)
+            manifest = {
+                'job_id': 'job-timeout-1',
+                'toolchain_lock': {
+                    'comfyui_commit': comfy_sha,
+                    'comfyui_gguf_commit': gguf_sha,
+                    'model_revisions': dict(saved_lock['model_revisions']),
+                },
+                'reels': [{'reel_id': 'reel-timeout', 'beats': [{'video_prompt': 'same Reel'}]}],
+            }
+            timeout_error = {
+                'status': 'failed',
+                'error_type': 'TimeoutError',
+                'error': 'ComfyUI scene generation timed out after 2700s. Last status=None',
+                'stage': 'kaggle_gpu_render',
+                'manifest_id': 'job-timeout-1',
+            }
+            original_reels = [{'reel_id': 'reel-timeout', 'delivery_status': 'planned'}]
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                'job_id': 'job-timeout-1',
+                'status': 'gpu_failed',
+                'kaggle_kernel_id': 'owner/worker',
+                'manifest': manifest,
+                'reels': original_reels,
+                'gpu_retry_attempts': 1,
+                'gpu_error': json.dumps(timeout_error),
+            })
+            try:
+                with (
+                    patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}),
+                    patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'),
+                    patch.object(studio_pipeline, 'configure_kaggle_cli'),
+                    patch.object(studio_pipeline, 'kaggle_status', return_value=('ERROR', 'KernelWorkerStatus.ERROR')),
+                    patch.object(studio_pipeline, 'build_kaggle_kernel', return_value=root / 'kernel'),
+                    patch.object(studio_pipeline.subprocess, 'run', return_value=Mock(returncode=0, stdout='pushed', stderr='')) as push,
+                ):
+                    (root / 'kernel').mkdir()
+                    self.assertEqual(studio_pipeline.retry_failed_gpu(), 0)
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'gpu_running')
+                self.assertEqual(updated['job_id'], 'job-timeout-1')
+                self.assertEqual(updated['gpu_retry_attempts'], 2)
+                self.assertEqual(updated['manifest']['reels'], manifest['reels'])
+                self.assertEqual(updated['reels'], original_reels)
+                self.assertIn('Queue-aware ComfyUI prompt tracking', updated['gpu_retry_reason'])
+                push.assert_called_once()
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.TOOLCHAIN_LOCK = old_lock
+
     def test_retry_gpu_rejects_unclassified_hf_revision_error(self):
         old_pending = studio_pipeline.PENDING
         with tempfile.TemporaryDirectory() as folder:
@@ -353,7 +422,7 @@ class StudioPipelineTests(unittest.TestCase):
                 'gpu_error': {'error_type': 'RevisionNotFoundError', 'error': 'Invalid rev id: branch_name'},
             })
             try:
-                with self.assertRaisesRegex(RuntimeError, 'restricted to the observed'):
+                with self.assertRaisesRegex(RuntimeError, 'restricted to the first classified'):
                     studio_pipeline.retry_failed_gpu()
             finally:
                 studio_pipeline.PENDING = old_pending
