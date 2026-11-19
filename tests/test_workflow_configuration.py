@@ -104,6 +104,12 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('data/telegram_state.json data/history.json data/performance_log.csv', body)
         self.assertIn('group: bina-shor-ke-studio', body)
 
+    def test_kaggle_status_timestamp_is_expanded_by_shell(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('echo "status_checked_at_utc=${status_checked_at_utc}" >> "$GITHUB_OUTPUT"', body)
+        self.assertIn('echo "KAGGLE_STATUS_CHECKED_AT_UTC=${status_checked_at_utc}"', body)
+        self.assertNotIn(r'\${status_checked_at_utc}', body)
+
     def test_gpu_poller_is_bounded_and_has_zero_paid_fallback(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         self.assertIn('timeout-minutes: 180', body)
