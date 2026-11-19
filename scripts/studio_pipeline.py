@@ -1066,14 +1066,20 @@ def retry_failed_gpu() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') != 'gpu_failed':
         raise RuntimeError(f"GPU retry requires status=gpu_failed (current={pending.get('status', 'none')}). Run poll once first if the old Kaggle job has not yet been collected.")
-    if int(pending.get('gpu_retry_attempts', 0)) >= 1:
-        raise RuntimeError('The one allowed GPU retry has already been used; inspect Kaggle logs before any further GPU run.')
+    retry_attempts = int(pending.get('gpu_retry_attempts', 0) or 0)
+    if retry_attempts >= 2:
+        raise RuntimeError('The two bounded same-Reel GPU retries have been used; inspect Kaggle worker diagnostics before any new batch.')
     if pending.get('resume_dataset_id') or int(pending.get('resume_scene_count', 0) or 0) > 0:
         raise RuntimeError('Verified scene checkpoints exist. Use resume-checkpoint instead of retry-gpu so completed scenes are reused.')
     if pending.get('checkpoint_save_error'):
         raise RuntimeError('Checkpoint persistence failed. Do not retry the GPU blindly; inspect the saved Kaggle output and checkpoint error first.')
 
-    failure_text = json.dumps(pending.get('gpu_error', ''), ensure_ascii=False).lower()
+    raw_error = pending.get('gpu_error', '')
+    try:
+        error_payload = json.loads(raw_error) if isinstance(raw_error, str) else raw_error
+    except (TypeError, ValueError):
+        error_payload = {}
+    failure_text = json.dumps(raw_error, ensure_ascii=False).lower()
     known_ksampler_failure = (
         'ksampler schema changed' in failure_text or 'control_after_generate' in failure_text
     )
@@ -1084,11 +1090,20 @@ def retry_failed_gpu() -> int:
             or 'invalid rev id: vae' in failure_text
         )
     )
-    if not (known_ksampler_failure or known_hf_revision_failure):
+    known_comfyui_timeout = (
+        isinstance(error_payload, dict)
+        and error_payload.get('error_type') == 'TimeoutError'
+        and 'ComfyUI scene generation timed out after 2700s' in str(error_payload.get('error', ''))
+        and error_payload.get('stage') == 'kaggle_gpu_render'
+        and error_payload.get('manifest_id') == pending.get('job_id')
+    )
+    allowed_first_retry = retry_attempts == 0 and (known_ksampler_failure or known_hf_revision_failure)
+    allowed_timeout_retry = retry_attempts == 1 and known_comfyui_timeout
+    if not (allowed_first_retry or allowed_timeout_retry):
         raise RuntimeError(
-            'This one-time retry is restricted to the observed KSampler schema mismatch '
-            'or the known Hugging Face text_encoders/vae folder-as-revision failure. '
-            'The saved GPU error does not match either classified failure.'
+            'GPU retry is restricted to the first classified KSampler/Hugging Face compatibility fix, '
+            'or one additional same-manifest retry for the exact recorded 2700-second ComfyUI timeout '
+            'after queue-aware diagnostics are installed. Other failures and attempt counts are refused.'
         )
 
     manifest = pending.get('manifest')
@@ -1135,7 +1150,9 @@ def retry_failed_gpu() -> int:
 
     kernel_dir = build_kaggle_kernel(manifest)
     retry_reason = (
-        'Corrected Hugging Face snapshot SHA pins for Wan2.2 text encoder/VAE; original Reel manifest retained.'
+        'Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained.'
+        if allowed_timeout_retry
+        else 'Corrected Hugging Face snapshot SHA pins for Wan2.2 text encoder/VAE; original Reel manifest retained.'
         if known_hf_revision_failure
         else 'ComfyUI KSampler API schema compatibility fix; original Reel manifest retained.'
     )
