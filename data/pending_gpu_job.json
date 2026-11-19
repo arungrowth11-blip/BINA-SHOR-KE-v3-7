@@ -1,7 +1,7 @@
 {
   "job_id": "20261119_074202",
   "created_at_ist": "2026-11-19T07:44:34+05:30",
-  "status": "gpu_running",
+  "status": "finalize_failed",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261119_074202",
@@ -33,7 +33,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 4.4,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.7083,
@@ -59,7 +59,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 3.04,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 3.2083,
@@ -85,7 +85,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 0,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 2.5417,
@@ -103,7 +103,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 3.88,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.0417,
@@ -129,7 +129,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 4.12,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.375,
@@ -155,7 +155,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 2.84,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 3.0417,
@@ -256,7 +256,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 4.4,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.7083,
@@ -301,7 +301,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 3.04,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 3.2083,
@@ -334,7 +334,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 0,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 2.5417,
@@ -371,7 +371,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 3.88,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.0417,
@@ -416,7 +416,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 4.12,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.375,
@@ -461,7 +461,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 2.84,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 3.0417,
@@ -559,7 +559,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 4.4,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 4.7083,
@@ -585,7 +585,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 3.04,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 3.2083,
@@ -611,7 +611,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 0,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 2.5417,
@@ -629,7 +629,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 3.88,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 4.0417,
@@ -655,7 +655,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 4.12,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 4.375,
@@ -681,7 +681,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 2.84,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 3.0417,
@@ -701,7 +701,8 @@
           "target_frames": 73
         }
       ],
-      "delivery_status": "planned"
+      "delivery_status": "planned",
+      "output_directory": "output/20261120_0026_1_reel-1"
     }
   ],
   "policy": {
@@ -714,5 +715,10 @@
   "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"TimeoutError\",\n  \"error\": \"ComfyUI scene generation timed out after 2700s. Last status=None\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261119_074202\"\n}",
   "gpu_retry_attempts": 2,
   "gpu_retry_dispatched_at_ist": "2026-11-19T21:48:40+05:30",
-  "gpu_retry_reason": "Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained."
+  "gpu_retry_reason": "Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained.",
+  "active_finalizing_reel_id": "reel_01_074202",
+  "finalize_failed_at_ist": "2026-11-20T00:26:16+05:30",
+  "last_seen_gpu_status": "COMPLETE",
+  "last_seen_gpu_status_at_ist": "2026-11-20T00:26:07+05:30",
+  "finalize_error": "RuntimeError: Command failed (234): ffmpeg -hide_banner -loglevel error -y -i /home/runner/work/BINA-SHOR-KE-v3-7/BINA-SHOR-KE-v3-7/output/20261120_0026_1_reel-1/ai_clips/scene_03.mp4 -i\n[aac @ 0x6118f026dd80] Input contains (near) NaN/+-Inf\n[aost#0:1/aac @ 0x6118f026db00] [enc:aac @ 0x6118f7300bc0] Error submitting audio frame to the encoder\n[aost#0:1/aac @ 0x6118f026db00] [enc:aac @ 0x6118f7300bc0] Error encoding a frame: Invalid argument\n[aost#0:1/aac @ 0x6118f026db00] Task finished with error code: -22 (Invalid argument)\n[aost#0:1/aac @ 0x6118f026db00] Terminating thread with return code -22 (Invalid argument)"
 }
