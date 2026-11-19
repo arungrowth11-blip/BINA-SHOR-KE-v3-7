@@ -747,5 +747,25 @@ class LocalMediaQATests(unittest.TestCase):
         self.assertTrue(report["full_video_scanned"])
         self.assertIn("freezedetect", run.call_args.args[0][run.call_args.args[0].index("-vf") + 1])
 
+class SceneAudioFilterTests(unittest.TestCase):
+    def test_silent_scene_bypasses_loudnorm(self):
+        audio_filter = producer._scene_audio_filter(1.0, 0.08, has_speech=False)
+        self.assertEqual(audio_filter, "apad=pad_dur=0.080,anull")
+        self.assertNotIn("loudnorm", audio_filter)
+
+    def test_spoken_scene_keeps_bounded_tempo_and_loudnorm(self):
+        audio_filter = producer._scene_audio_filter(1.02, 0.08, has_speech=True)
+        self.assertEqual(
+            audio_filter,
+            "atempo=1.020000,apad=pad_dur=0.080,loudnorm=I=-16:TP=-1.5:LRA=11",
+        )
+
+    def test_scene_audio_filter_rejects_nonfinite_timing(self):
+        with self.assertRaisesRegex(ValueError, "tempo must be finite"):
+            producer._scene_audio_filter(float("nan"), 0.08, has_speech=False)
+        with self.assertRaisesRegex(ValueError, "padding must be finite"):
+            producer._scene_audio_filter(1.0, float("inf"), has_speech=False)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
