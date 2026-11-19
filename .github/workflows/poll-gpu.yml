@@ -20,6 +20,14 @@ on:
           - "resume-checkpoint"
           - "resolve-dispatch-running"
           - "resolve-dispatch-not-started"
+  # Scheduled workflows run from the repository default branch only. This narrow
+  # feature-branch hook performs one real poll when this workflow is updated;
+  # pending-state commits do not match this path, so it cannot recurse.
+  push:
+    branches:
+      - feature/voice-first-3d-foundation
+    paths:
+      - ".github/workflows/poll-gpu.yml"
   schedule:
     - cron: "0 */2 * * *"
       timezone: "Asia/Kolkata"
