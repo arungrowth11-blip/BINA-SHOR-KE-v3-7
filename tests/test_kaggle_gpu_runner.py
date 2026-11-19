@@ -119,9 +119,11 @@ class ComfyPromptDiagnosticsTests(unittest.TestCase):
         fake_requests = SimpleNamespace(
             get=fake_get, RequestException=type("RequestException", (Exception,), {})
         )
-        with patch.dict(sys.modules, {"requests": fake_requests}), \\
-             patch.object(runner["time"], "monotonic", side_effect=[0, 0, 11]), \\
-             patch.object(runner["time"], "sleep", return_value=None):
+        with (
+            patch.dict(sys.modules, {"requests": fake_requests}),
+            patch.object(runner["time"], "monotonic", side_effect=[0, 0, 11]),
+            patch.object(runner["time"], "sleep", return_value=None),
+        ):
             with self.assertRaisesRegex(TimeoutError, "queue_state.*running"):
                 runner["wait_prompt"]("prompt-123", timeout=10)
 
