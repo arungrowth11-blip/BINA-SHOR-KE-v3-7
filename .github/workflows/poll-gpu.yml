@@ -21,8 +21,9 @@ on:
           - "resolve-dispatch-running"
           - "resolve-dispatch-not-started"
   # Scheduled workflows run from the repository default branch only. This narrow
-  # feature-branch hook performs one real poll when this workflow is updated;
-  # pending-state commits do not match this path, so it cannot recurse.
+  # feature-branch hook performs one poll when this workflow is intentionally updated;
+  # its default action is `poll`; only the explicit timeout-retry commit marker
+  # selects `retry-gpu`. Pending-state commits do not match this path, so no loop forms.
   push:
     branches:
       - feature/voice-first-3d-foundation
