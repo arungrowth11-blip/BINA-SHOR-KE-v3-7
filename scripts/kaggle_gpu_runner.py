@@ -158,10 +158,21 @@ def send_failure_file(exc: Exception, result_manifest: dict | None = None):
             write_checkpoint_manifest(result_manifest, 'partial')
         except Exception as checkpoint_exc:
             print(f'Checkpoint inventory warning: {checkpoint_exc}', flush=True)
-    write_json(OUT / 'GPU_JOB_ERROR.json', {
+    diagnostic = {
         'status': 'failed', 'error_type': type(exc).__name__, 'error': str(exc)[:5000],
         'stage': 'kaggle_gpu_render', 'manifest_id': MANIFEST.get('job_id'),
-    })
+    }
+    if isinstance(result_manifest, dict) and isinstance(result_manifest.get('current_scene'), dict):
+        diagnostic['current_scene'] = result_manifest['current_scene']
+    # Preserve the ComfyUI server tail in Kaggle output; the prior worker deleted it on exit,
+    # leaving only a generic timeout and making GPU failures impossible to diagnose.
+    server_log = WORK / 'comfy_server.log'
+    if server_log.is_file():
+        try:
+            diagnostic['comfy_server_log_tail'] = server_log.read_text(encoding='utf-8', errors='replace')[-20000:]
+        except OSError as log_exc:
+            diagnostic['comfy_server_log_read_error'] = str(log_exc)[:500]
+    write_json(OUT / 'GPU_JOB_ERROR.json', diagnostic)
 
 
 def clone_and_pin_repo(repo_url: str, destination: Path, revision: str | None) -> str:
@@ -472,27 +483,75 @@ def post_prompt(graph, base='http://127.0.0.1:8188'):
     return body['prompt_id']
 
 
-def wait_prompt(prompt_id, timeout=2700, base='http://127.0.0.1:8188'):
+DEFAULT_PROMPT_TIMEOUT_SECONDS = 5400
+
+
+def _queue_prompt_ids(items) -> set[str]:
+    """Return prompt IDs from ComfyUI's queue tuples or dictionary-shaped responses."""
+    found: set[str] = set()
+    if not isinstance(items, list):
+        return found
+    for item in items:
+        if isinstance(item, (list, tuple)) and len(item) > 1:
+            found.add(str(item[1]))
+        elif isinstance(item, dict) and item.get('prompt_id'):
+            found.add(str(item['prompt_id']))
+    return found
+
+
+def wait_prompt(prompt_id, timeout=DEFAULT_PROMPT_TIMEOUT_SECONDS, base='http://127.0.0.1:8188'):
+    """Wait for a ComfyUI prompt, tracking its queue state while history is not yet persisted.
+
+    ComfyUI history may remain empty while a prompt is still queued/running. Polling only
+    /history therefore loses useful state and can report a missing status for a live job.
+    Keep both endpoints in the timeout diagnostic and allow up to 90 minutes per scene.
+    """
     import requests
-    deadline = time.time() + timeout
-    last_status = None
-    while time.time() < deadline:
+    deadline = time.monotonic() + timeout
+    last_status = {'status_str': 'not_seen', 'history_entry': False, 'queue_state': 'unknown'}
+    while time.monotonic() < deadline:
         try:
-            r = requests.get(f'{base}/history/{prompt_id}', timeout=20)
-            r.raise_for_status()
-            data = r.json()
-            if prompt_id in data:
+            response = requests.get(f'{base}/history/{prompt_id}', timeout=20)
+            response.raise_for_status()
+            data = response.json()
+            if isinstance(data, dict) and prompt_id in data:
                 item = data[prompt_id]
-                status = item.get('status', {})
-                last_status = status
+                status = item.get('status', {}) if isinstance(item, dict) else {}
+                last_status = {'history_entry': True, **(status if isinstance(status, dict) else {})}
                 if status.get('completed') is True or status.get('status_str') == 'success':
                     return item
                 if status.get('status_str') in ('error', 'failed'):
                     raise RuntimeError('ComfyUI generation failed: ' + json.dumps(status, ensure_ascii=False)[:3000])
-        except requests.RequestException:
-            pass
+            else:
+                # /history is populated after execution; /queue shows active and pending prompts.
+                queue_response = requests.get(f'{base}/queue', timeout=10)
+                queue_response.raise_for_status()
+                queue = queue_response.json()
+                running = _queue_prompt_ids(queue.get('queue_running', [])) if isinstance(queue, dict) else set()
+                pending = _queue_prompt_ids(queue.get('queue_pending', [])) if isinstance(queue, dict) else set()
+                if prompt_id in running:
+                    queue_state = 'running'
+                elif prompt_id in pending:
+                    queue_state = 'queued'
+                else:
+                    queue_state = 'not_visible_in_history_or_queue'
+                last_status = {
+                    'history_entry': False,
+                    'queue_state': queue_state,
+                    'running_count': len(running),
+                    'pending_count': len(pending),
+                }
+        except requests.RequestException as exc:
+            last_status = {
+                'history_entry': False,
+                'queue_state': 'endpoint_error',
+                'endpoint_error': str(exc)[:500],
+            }
         time.sleep(8)
-    raise TimeoutError(f'ComfyUI scene generation timed out after {timeout}s. Last status={last_status}')
+    raise TimeoutError(
+        f'ComfyUI scene generation timed out after {timeout}s for prompt {prompt_id}. '
+        f'Last observed state={json.dumps(last_status, ensure_ascii=False)[:2000]}'
+    )
 
 
 def latest_video(output_dir: Path, before: float, prefix: str) -> Path:
@@ -562,8 +621,14 @@ def main():
                 scene_started = time.monotonic()
                 graph = build_api_workflow(objects, beat, reel, i, prefix)
                 prompt_id = post_prompt(graph)
+                result_manifest['current_scene'] = {
+                    'reel_id': reel_id, 'scene_index': i, 'target_frames': int(beat.get('target_frames', 81)),
+                    'prompt_id': prompt_id, 'queued_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                }
+                write_json(OUT / 'gpu_output_manifest.json', result_manifest)
                 print(f"Queued {reel_id} scene {i}/{len(reel['beats'])}: {prompt_id}", flush=True)
                 history = wait_prompt(prompt_id)
+                result_manifest.pop('current_scene', None)
                 source = latest_video(output_dir, before, prefix)
                 transcode_scene(source, final_out)
                 result_manifest['scenes'].append({
