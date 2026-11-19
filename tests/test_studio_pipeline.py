@@ -270,9 +270,91 @@ class StudioPipelineTests(unittest.TestCase):
                 updated = studio_pipeline.load_json(studio_pipeline.PENDING)
                 self.assertEqual(updated['status'], 'gpu_running')
                 self.assertEqual(updated['job_id'], 'job-1')
-                self.assertEqual(updated['manifest'], manifest)
+                self.assertEqual(updated['manifest']['reels'], manifest['reels'])
+                self.assertEqual(
+                    updated['manifest']['toolchain_lock']['model_revisions']['clip'],
+                    'c4f60d30c55a624e35427060fdd217579a6c1d77',
+                )
                 self.assertEqual(updated['gpu_retry_attempts'], 1)
                 self.assertIn('kernels', push.call_args.args[0])
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+
+    def test_retry_gpu_repairs_exact_hf_folder_revision_error_and_keeps_same_reel(self):
+        old_pending = studio_pipeline.PENDING
+        old_lock = studio_pipeline.TOOLCHAIN_LOCK
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            studio_pipeline.PENDING = root / 'pending_gpu_job.json'
+            studio_pipeline.TOOLCHAIN_LOCK = root / 'toolchain_lock.json'
+            comfy_sha = '1' * 40
+            gguf_sha = '2' * 40
+            fixed_sha = 'c4f60d30c55a624e35427060fdd217579a6c1d77'
+            saved_lock = {
+                'status': 'locked',
+                'comfyui_commit': comfy_sha,
+                'comfyui_gguf_commit': gguf_sha,
+                'model_revisions': {
+                    'unet': 'e1701a0fc7a708f6459531776ee6e08111417d49',
+                    'clip': fixed_sha,
+                    'vae': fixed_sha,
+                },
+            }
+            studio_pipeline.write_json(studio_pipeline.TOOLCHAIN_LOCK, saved_lock)
+            manifest = {
+                'job_id': 'job-hf-1',
+                'toolchain_lock': {
+                    'comfyui_commit': comfy_sha,
+                    'comfyui_gguf_commit': gguf_sha,
+                    'model_revisions': {'unet': 'e1701a0fc7a708f6459531776ee6e08111417d49',
+                                        'clip': 'text_encoders', 'vae': 'vae'},
+                },
+                'reels': [{'reel_id': 'reel-hf', 'beats': [{'video_prompt': 'same story'}]}],
+            }
+            state = {
+                'job_id': 'job-hf-1', 'status': 'gpu_failed', 'kaggle_kernel_id': 'owner/worker',
+                'manifest': manifest, 'reels': [{'reel_id': 'reel-hf', 'delivery_status': 'planned'}],
+                'gpu_error': {
+                    'error_type': 'RevisionNotFoundError',
+                    'error': 'Invalid rev id: text_encoders',
+                },
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, state)
+            try:
+                with patch.dict(studio_pipeline.os.environ, {'KAGGLE_USERNAME': 'owner', 'KAGGLE_KEY': 'test-key'}), \
+                     patch.object(studio_pipeline, 'KAGGLE_SLUG', 'worker'), \
+                     patch.object(studio_pipeline, 'configure_kaggle_cli'), \
+                     patch.object(studio_pipeline, 'kaggle_status', return_value=('ERROR', 'KernelWorkerStatus.ERROR')), \
+                     patch.object(studio_pipeline, 'build_kaggle_kernel', return_value=root / 'kernel'), \
+                     patch.object(studio_pipeline.subprocess, 'run', return_value=Mock(returncode=0, stdout='pushed', stderr='')) as push:
+                    (root / 'kernel').mkdir()
+                    self.assertEqual(studio_pipeline.retry_failed_gpu(), 0)
+                updated = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(updated['status'], 'gpu_running')
+                self.assertEqual(updated['manifest']['job_id'], manifest['job_id'])
+                self.assertEqual(updated['manifest']['reels'], manifest['reels'])
+                self.assertEqual(updated['manifest']['toolchain_lock']['model_revisions']['clip'], fixed_sha)
+                self.assertEqual(updated['manifest']['toolchain_lock']['model_revisions']['vae'], fixed_sha)
+                self.assertEqual(updated['gpu_retry_attempts'], 1)
+                self.assertIn('Hugging Face snapshot SHA pins', updated['gpu_retry_reason'])
+                push.assert_called_once()
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.TOOLCHAIN_LOCK = old_lock
+
+    def test_retry_gpu_rejects_unclassified_hf_revision_error(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / 'pending_gpu_job.json'
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                'job_id': 'job-2', 'status': 'gpu_failed', 'kaggle_kernel_id': 'owner/worker',
+                'manifest': {'job_id': 'job-2', 'reels': [{'reel_id': 'r', 'beats': [{}]}]},
+                'gpu_error': {'error_type': 'RevisionNotFoundError', 'error': 'Invalid rev id: branch_name'},
+            })
+            try:
+                with self.assertRaisesRegex(RuntimeError, 'restricted to the observed'):
+                    studio_pipeline.retry_failed_gpu()
             finally:
                 studio_pipeline.PENDING = old_pending
 
