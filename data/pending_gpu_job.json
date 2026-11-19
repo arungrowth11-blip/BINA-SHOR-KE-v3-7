@@ -1,7 +1,7 @@
 {
   "job_id": "20261119_074202",
   "created_at_ist": "2026-11-19T07:44:34+05:30",
-  "status": "gpu_failed",
+  "status": "gpu_running",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261119_074202",
@@ -12,8 +12,8 @@
       "comfyui_gguf_commit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
       "model_revisions": {
         "unet": "e1701a0fc7a708f6459531776ee6e08111417d49",
-        "clip": "text_encoders",
-        "vae": "vae"
+        "clip": "c4f60d30c55a624e35427060fdd217579a6c1d77",
+        "vae": "c4f60d30c55a624e35427060fdd217579a6c1d77"
       }
     },
     "screenplay_schema_version": 2,
@@ -709,7 +709,10 @@
     "auto_facebook_publish": false,
     "max_reels": 1
   },
-  "dispatched_at_ist": "2026-11-19T07:44:36+05:30",
-  "dispatch_output": "Kernel version 3 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
-  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"RevisionNotFoundError\",\n  \"error\": \"404 Client Error. (Request ID: Root=1-6afe5bd3-0bb23637177b641474a274e4;32e1427f-f689-4d87-b264-06735add0cdc)\\n\\nRevision Not Found for url: https://huggingface.co/Comfy-Org/Wan-2.1/resolve/text_encoders/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors.\\nInvalid rev id: text_encoders\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261119_074202\"\n}"
+  "dispatched_at_ist": "2026-11-19T09:00:55+05:30",
+  "dispatch_output": "Kernel version 4 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
+  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"RevisionNotFoundError\",\n  \"error\": \"404 Client Error. (Request ID: Root=1-6afe5bd3-0bb23637177b641474a274e4;32e1427f-f689-4d87-b264-06735add0cdc)\\n\\nRevision Not Found for url: https://huggingface.co/Comfy-Org/Wan-2.1/resolve/text_encoders/split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors.\\nInvalid rev id: text_encoders\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261119_074202\"\n}",
+  "gpu_retry_attempts": 1,
+  "gpu_retry_dispatched_at_ist": "2026-11-19T09:00:55+05:30",
+  "gpu_retry_reason": "Corrected Hugging Face snapshot SHA pins for Wan2.2 text encoder/VAE; original Reel manifest retained."
 }
