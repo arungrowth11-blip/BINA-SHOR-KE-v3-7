@@ -1,7 +1,7 @@
 {
   "job_id": "20261119_074202",
   "created_at_ist": "2026-11-19T07:44:34+05:30",
-  "status": "gpu_failed",
+  "status": "gpu_running",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261119_074202",
@@ -709,10 +709,10 @@
     "auto_facebook_publish": false,
     "max_reels": 1
   },
-  "dispatched_at_ist": "2026-11-19T09:00:55+05:30",
-  "dispatch_output": "Kernel version 4 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
+  "dispatched_at_ist": "2026-11-19T21:48:40+05:30",
+  "dispatch_output": "Kernel version 5 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
   "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"TimeoutError\",\n  \"error\": \"ComfyUI scene generation timed out after 2700s. Last status=None\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261119_074202\"\n}",
-  "gpu_retry_attempts": 1,
-  "gpu_retry_dispatched_at_ist": "2026-11-19T09:00:55+05:30",
-  "gpu_retry_reason": "Corrected Hugging Face snapshot SHA pins for Wan2.2 text encoder/VAE; original Reel manifest retained."
+  "gpu_retry_attempts": 2,
+  "gpu_retry_dispatched_at_ist": "2026-11-19T21:48:40+05:30",
+  "gpu_retry_reason": "Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained."
 }
