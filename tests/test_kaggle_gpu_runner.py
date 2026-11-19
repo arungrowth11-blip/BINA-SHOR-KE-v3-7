@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import unittest
+import tempfile
 from pathlib import Path
 
 
@@ -16,6 +17,33 @@ def load_gpu_runner_namespace():
 
 
 class CameraCoverageTests(unittest.TestCase):
+
+    def test_hf_cache_revision_extracts_snapshot_sha_not_model_subfolder(self):
+        runner = load_gpu_runner_namespace()
+        revision = "a" * 40
+        with tempfile.TemporaryDirectory() as folder:
+            cached = Path(folder) / "models--Comfy-Org--Wan" / "snapshots" / revision / "split_files" / "text_encoders" / "encoder.safetensors"
+            self.assertEqual(runner["hf_cache_revision"](cached), revision)
+
+    def test_hf_cache_revision_resolves_comfyui_symlink_to_snapshot_sha(self):
+        runner = load_gpu_runner_namespace()
+        revision = "b" * 40
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            cached = root / "models--Comfy-Org--Wan" / "snapshots" / revision / "split_files" / "vae" / "wan.safetensors"
+            cached.parent.mkdir(parents=True)
+            cached.write_bytes(b"model")
+            destination = root / "ComfyUI" / "models" / "vae" / "wan.safetensors"
+            destination.parent.mkdir(parents=True)
+            destination.symlink_to(cached)
+            self.assertEqual(runner["hf_cache_revision"](destination), revision)
+
+    def test_hf_cache_revision_rejects_non_snapshot_path(self):
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            with self.assertRaisesRegex(RuntimeError, "Could not determine"):
+                runner["hf_cache_revision"](Path(folder) / "text_encoders" / "encoder.safetensors")
+
     def test_six_scene_coverage_has_distinct_editorial_functions(self):
         runner = load_gpu_runner_namespace()
         roles = [runner["shot_coverage_instruction"](index, 6) for index in range(1, 7)]
