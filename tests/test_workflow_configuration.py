@@ -26,7 +26,7 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('Repair borderline narration rhythm using the same AI scenes', body)
         self.assertIn("[ \"$POLL_ACTION\" = 'repair-rhythm' ]", body)
         self.assertIn('repair-rhythm-finalize', body)
-        self.assertIn('Retry the same Reel after the KSampler schema fix', body)
+        self.assertIn('Retry the same Reel after a narrowly classified worker fix', body)
         self.assertIn('refusing to silently skip GPU work', body)
         pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
         self.assertIn('def retry_failed_gpu()', pipeline)
