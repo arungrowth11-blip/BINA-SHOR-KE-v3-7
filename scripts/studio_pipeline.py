@@ -1062,24 +1062,67 @@ def resolve_dispatch_unknown(confirm_running: bool) -> int:
 
 
 def retry_failed_gpu() -> int:
-    """Retry the same manifest once after the known ComfyUI KSampler schema failure."""
+    """Retry the same Reel once for a narrowly classified worker compatibility failure."""
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') != 'gpu_failed':
         raise RuntimeError(f"GPU retry requires status=gpu_failed (current={pending.get('status', 'none')}). Run poll once first if the old Kaggle job has not yet been collected.")
     if int(pending.get('gpu_retry_attempts', 0)) >= 1:
-        raise RuntimeError('The one allowed KSampler compatibility retry has already been used; inspect Kaggle logs before any further GPU run.')
+        raise RuntimeError('The one allowed GPU retry has already been used; inspect Kaggle logs before any further GPU run.')
     if pending.get('resume_dataset_id') or int(pending.get('resume_scene_count', 0) or 0) > 0:
         raise RuntimeError('Verified scene checkpoints exist. Use resume-checkpoint instead of retry-gpu so completed scenes are reused.')
     if pending.get('checkpoint_save_error'):
         raise RuntimeError('Checkpoint persistence failed. Do not retry the GPU blindly; inspect the saved Kaggle output and checkpoint error first.')
+
     failure_text = json.dumps(pending.get('gpu_error', ''), ensure_ascii=False).lower()
-    if 'ksampler schema changed' not in failure_text and 'control_after_generate' not in failure_text:
-        raise RuntimeError('This retry is restricted to the observed KSampler schema incompatibility. The saved GPU error does not match that failure.')
+    known_ksampler_failure = (
+        'ksampler schema changed' in failure_text or 'control_after_generate' in failure_text
+    )
+    known_hf_revision_failure = (
+        'revisionnotfounderror' in failure_text
+        and (
+            'invalid rev id: text_encoders' in failure_text
+            or 'invalid rev id: vae' in failure_text
+        )
+    )
+    if not (known_ksampler_failure or known_hf_revision_failure):
+        raise RuntimeError(
+            'This one-time retry is restricted to the observed KSampler schema mismatch '
+            'or the known Hugging Face text_encoders/vae folder-as-revision failure. '
+            'The saved GPU error does not match either classified failure.'
+        )
+
     manifest = pending.get('manifest')
     if not isinstance(manifest, dict) or manifest.get('job_id') != pending.get('job_id') or not manifest.get('reels'):
         raise RuntimeError('Saved manifest is incomplete or does not match the pending job. Refusing to create a different Reel.')
     if any(reel.get('delivery_status') == 'delivered' for reel in pending.get('reels', [])):
         raise RuntimeError('At least one Reel from this manifest is already delivered. Refusing to retry the whole GPU manifest.')
+
+    # Reconcile the worker manifest with the repository's corrected, immutable model snapshot pins.
+    saved_lock = load_json(TOOLCHAIN_LOCK, {}) or {}
+    if saved_lock.get('status') != 'locked':
+        raise RuntimeError('The verified GPU toolchain lock is missing or not locked. Refusing a retry.')
+    saved_model_revisions = saved_lock.get('model_revisions')
+    required_model_keys = ('unet', 'clip', 'vae')
+    if not isinstance(saved_model_revisions, dict) or not all(
+        re.fullmatch(r'[0-9a-f]{40}', str(saved_model_revisions.get(key, '')))
+        for key in required_model_keys
+    ):
+        raise RuntimeError(
+            'The saved Hugging Face model lock is invalid. All UNet, CLIP and VAE revisions must be 40-character snapshot SHAs.'
+        )
+    previous_manifest_lock = manifest.get('toolchain_lock') if isinstance(manifest.get('toolchain_lock'), dict) else {}
+    for key in ('comfyui_commit', 'comfyui_gguf_commit'):
+        previous = previous_manifest_lock.get(key)
+        current = saved_lock.get(key)
+        if previous and previous != current:
+            raise RuntimeError(f'Toolchain source mismatch for {key}; refusing to change the ComfyUI code version during a GPU retry.')
+    manifest['toolchain_lock'] = {
+        'comfyui_commit': saved_lock['comfyui_commit'],
+        'comfyui_gguf_commit': saved_lock['comfyui_gguf_commit'],
+        'model_revisions': {key: saved_model_revisions[key] for key in required_model_keys},
+    }
+    pending['manifest'] = manifest
+    write_json(PENDING, pending)
 
     configure_kaggle_cli()
     recorded_kernel_id = str(pending.get('kaggle_kernel_id', '')).strip()
@@ -1091,9 +1134,14 @@ def retry_failed_gpu() -> int:
         raise RuntimeError(f"The previous Kaggle run is not confirmed terminal (status={remote_status}). No new GPU run was dispatched. {remote_output[-600:]}")
 
     kernel_dir = build_kaggle_kernel(manifest)
+    retry_reason = (
+        'Corrected Hugging Face snapshot SHA pins for Wan2.2 text encoder/VAE; original Reel manifest retained.'
+        if known_hf_revision_failure
+        else 'ComfyUI KSampler API schema compatibility fix; original Reel manifest retained.'
+    )
     try:
         result = subprocess.run(
-            ['kaggle', 'kernels', 'push', '-p', str(kernel_dir)],
+            kaggle_cli_command('kernels', 'push', '-p', str(kernel_dir)),
             text=True, capture_output=True, timeout=900,
         )
         console = (result.stdout or '') + '\n' + (result.stderr or '')
@@ -1115,13 +1163,14 @@ def retry_failed_gpu() -> int:
             pending['gpu_retry_dispatch_attempt_pending'] = True
             pending['gpu_retry_dispatch_error'] = console[-2500:]
             pending['gpu_retry_remote_status'] = after_status
+            pending['gpu_retry_reason'] = retry_reason
             write_json(PENDING, pending)
             alert_failure('BINA SHOR KE corrected GPU retry returned an ambiguous result. No second retry was sent. Inspect Kaggle run history, then use resolve-dispatch-running or resolve-dispatch-not-started.')
             return 1
 
     pending['gpu_retry_attempts'] = int(pending.get('gpu_retry_attempts', 0)) + 1
     pending['gpu_retry_dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-    pending['gpu_retry_reason'] = 'ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.'
+    pending['gpu_retry_reason'] = retry_reason
     pending['status'] = 'gpu_running'
     pending['dispatched_at_ist'] = pending['gpu_retry_dispatched_at_ist']
     pending['dispatch_output'] = console[-2000:]
