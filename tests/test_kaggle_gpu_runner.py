@@ -2,7 +2,10 @@ from __future__ import annotations
 
 import unittest
 import tempfile
+import sys
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -82,6 +85,69 @@ class CameraCoverageTests(unittest.TestCase):
             prompts.append(prompt)
         self.assertEqual(len(prompts), 6)
 
+
+
+
+class ComfyPromptDiagnosticsTests(unittest.TestCase):
+    def test_prompt_timeout_is_extended_to_ninety_minutes_per_scene(self):
+        runner = load_gpu_runner_namespace()
+        self.assertEqual(runner["DEFAULT_PROMPT_TIMEOUT_SECONDS"], 5400)
+
+    def test_wait_prompt_reports_queue_state_when_history_is_not_yet_persisted(self):
+        runner = load_gpu_runner_namespace()
+        calls = []
+
+        class Response:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def raise_for_status(self):
+                return None
+
+            def json(self):
+                return self.payload
+
+        def fake_get(url, timeout):
+            calls.append(url)
+            if "/history/" in url:
+                return Response({})
+            return Response({
+                "queue_running": [[1, "prompt-123", {}, {}, []]],
+                "queue_pending": [],
+            })
+
+        fake_requests = SimpleNamespace(
+            get=fake_get, RequestException=type("RequestException", (Exception,), {})
+        )
+        with patch.dict(sys.modules, {"requests": fake_requests}), \\
+             patch.object(runner["time"], "monotonic", side_effect=[0, 0, 11]), \\
+             patch.object(runner["time"], "sleep", return_value=None):
+            with self.assertRaisesRegex(TimeoutError, "queue_state.*running"):
+                runner["wait_prompt"]("prompt-123", timeout=10)
+
+        self.assertTrue(any("/history/prompt-123" in url for url in calls))
+        self.assertTrue(any(url.endswith("/queue") for url in calls))
+
+    def test_failure_file_preserves_current_scene_and_comfy_server_log_tail(self):
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_work, old_out, old_manifest = runner["WORK"], runner["OUT"], runner["MANIFEST"]
+            work, out = root / "work", root / "out"
+            work.mkdir()
+            out.mkdir()
+            (work / "comfy_server.log").write_text("ComfyUI booted\\nCUDA worker stalled\\n", encoding="utf-8")
+            runner["WORK"], runner["OUT"] = work, out
+            runner["MANIFEST"] = {"job_id": "offline-test", "reels": []}
+            current_scene = {"reel_id": "test-reel", "scene_index": 1, "prompt_id": "prompt-123"}
+            try:
+                runner["send_failure_file"](TimeoutError("scene timeout"), {"current_scene": current_scene, "scenes": []})
+                report = runner["json"].loads((out / "GPU_JOB_ERROR.json").read_text(encoding="utf-8"))
+                self.assertEqual(report["current_scene"], current_scene)
+                self.assertIn("CUDA worker stalled", report["comfy_server_log_tail"])
+                self.assertEqual(report["error_type"], "TimeoutError")
+            finally:
+                runner["WORK"], runner["OUT"], runner["MANIFEST"] = old_work, old_out, old_manifest
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
