@@ -274,8 +274,8 @@ jobs:
           remote_status="$(kaggle kernels status "$kernel_id" 2>&1 || true)"
           # Emit a machine-readable timestamp for every remote status observation.
           status_checked_at_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
-          echo "status_checked_at_utc=\${status_checked_at_utc}" >> "$GITHUB_OUTPUT"
-          echo "KAGGLE_STATUS_CHECKED_AT_UTC=\${status_checked_at_utc}"
+          echo "status_checked_at_utc=${status_checked_at_utc}" >> "$GITHUB_OUTPUT"
+          echo "KAGGLE_STATUS_CHECKED_AT_UTC=${status_checked_at_utc}"
           echo "$remote_status"
           if printf '%s' "$remote_status" | grep -Eqi 'RUNNING|QUEUED|COMPILING|CREATED'; then
             echo 'finalize_required=false' >> "$GITHUB_OUTPUT"
