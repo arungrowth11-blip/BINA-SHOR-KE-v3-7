@@ -192,8 +192,13 @@ jobs:
           gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
           known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
                                     or "control_after_generate" in gpu_error_text)
+          known_hf_revision_failure = (
+              "revisionnotfounderror" in gpu_error_text
+              and ("invalid rev id: text_encoders" in gpu_error_text
+                   or "invalid rev id: vae" in gpu_error_text)
+          )
           retry_gpu_ok = (state.get("status") == "gpu_failed"
-                          and known_ksampler_failure
+                          and (known_ksampler_failure or known_hf_revision_failure)
                           and not state.get("resume_dataset_id")
                           and int(state.get("resume_scene_count", 0) or 0) == 0
                           and not state.get("checkpoint_save_error")
