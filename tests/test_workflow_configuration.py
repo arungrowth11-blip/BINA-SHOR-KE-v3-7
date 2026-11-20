@@ -133,5 +133,19 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn("'paid_fallback': False", runner)
         self.assertIn("'auto_facebook_publish': False", runner)
 
+    def test_queued_feature_dispatch_refreshes_latest_state_before_pending_guard(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        refresh_name = '      - name: Refresh queued feature-branch dispatch to latest state'
+        pending_name = '      - name: Check whether a GPU batch actually needs polling (stdlib only)'
+        self.assertIn(refresh_name, body)
+        self.assertLess(body.index(refresh_name), body.index(pending_name))
+        refresh = body[body.index(refresh_name):body.index(pending_name)]
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/voice-first-3d-foundation'", refresh)
+        self.assertIn('git fetch --no-tags origin "$GITHUB_REF"', refresh)
+        self.assertIn('git reset --hard FETCH_HEAD', refresh)
+        self.assertIn('group: bina-shor-ke-studio', body)
+        self.assertIn('cancel-in-progress: false', body)
+        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

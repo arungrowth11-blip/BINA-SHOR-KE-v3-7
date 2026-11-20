@@ -73,6 +73,16 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Refresh queued feature-branch dispatch to latest state
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/voice-first-3d-foundation'
+        shell: bash
+        run: |
+          # workflow_dispatch keeps the event SHA while waiting for the concurrency lock.
+          # Refresh here so a queued retry reads state persisted by the preceding run.
+          git fetch --no-tags origin "$GITHUB_REF"
+          git reset --hard FETCH_HEAD
+          echo "Feature branch refreshed to $(git rev-parse --short HEAD)"
+
       - name: Check whether a GPU batch actually needs polling (stdlib only)
         id: pending
         shell: bash
