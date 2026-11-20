@@ -95,6 +95,12 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('उसने छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
         self.assertIn("'new_kaggle_gpu_dispatch': False", pipeline)
 
+    def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+        self.assertIn('active = state.get("status") in allowed', body)
+        self.assertNotIn('"delivered"', body[body.index('retry_states ='):body.index('qa_reason =')])
+
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */6 * * *"', body)
