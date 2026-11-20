@@ -1,7 +1,7 @@
 {
   "job_id": "20261119_074202",
   "created_at_ist": "2026-11-19T07:44:34+05:30",
-  "status": "finalize_failed",
+  "status": "delivered",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261119_074202",
@@ -549,7 +549,8 @@
           "shot_count": 6,
           "dialogue_rewritten": false,
           "target_frames_changed": false
-        }
+        },
+        "final_caption": "एक छोटा कर्ज, बड़ी रूटीन। कभी‑कभी छोटी‑छोटी चीज़ें भी बदल देती हैं।\n\nकहानी काल्पनिक है।\n\n#BinaShorKe #EverydayChoice #HindiMicroStory"
       },
       "beats": [
         {
@@ -701,8 +702,15 @@
           "target_frames": 73
         }
       ],
-      "delivery_status": "planned",
-      "output_directory": "output/20261120_0026_1_reel-1"
+      "delivery_status": "delivered",
+      "output_directory": "output/20261120_0026_1_reel-1",
+      "delivery_steps": {
+        "video": true,
+        "cover": true,
+        "message": true,
+        "publish_kit": true
+      },
+      "delivery_completed_at_ist": "2026-11-20T23:40:39+05:30"
     }
   ],
   "policy": {
@@ -720,5 +728,7 @@
   "finalize_failed_at_ist": "2026-11-20T00:26:16+05:30",
   "last_seen_gpu_status": "COMPLETE",
   "last_seen_gpu_status_at_ist": "2026-11-20T00:26:07+05:30",
-  "finalize_error": "RuntimeError: Command failed (234): ffmpeg -hide_banner -loglevel error -y -i /home/runner/work/BINA-SHOR-KE-v3-7/BINA-SHOR-KE-v3-7/output/20261120_0026_1_reel-1/ai_clips/scene_03.mp4 -i\n[aac @ 0x6118f026dd80] Input contains (near) NaN/+-Inf\n[aost#0:1/aac @ 0x6118f026db00] [enc:aac @ 0x6118f7300bc0] Error submitting audio frame to the encoder\n[aost#0:1/aac @ 0x6118f026db00] [enc:aac @ 0x6118f7300bc0] Error encoding a frame: Invalid argument\n[aost#0:1/aac @ 0x6118f026db00] Task finished with error code: -22 (Invalid argument)\n[aost#0:1/aac @ 0x6118f026db00] Terminating thread with return code -22 (Invalid argument)"
+  "retry_finalization_count": 1,
+  "retry_requested_at_ist": "2026-11-20T23:39:35+05:30",
+  "completed_at_ist": "2026-11-20T23:40:42+05:30"
 }
