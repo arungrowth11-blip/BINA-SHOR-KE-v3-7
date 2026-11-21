@@ -631,7 +631,7 @@ def create_character_reference_image(source: Path, destination: Path, duration: 
         "-frames:v", "1", "-vf", "scale=704:1280:flags=lanczos,format=rgb24",
         str(temporary),
     ], timeout=180)
-    if not temporary.is_file() or temporary.stat().st_size < 10_000:
+    if not temporary.is_file() or temporary.stat().st_size < 1_024:
         temporary.unlink(missing_ok=True)
         raise RuntimeError("First-scene identity anchor was not extracted as a non-empty PNG.")
     try:

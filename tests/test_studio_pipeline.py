@@ -196,8 +196,9 @@ class StudioPipelineTests(unittest.TestCase):
         story = {'reel_id': 'reel_anchor_test', 'visual_pipeline': 'hybrid_25d_motion_comic_v1', 'beats': [{}] * 6}
         beat = {'video_prompt': 'A clear illustrated action.', 'target_frames': 109, 'voice_timing': {'fps': 24},
                 'narrative_role': 'context', 'state_change': 'The character notices a new detail', 'causal_link': 'The hook creates this discovery'}
-        with self.assertRaisesRegex(RuntimeError, 'missing its safe first-scene character anchor'):
-            runner.build_api_workflow({}, beat, story, 2, 'bsk/test/scene_02')
+        with patch.object(runner, 'node_prompt', side_effect=lambda _objects, node_type, inputs: {'class_type': node_type, 'inputs': inputs}):
+            with self.assertRaisesRegex(RuntimeError, 'missing its safe first-scene character anchor'):
+                runner.build_api_workflow({}, beat, story, 2, 'bsk/test/scene_02')
 
     def test_wan_graph_rejects_invalid_frame_shape_and_unsupported_duration(self):
         runner = load_runner_module()
