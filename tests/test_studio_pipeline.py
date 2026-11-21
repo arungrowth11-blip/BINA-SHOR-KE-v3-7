@@ -1145,7 +1145,7 @@ class StudioPipelineTests(unittest.TestCase):
         pending = {
             "reels": [{
                 "beats": [{} for _ in range(6)],
-                "concept": {"visual_pipeline": producer.story_engine.PRIMARY_25D_PIPELINE},
+                "concept": {"visual_pipeline": studio_pipeline.producer.story_engine.PRIMARY_25D_PIPELINE},
             }]
         }
         self.assertEqual(studio_pipeline.estimate_resume_hours(pending, []), 999.0)
@@ -1171,7 +1171,7 @@ class StudioPipelineTests(unittest.TestCase):
                 "reels": [{
                     "reel_id": reel_id,
                     "beats": [{}],
-                    "concept": {"visual_pipeline": producer.story_engine.PRIMARY_25D_PIPELINE},
+                    "concept": {"visual_pipeline": studio_pipeline.producer.story_engine.PRIMARY_25D_PIPELINE},
                 }],
             }
             rows = studio_pipeline.collect_checkpoint_clips(root, pending)
