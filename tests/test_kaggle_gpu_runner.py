@@ -111,8 +111,7 @@ class FluxImageFirstWorkflowTests(unittest.TestCase):
     def test_image_first_config_uses_public_vae_mirror_not_gated_bfl_download(self):
         source = (Path(__file__).resolve().parents[1] / "scripts" / "kaggle_gpu_runner.py").read_text(encoding="utf-8")
         self.assertIn("'nick911/flux1-schnell-normal', 'ae.safetensors'", source)
-        self.assertIn("afc8e28272cd15db3919bacdb6918ce9c1ed22e96da", source) if False else None
-        self.assertIn("afc8e28272cd15db3919bacdb6918ce9c1ed22e96b", source)
+        self.assertIn("afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38", source)
         self.assertNotIn("'black-forest-labs/FLUX.1-schnell', 'ae.safetensors'", source)
 
 
