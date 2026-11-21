@@ -375,8 +375,14 @@ def install_comfyui():
                        COMFY / 'models' / 'text_encoders' / 'clip_l.safetensors'),
             't5xxl': ('comfyanonymous/flux_text_encoders', 't5xxl_fp8_e4m3fn_scaled.safetensors',
                       COMFY / 'models' / 'text_encoders' / 't5xxl_fp8_e4m3fn_scaled.safetensors'),
-            'vae': ('black-forest-labs/FLUX.1-schnell', 'ae.safetensors',
+            # The official BFL Schnell repo is gated. This public Apache-2.0
+            # mirror identifies ae.safetensors as an unmodified copy and publishes
+            # the original file SHA-256; verify bytes before accepting it.
+            'vae': ('nick911/flux1-schnell-normal', 'ae.safetensors',
                     COMFY / 'models' / 'vae' / 'ae.safetensors'),
+        }
+        expected_image_file_hashes = {
+            'vae': 'afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38',
         }
         locked_revisions = MANIFEST.get('image_toolchain_lock')
         locked_revisions = locked_revisions.get('model_revisions', {}) if isinstance(locked_revisions, dict) else {}
@@ -406,6 +412,13 @@ def install_comfyui():
             resolved = hf_cache_revision(cached)
             if resolved != revision:
                 raise RuntimeError(f'{key} model cache snapshot {resolved} differs from resolved revision {revision}.')
+            expected_file_sha = expected_image_file_hashes.get(key)
+            if expected_file_sha:
+                actual_file_sha = sha256_file(cached)
+                if actual_file_sha != expected_file_sha:
+                    raise RuntimeError(
+                        f'{key} model bytes SHA-256 mismatch: expected {expected_file_sha}, got {actual_file_sha}.'
+                    )
             destination.symlink_to(cached)
             model_revisions[key] = resolved
     else:
