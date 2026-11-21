@@ -302,10 +302,18 @@ def install_comfyui():
     import torch
     from huggingface_hub import hf_hub_download, model_info
 
-    primary_image_first = any(
-        is_25d_pipeline(reel.get('visual_pipeline'))
+    primary_image_first = bool(MANIFEST.get('reels')) and all(
+        str(reel.get('visual_pipeline') or '') == PRIMARY_25D_PIPELINE
         for reel in MANIFEST.get('reels', [])
     )
+    if any(
+        is_25d_pipeline(reel.get('visual_pipeline'))
+        and str(reel.get('visual_pipeline') or '') != PRIMARY_25D_PIPELINE
+        for reel in MANIFEST.get('reels', [])
+    ):
+        # Legacy hybrid manifests are Wan video-first and must keep their original
+        # ComfyUI graph/model family. They are not aliases for image-first production.
+        primary_image_first = False
     if not torch.cuda.is_available():
         raise RuntimeError('Kaggle did not provide a CUDA GPU. No CPU fallback was attempted because it would be too slow and low quality.')
     gpu_name = torch.cuda.get_device_name(0)
