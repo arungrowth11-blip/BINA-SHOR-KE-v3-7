@@ -27,9 +27,11 @@ jobs:
       - name: Install FFmpeg for real montage integration
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y ffmpeg
+          sudo apt-get install --no-install-recommends -y ffmpeg tesseract-ocr tesseract-ocr-hin
           ffmpeg -version
           ffprobe -version
+          tesseract --version
+          tesseract --list-langs | grep -qx hin
       - name: Compile all project Python files
         run: python -m compileall -q scripts tests
       - name: Run offline regression tests
