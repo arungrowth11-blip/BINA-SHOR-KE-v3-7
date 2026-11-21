@@ -663,12 +663,40 @@ def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
     return list(deduped.values())
 
 def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
+    """Conservative free-GPU recovery estimate; image-first resumes must rebuild parallax from PNG stills."""
     expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
+    if expected <= 0:
+        return 999.0
+    primary_image_first = any(
+        str(x.get('concept', {}).get('visual_pipeline', '')) == producer.story_engine.PRIMARY_25D_PIPELINE
+        for x in pending.get('reels', [])
+    )
+    if primary_image_first:
+        # Private image-first checkpoints preserve PNG stills only, not parallax MP4s.
+        # The resumed worker regenerates all parallax clips, including those finished
+        # before the interrupted session, so estimate the entire parallax phase again.
+        worker_path = ROOT / 'data' / 'gpu_output_manifest.json'
+        # The actual worker manifest is staged with the extracted output root; the caller
+        # stores measured per-scene times into the pending job before estimating below.
+        times = [
+            float(x.get('parallax_elapsed_seconds', 0) or 0)
+            for x in scenes if float(x.get('parallax_elapsed_seconds', 0) or 0) > 0
+        ]
+        minimum_samples = min(5, expected)
+        if len(times) < minimum_samples:
+            return 999.0
+        median = statistics.median(times)
+        # 2x observed per-scene parallax time plus a full hour for Comfy/model restore.
+        return round((expected * median * 2.0 + 3600) / 3600, 2)
+
     present = {(x['reel_id'], x['scene_index']) for x in scenes}
     missing = max(0, expected - len(present))
     if missing == 0:
-        return 1.5  # ComfyUI/model bootstrap can still consume substantial time
-    times = [float(x.get('generation_elapsed_seconds', 0)) for x in scenes if float(x.get('generation_elapsed_seconds', 0)) > 0]
+        return 1.5  # Model/bootstrap restoration can still consume substantial time
+    times = [
+        float(x.get('generation_elapsed_seconds', 0))
+        for x in scenes if float(x.get('generation_elapsed_seconds', 0)) > 0
+    ]
     if not times:
         lock = load_json(TOOLCHAIN_LOCK, {}) or {}
         benchmark = lock.get('gpu_benchmark') if isinstance(lock, dict) else {}
