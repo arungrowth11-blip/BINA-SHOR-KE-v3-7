@@ -2159,6 +2159,19 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         30 if story_engine.is_25d_pipeline(concept.get("visual_pipeline"))
         else (24 if require_ai_video else 30)
     )
+    if require_ai_video and not primary_image_first:
+        # Preserve the clear legacy error contract: detect missing Wan source assets
+        # before reporting an absent editorial plan, and always before TTS generation.
+        missing_legacy_clips = [
+            f"scene_{i+1:02d}.mp4"
+            for i in range(len(concept["beats"]))
+            if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()
+        ]
+        if missing_legacy_clips:
+            raise RuntimeError(
+                "AI-video mode is missing required clips before TTS starts: "
+                + ", ".join(missing_legacy_clips)
+            )
     if require_ai_video:
         if not isinstance(editorial_plan, dict):
             raise RuntimeError("AI production requires a voice-locked editorial_shot_plan; refusing a legacy fallback.")
