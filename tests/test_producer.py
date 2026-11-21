@@ -165,6 +165,38 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         sleep.assert_called_once_with(12)
 
+    def test_gemini_text_request_uses_header_for_api_key(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}]
+        }
+        with patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), patch.object(
+            producer.requests, "post", return_value=response
+        ) as mocked:
+            result = producer._gemini_json_request("system", "prompt")
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(mocked.call_args.kwargs["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertNotIn("params", mocked.call_args.kwargs)
+        self.assertNotIn("test-gemini-key", mocked.call_args.args[0])
+
+    def test_gemini_visual_qa_request_uses_header_for_api_key(self):
+        response = Mock()
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"scores": {}}'}]}}]
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            frame = Path(folder) / "frame.jpg"
+            frame.write_bytes(b"frame-bytes")
+            with patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), patch.object(
+                producer.requests, "post", return_value=response
+            ) as mocked:
+                result = producer.gemini_json_with_images("system", "prompt", [frame])
+        self.assertEqual(result, {"scores": {}})
+        self.assertEqual(mocked.call_args.kwargs["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertNotIn("params", mocked.call_args.kwargs)
+        self.assertNotIn("test-gemini-key", mocked.call_args.args[0])
+
     def test_second_draft_prompt_includes_previous_structural_feedback(self):
         concept = self.sample_concept()
         feedback = "Beat 1 narration has 18 words; use 7-12 words."

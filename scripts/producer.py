@@ -155,7 +155,7 @@ def _gemini_json_request(system: str, user_prompt: str, temperature: float = 0.8
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": temperature},
     }
-    response = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=timeout)
+    response = requests.post(url, headers={"x-goog-api-key": GEMINI_API_KEY}, json=payload, timeout=timeout)
     if response.status_code >= 400:
         # Preserve the response object so retry logic can honour Retry-After.
         raise requests.HTTPError(
@@ -1422,7 +1422,7 @@ def gemini_json_with_images(system: str, user_prompt: str, image_paths: list[Pat
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": temperature},
     }
-    response = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=150)
+    response = requests.post(url, headers={"x-goog-api-key": GEMINI_API_KEY}, json=payload, timeout=150)
     response.raise_for_status()
     body = response.json()
     output_text = body["candidates"][0]["content"]["parts"][0]["text"]
