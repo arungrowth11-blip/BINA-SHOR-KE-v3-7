@@ -387,18 +387,18 @@ class FactoryLogicTests(unittest.TestCase):
                     "segment_id": sid,
                     "speaker_id": speaker_id,
                     "text": "मैंने तुम्हारी बात सुनी थी।",
-                    "duration_seconds": 2.35,
+                    "duration_seconds": 4.6,
                 }],
                 "voice_timing": {
                     "timing_source": "measured_tts_wav_before_gpu",
-                    "target_duration_seconds": 2.625,
-                    "target_frames": 63,
+                    "target_duration_seconds": 5.0,
+                    "target_frames": 120,
                     "fps": 24,
                     "segments": [{
                         "segment_id": sid,
                         "speaker_id": speaker_id,
                         "start_seconds": 0.08,
-                        "end_seconds": 2.43,
+                        "end_seconds": 4.68,
                     }],
                 },
             })
@@ -408,7 +408,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(result["voice_aware_storyboard"]["status"], "generated_after_voice_lock")
         self.assertEqual(result["beats"][0]["video_prompt"], prompt)
         self.assertEqual(result["beats"][0]["speech_segments"][0]["text"], "मैंने तुम्हारी बात सुनी थी।")
-        self.assertEqual(result["beats"][0]["target_frames"] if "target_frames" in result["beats"][0] else result["beats"][0]["voice_timing"]["target_frames"], 63)
+        self.assertEqual(result["beats"][0]["voice_timing"]["target_frames"], 120)
         self.assertIn("actual_audio_duration_seconds", mocked.call_args.args[1])
         self.assertIn("target_duration_seconds", mocked.call_args.args[1])
 
