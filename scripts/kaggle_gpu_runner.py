@@ -310,10 +310,15 @@ def install_comfyui():
         raise RuntimeError('Kaggle did not provide a CUDA GPU. No CPU fallback was attempted because it would be too slow and low quality.')
     gpu_name = torch.cuda.get_device_name(0)
     total_vram_gib = torch.cuda.get_device_properties(0).total_memory / (1024**3)
-    if total_vram_gib < 7.5:
-        raise RuntimeError(f'GPU {gpu_name} has only {total_vram_gib:.1f} GiB VRAM. The qualified 4-bit still/video model paths require at least 7.5 GiB; no CPU or paid fallback was attempted.')
+    minimum_vram_gib = 12.0 if primary_image_first else 7.5
+    if total_vram_gib < minimum_vram_gib:
+        raise RuntimeError(
+            f'GPU {gpu_name} has only {total_vram_gib:.1f} GiB VRAM; '
+            f'the selected {"FLUX image-first" if primary_image_first else "legacy Wan"} mode '
+            f'requires at least {minimum_vram_gib:.1f} GiB as a safety floor. No CPU or paid fallback was attempted.'
+        )
     free = shutil.disk_usage(WORK).free / (1024**3)
-    min_disk = 14.5 if primary_image_first else 14.5
+    min_disk = 18.0 if primary_image_first else 14.5
     if free < min_disk:
         raise RuntimeError(f'Only {free:.1f} GiB free disk space; the selected open-weight model, text encoders, VAE and depth model need about {min_disk:.1f} GiB plus runtime/output. Aborting before download.')
     print(f'GPU={gpu_name}; total_vram={total_vram_gib:.1f} GiB; free_disk={free:.1f} GiB; mode={"image-first-primary-2.5d" if primary_image_first else "legacy-wan-video"}', flush=True)
@@ -362,7 +367,7 @@ def install_comfyui():
                        COMFY / 'models' / 'text_encoders' / 'clip_l.safetensors'),
             't5xxl': ('comfyanonymous/flux_text_encoders', 't5xxl_fp8_e4m3fn_scaled.safetensors',
                       COMFY / 'models' / 'text_encoders' / 't5xxl_fp8_e4m3fn_scaled.safetensors'),
-            'vae': ('Comfy-Org/Lumina_Image_2.0_Repackaged', 'split_files/vae/ae.safetensors',
+            'vae': ('black-forest-labs/FLUX.1-schnell', 'ae.safetensors',
                     COMFY / 'models' / 'vae' / 'ae.safetensors'),
         }
         locked_revisions = MANIFEST.get('image_toolchain_lock')
