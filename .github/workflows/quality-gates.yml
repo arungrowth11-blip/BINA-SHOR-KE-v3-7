@@ -6,6 +6,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: bina-shor-ke-quality-gates-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
