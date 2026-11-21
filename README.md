@@ -6,7 +6,7 @@ A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels
 
 - **Primary writer:** Gemini 3.8 Flash Free Tier.
 - **Optional text failover / independent editor:** Groq `openai/gpt-oss-120b` Free, Mistral `ministral-8b-latest` in Studio Free mode, and Cloudflare Workers AI `@cf/meta/llama-3.1-8b-instruct` only with explicit Free-plan opt-in. Requests fail over sequentially; there is no paid route or parallel prompt fan-out.
-- **Narration:** Gemini 3.8 Flash-Lite TTS generates separate character dialogue turns with speaker-specific voice IDs. Each WAV is validated and measured before the final shot prompts and Wan video dispatch. Voice mappings are candidates requiring Hindi listening review; they are not guarantees of a character's exact age or acting quality.
+- **Narration:** Gemini 3.8 Flash-Lite TTS generates separate character dialogue turns with speaker-specific voice IDs. Each WAV is validated and measured before the final editorial shot prompts and image-first still/parallax dispatch. Voice mappings are candidates requiring Hindi listening review; they are not guarantees of a character's exact age or acting quality.
 - **Primary visual generation:** FLUX.1 Schnell Q4_K_S GGUF through ComfyUI, 4-step still-image graphs, one vertical 704×1280 still per narrative beat. Pinned Depth Anything V2 Small estimates depth; OpenCV/FFmpeg generates camera-driven parallax motion. Editorial master is 1080×1920 at 30 FPS. The default story plan routes 100% of editorial shots through depth-parallax and dispatches no Wan video calls.
 - **Legacy renderer:** Wan2.2 TI2V-5B Q4_K_M GGUF remains available for already-created legacy jobs and older manifests; it is not the default generation route.
 - **Qualification status:** image-first workflow has offline code/tests but still requires a real Kaggle one-Reel render, model/runtime lock, measured GPU benchmark, output inspection and human visual approval before weekly batch qualification.
@@ -62,7 +62,7 @@ No guarantee of artifact-free video, audience distribution, 10,000 views, moneti
 ## v3.7 P0 reliability corrections
 
 - Fixed Kaggle worker manifest injection so the generated `MANIFEST` is a dictionary; the worker also validates the injected type at startup.
-- Weekly three-Reel planning now requires a successfully finalized Reel, passed technical QA, all four Telegram delivery steps, and an owner `/approve` record. The GPU runtime benchmark remains an additional independent gate.
+- Weekly three-Reel planning now requires a successfully finalized image-first 2.5D Reel, passed VLM/OCR/motion/technical QA, all four Telegram delivery steps, and an owner `/approve` record. The separate FLUX + depth image-first GPU runtime benchmark remains an independent gate; the old Wan benchmark cannot qualify the new renderer.
 - Telegram feedback drain and persistence steps are skipped unless `TELEGRAM_BOT_TOKEN` is configured.
 - Empty/unset `KAGGLE_KERNEL_SLUG` values resolve to the safe default `bina-shor-ke-studio-video`.
 - New plans are blocked while a resumable `gpu_checkpoint_saved` state exists.
@@ -80,6 +80,6 @@ This release is offline-tested only. No live Kaggle GPU, external API, or Telegr
 
 ## Selective upgrades from the separate AI Comedy Factory blueprint
 
-- The six Wan scene prompts now receive a consistent, story-aware coverage role: establishing, action, detail insert, consequence, turning point and visual payoff. The same visual bible is repeated across all six prompts. Camera guidance cannot invent characters, props or events and never overrides the beat's actual action.
+- **Legacy Wan route only:** the six Wan scene prompts receive consistent, story-aware coverage roles. The primary image-first FLUX route now uses the same per-Reel visual bible, cast appearance, wardrobe, narrative role, state change and causal link in every still prompt; true image-conditioned multi-angle character-sheet locking remains outstanding.
 - The complete narration + ambience master bus now receives final integrated loudness normalization at -16 LUFS, a -1.5 dBTP target and a final sample limiter. This adapts the source blueprint's broadcast-mastering idea while preserving BINA SHOR KE's quieter mix target.
-- Existing provider failover, TTS retry/cache, subtitles/overlays, per-scene continuity bible, checkpoint recovery and technical/visual QA were retained rather than duplicated. FLUX/Wan alternate model stacks, meme outros and extra TTS providers were not imported because they are unqualified for this free-GPU production path and would add resource or quality risk.
+- Existing provider failover, TTS retry/cache, subtitles/overlays, per-scene continuity bible, checkpoint recovery and technical/visual QA were retained. The new primary FLUX still + Depth Anything parallax path is implemented but not yet live-GPU qualified; Wan2.2 remains only for older manifests.
