@@ -1,7 +1,7 @@
-"""Deterministic FFmpeg assembly for the hybrid 2.5D motion-comic cut.
+"""Deterministic FFmpeg assembly for the primary 2.5D motion-comic cut.
 
-The GPU worker creates the illustrated keyframe parallax clip; this module combines
-selected hero-video intervals and depth-parallax intervals into an exact-timed montage.
+The GPU worker creates depth-parallax scene masters; this module assembles the 2.5D majority
+and a small number of story-critical hero-video intervals into an exact-timed montage.
 """
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ def build_editorial_filter_graph(
     *,
     width: int = 1080,
     height: int = 1920,
-    fps: int = 24,
+    fps: int = 30,
     video_speed_ratio: float = 1.0,
     video_hold_duration: float = 0.0,
 ) -> str:
