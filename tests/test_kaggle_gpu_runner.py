@@ -159,6 +159,18 @@ class FluxImageFirstWorkflowTests(unittest.TestCase):
             self.assertEqual(result["sha256"], runner["sha256_file"](destination))
             self.assertGreater(result["bytes"], 100_000)
 
+    def test_image_first_parallax_accepts_voice_locked_maximum_frame_duration(self):
+        runner = load_gpu_runner_namespace()
+        with patch.object(runner["shutil"], "which", return_value="/usr/bin/ffprobe"), patch.object(
+            runner["subprocess"], "run",
+            return_value=SimpleNamespace(returncode=0, stdout="8.041667", stderr=""),
+        ):
+            legacy_valid, _ = runner["valid_scene_file"](Path("scene.mp4"))
+            image_first_valid, measured = runner["valid_scene_file"](Path("scene.mp4"), max_duration=8.1)
+        self.assertFalse(legacy_valid)
+        self.assertTrue(image_first_valid)
+        self.assertAlmostEqual(measured, 8.041667)
+
     def test_image_first_comfy_preflight_requires_flux_nodes_only(self):
         runner = load_gpu_runner_namespace()
         required = {
