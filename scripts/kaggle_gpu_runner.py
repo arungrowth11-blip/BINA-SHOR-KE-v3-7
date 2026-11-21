@@ -58,7 +58,7 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def valid_scene_file(path: Path) -> tuple[bool, float]:
+def valid_scene_file(path: Path, max_duration: float = 8.0) -> tuple[bool, float]:
     if not path.is_file() or path.stat().st_size < 100_000 or shutil.which('ffprobe') is None:
         return False, 0.0
     probe = subprocess.run(
@@ -71,7 +71,7 @@ def valid_scene_file(path: Path) -> tuple[bool, float]:
         duration = float(probe.stdout.strip())
     except (TypeError, ValueError):
         return False, 0.0
-    return 2.5 <= duration <= 8.0, duration
+    return 2.5 <= duration <= max_duration, duration
 
 
 def checkpoint_entries_from_output(result_manifest: dict) -> list[dict]:
@@ -1088,7 +1088,9 @@ def create_25d_parallax_clip(
     finally:
         if encoder.stderr:
             encoder.stderr.close()
-    valid, measured = valid_scene_file(temporary)
+    valid, measured = valid_scene_file(
+        temporary, max_duration=8.1 if source.suffix.lower() == ".png" else 8.0
+    )
     if not valid or abs(measured - duration) > 0.20:
         temporary.unlink(missing_ok=True)
         raise RuntimeError(f"2.5D parallax clip failed media validation: valid={valid}, target={duration:.3f}s, actual={measured:.3f}s.")
@@ -1254,9 +1256,9 @@ def main():
                         raise RuntimeError(f'Missing or invalid FLUX still for {reel_id} scene {scene_index}: {exc}') from exc
                     voice_timing = beat.get('voice_timing') if isinstance(beat.get('voice_timing'), dict) else {}
                     scene_duration = float(voice_timing.get('target_duration_seconds') or (int(beat.get('target_frames', 81)) / 24.0))
-                    if not 2.5 <= scene_duration <= 8.0:
-                        raise RuntimeError(f'Voice-locked parallax duration {scene_duration:.3f}s is outside the 2.5–8.0s encoder contract.')
-                    valid_parallax, existing_duration = valid_scene_file(parallax)
+                    if not 2.5 <= scene_duration <= 8.1:
+                        raise RuntimeError(f'Voice-locked parallax duration {scene_duration:.3f}s is outside the 2.5–8.1s image-first encoder contract.')
+                    valid_parallax, existing_duration = valid_scene_file(parallax, max_duration=8.1)
                 else:
                     valid_source, scene_duration = valid_scene_file(source)
                     if not valid_source:
