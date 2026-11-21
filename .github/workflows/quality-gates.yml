@@ -35,6 +35,7 @@ jobs:
           ffmpeg -version
           ffprobe -version
           tesseract --version
+          tesseract --list-langs | grep -qx eng
           tesseract --list-langs | grep -qx hin
       - name: Compile all project Python files
         run: python -m compileall -q scripts tests
