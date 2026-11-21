@@ -1,80 +1,48 @@
-# BINA SHOR KE — v3.7: सबसे पहले यह करें
+# BINA SHOR KE — Current Operator Guide (Primary 2.5D)
 
-यह latest corrected release है। v3.5 या उससे पुराने ZIP की बजाय v3.7 इस्तेमाल करें।
+> यह मौजूदा GitHub repository और feature branch के लिए है। नया ZIP, नई repository या manual code copy बनाने की जरूरत नहीं। Current PR #10 open/draft है; production में merge नहीं हुआ।
 
-# BINA SHOR KE v3.7 — सबसे पहले यह करें
+## 1. Current architecture
 
-## 1. ZIP को GitHub पर डालें
+- **Primary:** FLUX.1 Schnell Q4_K_S से एक 704×1280 illustrated still प्रति source story beat।
+- **Motion:** Depth Anything V2 + OpenCV/FFmpeg से वास्तविक 2.5D depth-parallax MP4।
+- **Final edit:** 1080×1920, 30 FPS; primary editorial shots सभी depth-parallax से।
+- **Legacy only:** Wan2.2 केवल पुराने pending manifests/recovery के लिए। नई primary job में Wan fallback नहीं।
+- **Voice-first:** script/dialogue पहले, हर voice segment का वास्तविक WAV duration मापना, फिर final timed shot plan।
+- **Human sign-off:** पूरा Reel सुनना/देखना, owner approval; कोई social platform auto-publish नहीं।
 
-1. ZIP extract करें।
-2. GitHub पर `bina-shor-ke-studio` नाम की **Private** repository बनाएं।
-3. GitHub Desktop से repository clone करें और extracted folder की सभी files, hidden `.github` folder सहित, उसमें copy करें।
-4. Commit और Push करें।
+## 2. Required secrets
 
-पूरी Windows walkthrough `README_HINDI.md` में है।
+GitHub Actions secrets: GEMINI_API_KEY, TELEGRAM_BOT_TOKEN, KAGGLE_USERNAME, KAGGLE_KEY. Optional text fallback secrets: GROQ_API_KEY and MISTRAL_API_KEY. FLUX AE VAE public mirror से आता है और fixed SHA-256 check होता है; Hugging Face token को requirement नहीं बनाया गया। Gemini/provider accounts को paid billing पर switch न करें; no paid fallback है।
 
-## 2. पहले केवल ये 4 GitHub Secrets डालें
+## 3. Qualification sequence
 
-Repository → Settings → Secrets and variables → Actions → New repository secret:
+1. Offline preflight and current-head CI must pass.
+2. Run exactly one image-first `plan-one` after code/CI review. Do not run a weekly batch.
+3. The worker must load pinned FLUX + CLIP-L/T5 + VAE + Depth Anything models on Kaggle, create all source PNG stills, make every depth-parallax MP4, persist manifest hashes and finish without errors.
+4. Finalizer must verify PNG/MP4 hashes, render 30 FPS 9:16 master, and pass technical checks, complete VLM review, full-video black/freeze scan and Hindi+English OCR.
+5. Telegram must confirm all four delivery items: video, cover, review message and publish kit.
+6. Watch/listen to the full Reel. Only after explicit owner `/approve title=Exact Reel Title` is the one-Reel qualification recorded.
+7. The image-first toolchain must save a complete immutable model/runtime lock and measured benchmark; only if the measured conservative 3-Reel estimate is <=8 hours can `plan-week` unlock.
 
-- `GEMINI_API_KEY`
-- `TELEGRAM_BOT_TOKEN`
-- `KAGGLE_USERNAME`
-- `KAGGLE_KEY`
+The prior Wan benchmark (10.32h estimate) is not evidence for the FLUX image-first path.
 
-Gemini को Free Tier पर रखें; Google Cloud Billing link न करें।
+## 4. Recovery / retry
 
-## 3. अतिरिक्त free AI keys (recommended, पर launch के लिए optional)
+- Image-first checkpoints save FLUX PNG stills with dimensions and SHA-256; private Kaggle restore verifies those hashes. Missing parallax MP4s can be regenerated from restored stills.
+- Legacy Wan recovery accepts only the old video assets/lock. Never combine primary FLUX and legacy Wan assets in one job.
+- Do not clear pending job state or fake benchmark/QA/Telegram flags. Ambiguous Kaggle dispatch must be resolved against the exact private kernel history before any retry.
+- A technical rerun is not proof of a passed visual review. Failed/incomplete OCR/VLM/motion checks must stay blocked.
 
-- `GROQ_API_KEY` — Groq Free. यह independent critic को अलग provider देता है और Gemini text quota fail होने पर fallback करता है।
-- `MISTRAL_API_KEY` — Mistral Studio **Free mode**. `ministral-8b-latest` model का access अपने account में जाँचें; Free mode की limits कम हैं। Pay-as-you-go/billing enable न करें।
-- Cloudflare अभी **बंद रखें**। इसे तभी चालू करें जब account को Workers Free verify कर लें; तब `CF_ACCOUNT_ID`, `CF_API_TOKEN` और `CF_WORKERS_AI_FREE_ONLY=YES` secrets जोड़ें। Workers Paid account पर opt-in न करें।
+## 5. Known qualification gaps
 
-## 4. सही launch order
+- Live FLUX/Kaggle image-first Reel and measured runtime have not yet been verified.
+- Six source story beats currently produce six FLUX stills; these are expanded into 12–16 editorial cuts using camera movement/crops. Independent still generation per each editorial shot is not yet implemented.
+- Character descriptions and wardrobe are repeated in prompts and reviewed by VLM, but true image-conditioned multi-angle character-sheet locking is not yet implemented or qualified.
+- 18–28 minutes per Reel is an unverified target.
+- First six-Reel experiment and platform analytics are pending.
+- Immutable container/dependency caching to remove the older cold-start bottleneck is still pending.
 
-1. GitHub Actions → `BINA SHOR KE — Director and AI Reel Dispatch` → Run workflow → `preflight`.
-2. Preflight पास हो तो उसी workflow में `plan-one` चलाएँ। यह पहला GPU qualification Reel है।
-3. Telegram पर MP4 video, cover, review message और publish kit चारों आने की पुष्टि करें। पूरा video फोन पर देखें: हिंदी उच्चारण, कहानी, pacing, motion/flicker, character/prop continuity और subtitle readability जाँचें।
-4. Reel सही हो तो `/approve title=Exact Reel Title` भेजें; समस्या हो तो `/reject title=Exact Reel Title` भेजें। `plan-week` केवल owner approval, QA, सभी Telegram delivery steps और qualified GPU benchmark के बाद ही चलेगा। अनुमानित runtime 8 घंटे से अधिक हो तो एक Reel प्रति run रखें।
-5. Approved Reel को Facebook/Instagram पर manually publish करें; फिर `/published` और लगभग 24 घंटे बाद `/insights` दर्ज करें। `Telegram Feedback Sync` workflow हर 6 घंटे में commands save करेगा; जरूरत पर इसे manually भी Run workflow कर सकते हैं।
+## 6. Publishing
 
-## 5. खर्च सुरक्षा
-
-GitHub Actions billing में paid overage बंद रखें। Gemini को billing से link न करें। Groq/Mistral को Free mode/Free plan पर ही रखें। Cloudflare opt-in default से OFF है। किसी provider का free quota खत्म हो तो workflow fail होगा—paid provider पर switch नहीं करेगा।
-
-**ध्यान दें:** 84 offline tests और workflow YAML validation पास हैं। आपकी API keys, Kaggle GPU, Telegram delivery और real video generation इस मशीन से live test नहीं किए गए हैं। 3 Reels/week लक्ष्य है, guarantee नहीं।
-
-
-## अगर Kaggle dispatch status ambiguous हो
-GitHub → Actions → `GPU Poll, Final Edit, QA and Telegram` → Run workflow. पहले Kaggle के private kernel की run/version history खोलकर जाँचें। नया run दिखे तो `resolve-dispatch-running` चुनें। नया run बिल्कुल नहीं दिखे तो ही `resolve-dispatch-not-started` चुनें। अनुमान से कोई विकल्प न चुनें।
-
-
-## 6. Crash हुआ तो क्या होगा?
-
-- Worker हर scene को complete/validate करके atomically MP4 लिखता है और SHA-256 checkpoint manifest बनाता है।
-- Kaggle failure के बाद यदि Kaggle output files उपलब्ध कराता है, finalizer valid scenes को private Kaggle Dataset में save करके next run में hash-verify restore करने की कोशिश करेगा। यह best-effort recovery है; अचानक infrastructure loss में Kaggle output उपलब्ध न हो तो scenes recover नहीं हो पाएँगे।
-- Estimated remaining render 4 घंटे के भीतर हो तो एक bounded automatic resume संभव है। अन्यथा Telegram alert आएगा; `GPU Poll, Final Edit, QA and Telegram` workflow में `resume-checkpoint` चुनें—केवल तब जब estimate 8 घंटे के भीतर हो। अधिकतम दो resume attempts हैं।
-- Push response ambiguous हो तो कोई auto-resume नहीं: पहले Kaggle kernel history देखकर `resolve-dispatch-running` या `resolve-dispatch-not-started` चुनें।
-
-## 7. Telegram command sync
-
-`Telegram Feedback Sync` workflow हर 6 घंटे में `/approve`, `/reject`, `/published` और `/insights` commands पढ़कर private GitHub history तथा update cursor save करता है। First `plan-one` से पहले bot को private chat में `/start` भेजें; उसी run में owner chat pin होगा। Scheduled runs में delay हो सकता है, इसलिए command भेजने के बाद Actions → `BINA SHOR KE — Telegram Feedback Sync` → Run workflow से तत्काल sync भी कर सकते हैं। Bot पर webhook पहले से configured हो तो `getUpdates` काम नहीं करेगा; नए BotFather bot का उपयोग करें या पुराने webhook को हटाएँ।
-
-## 8. नए models का controlled test
-
-`docs/MODEL_LAB_BENCHMARK_HINDI.md` देखें। Model Lab isolated है—यह weekly run में Hunyuan/FLUX/Indic-Speak install या download नहीं करता। Scorecard commands:
-
-```powershell
-python scripts/model_lab.py template --candidate hunyuanvideo-1.5 --output output/model_lab/hunyuan.json
-python scripts/model_lab.py template --candidate flux.1-schnell --output output/model_lab/flux.json
-python scripts/model_lab.py template --candidate indic-speak --output output/model_lab/indic.json
-```
-
-पहले weights/terms और upstream licenses verify करें। Candidate को baseline से paired comparison किए बिना production में promote न करें।
-
-
-## v3.7 का अनिवार्य weekly gate
-
-`plan-week` GPU benchmark से अकेले unlock नहीं होगा। पहले `plan-one` पूरा हो, technical QA पास हो, Telegram पर video + cover + review message + publish kit चारों सफलतापूर्वक आएँ, और आप exact title के साथ `/approve title=Exact Reel Title` भेजें। Approval आने के बाद Telegram Feedback Sync workflow चलाएँ; चाहें तो `plan-week` स्वयं भी pending Telegram updates process करके gate जाँचता है।
-
-अगर पिछला GPU job `gpu_checkpoint_saved` पर है, नया plan न चलाएँ। पहले workflow में `resume-checkpoint` चलाएँ या Kaggle स्थिति की जाँच करके स्पष्ट owner resolution करें।
+The factory sends a private review package to Telegram. Publishing to Facebook, Instagram or YouTube remains a manual, owner-controlled action. Use accurate synthetic-content disclosures where the platform requires them. Never treat a successful render or Telegram delivery as publication confirmation.
