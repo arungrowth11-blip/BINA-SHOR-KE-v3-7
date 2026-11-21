@@ -938,6 +938,31 @@ class FactoryLogicTests(unittest.TestCase):
         result = producer._parse_review_message("/approve title=सीमा तय करना", history, approved=True)
         self.assertTrue(result["approved"])
         self.assertEqual(history["topics"][0]["status"], "owner_approved_for_manual_publish")
+        self.assertIsNone(history.get("one_reel_qualification"))
+
+    def test_weekly_qualification_requires_full_visual_qa_evidence(self):
+        history = {"topics": [{
+            "title": "पिता की घड़ी", "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": True, "telegram_delivered": True, "reel_id": "reel_qa_complete",
+            "visual_qa_status": "reviewed", "motion_diagnostics_status": "passed",
+            "metadata_ocr_status": "passed",
+        }]}
+        result = producer._parse_review_message("/approve title=पिता की घड़ी", history, approved=True)
+        self.assertTrue(result["weekly_qualification_created"])
+        qualification = history["one_reel_qualification"]
+        self.assertEqual(qualification["status"], "qualified")
+        self.assertTrue(qualification["visual_qa_status"] == "reviewed")
+        self.assertEqual(qualification["metadata_ocr_status"], "passed")
+
+    def test_weekly_qualification_rejects_missing_ocr_evidence(self):
+        history = {"topics": [{
+            "title": "पिता की घड़ी", "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": True, "telegram_delivered": True, "reel_id": "reel_qa_missing_ocr",
+            "visual_qa_status": "reviewed", "motion_diagnostics_status": "passed",
+        }]}
+        result = producer._parse_review_message("/approve title=पिता की घड़ी", history, approved=True)
+        self.assertFalse(result["weekly_qualification_created"])
+        self.assertIsNone(history.get("one_reel_qualification"))
 
     def test_review_rejection_does_not_mark_as_published(self):
         history = {"topics": [{"title": "सीमा तय करना", "status": "ready_for_manual_publish_not_confirmed_published"}]}
