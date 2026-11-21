@@ -106,11 +106,19 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('NotoSans-Regular.ttf', setup)
         self.assertIn('NotoSans-Bold.ttf', setup)
         self.assertIn('fonts-noto-core', setup)
+        self.assertIn('tesseract-ocr', setup)
+        self.assertIn('tesseract-ocr-hin', setup)
+        self.assertIn('tesseract --list-langs', setup)
         self.assertNotIn('fonts-noto-extra', setup)
         self.assertIn('--no-install-recommends', setup)
         self.assertIn('skipping apt update/install', setup)
         self.assertIn('cache: pip', body)
         self.assertIn('cache-dependency-path: |', body)
+
+    def test_offline_quality_gate_installs_hindi_tesseract_for_ocr_checks(self):
+        body = (ROOT / '.github' / 'workflows' / 'quality-gates.yml').read_text(encoding='utf-8')
+        self.assertIn('ffmpeg tesseract-ocr tesseract-ocr-hin', body)
+        self.assertIn('tesseract --list-langs | grep -qx hin', body)
 
     def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
