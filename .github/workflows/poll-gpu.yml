@@ -350,6 +350,9 @@ jobs:
           if [ "$missing_fonts" = true ]; then
             packages+=(fonts-noto-core)
           fi
+          if ! command -v tesseract >/dev/null 2>&1 || ! tesseract --list-langs 2>/dev/null | grep -qx hin; then
+            packages+=(tesseract-ocr tesseract-ocr-hin)
+          fi
           if [ "${#packages[@]}" -gt 0 ]; then
             echo "Installing missing prerequisites only: ${packages[*]}"
             sudo apt-get update -qq
@@ -359,6 +362,8 @@ jobs:
           fi
           command -v ffmpeg
           command -v ffprobe
+          command -v tesseract
+          tesseract --list-langs 2>/dev/null | grep -qx hin
           ffmpeg -filters 2>/dev/null | grep -q subtitles
           for font in "${required_fonts[@]}"; do
             test -s "$font" || { echo "Required Devanagari font missing after setup: $font" >&2; exit 1; }
