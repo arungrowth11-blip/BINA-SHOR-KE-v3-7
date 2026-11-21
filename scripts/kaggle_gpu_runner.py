@@ -101,27 +101,58 @@ def checkpoint_entries_from_output(result_manifest: dict) -> list[dict]:
 
 
 def write_checkpoint_manifest(result_manifest: dict, status: str):
-    entries = checkpoint_entries_from_output(result_manifest)
-    checkpoint = {
-        'schema_version': 1, 'job_id': MANIFEST.get('job_id'), 'status': status,
-        'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF',
-        'expected_scenes': sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', [])),
-        'completed_scenes': len(entries), 'scenes': entries,
-        'updated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-    }
+    """Atomically inventory hash-verified MP4 scenes or first-class still images."""
+    if any(is_25d_pipeline(reel.get('visual_pipeline')) for reel in MANIFEST.get('reels', [])):
+        entries = []
+        from PIL import Image
+        for reel in MANIFEST.get('reels', []):
+            reel_id = str(reel.get('reel_id', ''))
+            for scene_index in range(1, len(reel.get('beats', [])) + 1):
+                path = OUT / reel_id / f'scene_{scene_index:02d}.png'
+                if not path.is_file() or path.stat().st_size < 100_000:
+                    continue
+                try:
+                    with Image.open(path) as image:
+                        image.verify()
+                    with Image.open(path) as image:
+                        width, height = image.size
+                except Exception:
+                    continue
+                entries.append({
+                    'reel_id': reel_id, 'scene_index': scene_index,
+                    'file': f'{reel_id}__scene_{scene_index:02d}.png',
+                    'relative_path': str(path.relative_to(OUT)),
+                    'bytes': path.stat().st_size, 'sha256': sha256_file(path),
+                    'media_type': 'image/png', 'width': width, 'height': height,
+                })
+        checkpoint = {
+            'schema_version': 2, 'job_id': MANIFEST.get('job_id'), 'status': status,
+            'model': 'FLUX.1-schnell Q4_K_S GGUF + Depth Anything V2',
+            'expected_scenes': sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', [])),
+            'completed_scenes': len(entries), 'scenes': entries,
+            'updated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        }
+    else:
+        entries = checkpoint_entries_from_output(result_manifest)
+        checkpoint = {
+            'schema_version': 1, 'job_id': MANIFEST.get('job_id'), 'status': status,
+            'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF',
+            'expected_scenes': sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', [])),
+            'completed_scenes': len(entries), 'scenes': entries,
+            'updated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        }
     write_json(OUT / 'gpu_checkpoint_manifest.json', checkpoint)
     return entries
 
 
 def restore_checkpoint_dataset(result_manifest: dict):
-    """Restore only manifest-listed, SHA-256 verified MP4s from a private Kaggle dataset."""
+    """Restore only manifest-listed, SHA-256 verified video or PNG checkpoints."""
     dataset_id = str(MANIFEST.get('resume_dataset_id', '')).strip()
     if not dataset_id:
         return
     if not re.fullmatch(r'[A-Za-z0-9_-]{1,50}/[A-Za-z0-9_-]{1,50}', dataset_id):
         raise RuntimeError('Resume dataset id has an invalid Kaggle owner/slug format.')
-    slug = dataset_id.split('/', 1)[1]
-    source = KAGGLE_INPUT_ROOT / slug
+    source = KAGGLE_INPUT_ROOT / dataset_id.split('/', 1)[1]
     index_path = source / 'checkpoint_manifest.json'
     if not index_path.is_file():
         raise RuntimeError(f'Resume checkpoint dataset is mounted but {index_path.name} is missing.')
@@ -130,29 +161,53 @@ def restore_checkpoint_dataset(result_manifest: dict):
         raise RuntimeError('Resume checkpoint belongs to a different production job; refusing to mix scene files.')
     allowed = {str(r['reel_id']): len(r.get('beats', [])) for r in MANIFEST.get('reels', [])}
     restored = []
+    from PIL import Image
     for item in checkpoint.get('scenes', []):
         reel_id = str(item.get('reel_id', ''))
         scene_index = int(item.get('scene_index', 0))
         if reel_id not in allowed or not (1 <= scene_index <= allowed[reel_id]):
             continue
-        filename = f'{reel_id}__scene_{scene_index:02d}.mp4'
+        image_checkpoint = item.get('media_type') == 'image/png'
+        extension = '.png' if image_checkpoint else '.mp4'
+        filename = f'{reel_id}__scene_{scene_index:02d}{extension}'
         src = source / filename
         if not src.is_file() or src.stat().st_size != int(item.get('bytes', -1)):
             continue
         if sha256_file(src) != item.get('sha256'):
             continue
-        ok, duration = valid_scene_file(src)
-        if not ok:
-            continue
-        dest = OUT / reel_id / f'scene_{scene_index:02d}.mp4'
+        if image_checkpoint:
+            try:
+                with Image.open(src) as image:
+                    image.verify()
+                with Image.open(src) as image:
+                    width, height = image.size
+                if (width, height) != (704, 1280):
+                    continue
+            except Exception:
+                continue
+            dest = OUT / reel_id / f'scene_{scene_index:02d}.png'
+        else:
+            ok, duration = valid_scene_file(src)
+            if not ok:
+                continue
+            dest = OUT / reel_id / f'scene_{scene_index:02d}.mp4'
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
-        restored.append({
+        row = {
             'reel_id': reel_id, 'scene_index': scene_index,
             'path': str(dest.relative_to(WORK)), 'bytes': dest.stat().st_size,
-            'duration_seconds_target': float(item.get('duration_seconds_target', duration)), 'generation_elapsed_seconds': float(item.get('generation_elapsed_seconds', 0) or 0),
-            'prompt_id': item.get('prompt_id'), 'restored_from_checkpoint': True,
-        })
+            'media_type': 'image/png' if image_checkpoint else 'video/mp4',
+            'sha256': sha256_file(dest), 'restored_from_checkpoint': True,
+        }
+        if image_checkpoint:
+            row.update({'width': width, 'height': height})
+        else:
+            row.update({
+                'duration_seconds_target': float(item.get('duration_seconds_target', duration)),
+                'generation_elapsed_seconds': float(item.get('generation_elapsed_seconds', 0) or 0),
+                'prompt_id': item.get('prompt_id'),
+            })
+        restored.append(row)
     result_manifest['scenes'].extend(restored)
     entries = write_checkpoint_manifest(result_manifest, 'resumed')
     print(f'Restored {len(entries)} verified scene checkpoints from private Kaggle dataset {dataset_id}.', flush=True)
