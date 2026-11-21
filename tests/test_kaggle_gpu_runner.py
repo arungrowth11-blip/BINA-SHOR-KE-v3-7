@@ -115,6 +115,21 @@ class FluxImageFirstWorkflowTests(unittest.TestCase):
         self.assertNotIn("'black-forest-labs/FLUX.1-schnell', 'ae.safetensors'", source)
 
 
+    def test_batch_mode_resolver_separates_primary_flux_and_legacy_wan_manifests(self):
+        runner = load_gpu_runner_namespace()
+        primary = {"reels": [{"visual_pipeline": "primary_25d_motion_comic_v2"}]}
+        legacy = {"reels": [{"visual_pipeline": "hybrid_25d_motion_comic_v1"}]}
+        wan = {"reels": [{"visual_pipeline": "legacy_wan_video"}]}
+        mixed = {"reels": [
+            {"visual_pipeline": "primary_25d_motion_comic_v2"},
+            {"visual_pipeline": "hybrid_25d_motion_comic_v1"},
+        ]}
+        self.assertTrue(runner["uses_primary_image_first"](primary))
+        self.assertFalse(runner["uses_primary_image_first"](legacy))
+        self.assertFalse(runner["uses_primary_image_first"](wan))
+        with self.assertRaisesRegex(RuntimeError, "mixes primary image-first"):
+            runner["uses_primary_image_first"](mixed)
+
     def test_flux_workflow_uses_four_step_still_graph_and_no_wan_video_nodes(self):
         runner = load_gpu_runner_namespace()
         runner["node_prompt"] = lambda _objects, node_type, inputs: {
