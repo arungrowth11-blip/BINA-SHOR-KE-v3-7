@@ -147,7 +147,7 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
         raise ValueError("Every source beat must have a finite measured duration of at least 2.5 seconds.")
     total = sum(durations)
     measured = validate_measured_duration(total, policy["story_type"])
-    shot_target = int(round(total / 2.9))
+    shot_target = int(round(total / 2.5))
     shot_target = max(policy["min_shots"], min(policy["max_shots"], shot_target))
     counts = _allocate_counts(durations, shot_target)
 
