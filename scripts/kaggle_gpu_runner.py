@@ -352,7 +352,8 @@ def install_comfyui():
         raise RuntimeError(f'Only {free:.1f} GiB free disk space; the selected open-weight model, text encoders, VAE and depth model need about {min_disk:.1f} GiB plus runtime/output. Aborting before download.')
     print(f'GPU={gpu_name}; total_vram={total_vram_gib:.1f} GiB; free_disk={free:.1f} GiB; mode={"image-first-primary-2.5d" if primary_image_first else "legacy-wan-video"}', flush=True)
 
-    lock = MANIFEST.get('toolchain_lock') if isinstance(MANIFEST.get('toolchain_lock'), dict) else {}
+    lock_key = 'image_toolchain_lock' if primary_image_first else 'toolchain_lock'
+    lock = MANIFEST.get(lock_key) if isinstance(MANIFEST.get(lock_key), dict) else {}
     comfy_sha = clone_and_pin_repo(
         'https://github.com/Comfy-Org/ComfyUI.git', COMFY, lock.get('comfyui_commit')
     )
