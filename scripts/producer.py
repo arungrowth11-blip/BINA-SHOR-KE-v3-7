@@ -1731,7 +1731,7 @@ Style: Counter,Noto Sans,24,&H00E6DFD3,&H000000FF,&H00101010,&HAA101010,-1,0,0,0
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 3,0:00:00.00,{ass_time(duration)},Brand,,0,0,0,,{{\\an8\\pos(540,165)}}BINA SHOR KE
 Dialogue: 2,0:00:00.00,{ass_time(duration)},Counter,,0,0,0,,{{\\an9\\pos(1010,170)}}{scene_index:02d} / {scene_count:02d}
-Dialogue: 2,0:00:00.14,{ass_time(max(0.25, duration - 0.12))},Tag,,0,0,0,,{{\\an7\\pos(72,430)\\fad(160,100)}}{clean_ass_text((overlay_type.upper().replace('_', ' ') + '  |  ' + overlay_text)[:65])}
+Dialogue: 2,0:00:00.14,{ass_time(max(0.25, duration - 0.12))},Tag,,0,0,0,,{{\\an7\\pos(72,430)\\fad(160,100)}}{clean_ass_text(overlay_text[:65])}
 Dialogue: 1,0:00:00.10,{ass_time(max(0.2, duration - 0.1))},Main,,0,0,0,,{{\\an5\\pos(540,1180)\\fad(180,180)}}{safe_text}
 """
     path.write_text(content, encoding="utf-8")
