@@ -220,9 +220,27 @@ def ensure_reel_qa_passed(build: dict) -> None:
     technical = build.get('technical', {}) if isinstance(build, dict) else {}
     if not isinstance(technical, dict) or technical.get('technical_checks_passed') is not True:
         raise RuntimeError('Final Reel technical QA did not pass; refusing Telegram delivery and weekly qualification.')
-    visual = technical.get('rendered_frame_visual_qa', {})
-    if isinstance(visual, dict) and visual.get('status') == 'warning':
-        raise RuntimeError('Rendered-frame visual QA reported a critical warning; refusing Telegram delivery and weekly qualification.')
+    visual = technical.get('rendered_frame_visual_qa')
+    if not isinstance(visual, dict) or visual.get('status') != 'reviewed':
+        status = visual.get('status', 'missing') if isinstance(visual, dict) else 'missing'
+        raise RuntimeError(
+            f'Rendered-frame visual QA is {status}; only a completed reviewed result can pass. '
+            'A QA outage or incomplete scorecard is not a pass.'
+        )
+    if visual.get('critical_issue') is not False or visual.get('missing_required_scores'):
+        raise RuntimeError('Rendered-frame visual QA is missing required scores or reports a critical issue.')
+    motion = visual.get('full_video_motion_diagnostics')
+    if not isinstance(motion, dict) or motion.get('status') != 'passed' or motion.get('full_video_scanned') is not True:
+        status = motion.get('status', 'missing') if isinstance(motion, dict) else 'missing'
+        raise RuntimeError(
+            f'Full-video motion diagnostics are {status}; black/frozen-frame scan must complete and pass.'
+        )
+    ocr = visual.get('metadata_ocr_qa')
+    if not isinstance(ocr, dict) or ocr.get('status') != 'passed':
+        status = ocr.get('status', 'missing') if isinstance(ocr, dict) else 'missing'
+        raise RuntimeError(
+            f'On-screen metadata OCR is {status}; OCR must complete with zero forbidden prompt labels.'
+        )
 
 def ensure_complete_telegram_delivery(steps: dict) -> None:
     required = ('video', 'cover', 'message', 'publish_kit')
@@ -439,12 +457,15 @@ def plan_week(reel_count: int = 3) -> int:
         'toolchain_lock': toolchain_lock,
         'screenplay_schema_version': 2,
         'audio_before_video': True,
-        'visual_pipeline': 'hybrid_25d_motion_comic_v1',
+        'visual_pipeline': producer.story_engine.PRIMARY_25D_PIPELINE,
         'editorial_shot_count': sum(int((r['concept'].get('editorial_shot_plan') or {}).get('editorial_shot_count', 0)) for r in planned),
         'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader; depth-parallax via Depth Anything V2 Small (Apache-2.0)',
         'reels': [{
             'reel_id': r['reel_id'], 'title': r['title'], 'pillar': r['pillar'],
-            'visual_bible': r['concept'].get('visual_bible', ''), 'story_type': r['concept'].get('story_type', 'emotional'), 'visual_pipeline': r['concept'].get('visual_pipeline', 'legacy_wan_video'), 'beats': r['beats']
+            'visual_bible': r['concept'].get('visual_bible', ''), 'story_type': r['concept'].get('story_type', 'emotional'),
+            'visual_pipeline': r['concept'].get('visual_pipeline', 'legacy_wan_video'),
+            'visual_style_profile': r['concept'].get('visual_style_profile', {}),
+            'beats': r['beats']
         } for r in planned],
     }
     write_json(PENDING, {
@@ -961,7 +982,7 @@ def _poll_and_finalize_impl() -> int:
                     missing.append(i)
                     continue
                 shutil.copy2(candidates[0], ai_dir / f'scene_{i:02d}.mp4')
-                if concept.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1':
+                if producer.story_engine.is_25d_pipeline(concept.get('visual_pipeline')):
                     depth_candidates = [p for p in existing if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}_25d.mp4']
                     if not depth_candidates:
                         depth_candidates = [p for p in existing if p.name == f'scene_{i:02d}_25d.mp4' and reel['reel_id'] in str(p)]
@@ -1041,7 +1062,15 @@ def _poll_and_finalize_impl() -> int:
                 'status': 'ready_for_manual_publish_not_confirmed_published',
                 'reel_id': reel['reel_id'], 'job_id': pending.get('job_id'),
                 # render_reel returns only after its hard technical and visual QA gates pass.
-                'qa_passed': bool(build.get('technical', {}).get('technical_checks_passed') is True),
+                'qa_passed': bool(
+                    build.get('technical', {}).get('technical_checks_passed') is True
+                    and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status') == 'reviewed'
+                    and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status') == 'passed'
+                    and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status') == 'passed'
+                ),
+                'visual_qa_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status'),
+                'motion_diagnostics_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status'),
+                'metadata_ocr_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status'),
                 'telegram_delivered': all(reel['delivery_steps'].get(step) is True for step in ('video', 'cover', 'message', 'publish_kit')),
                 'qa_completed_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
             }
