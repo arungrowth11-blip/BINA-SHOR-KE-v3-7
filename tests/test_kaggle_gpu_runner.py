@@ -91,6 +91,88 @@ class CameraCoverageTests(unittest.TestCase):
 
 
 
+class FluxImageFirstWorkflowTests(unittest.TestCase):
+    def test_flux_workflow_uses_four_step_still_graph_and_no_wan_video_nodes(self):
+        runner = load_gpu_runner_namespace()
+        runner["node_prompt"] = lambda _objects, node_type, inputs: {
+            "class_type": node_type, "inputs": inputs
+        }
+        story = {
+            "reel_id": "flux_offline_reel",
+            "visual_bible": "Same adult cast, same wardrobe, same Indian apartment.",
+            "visual_style_profile": {
+                "surface_language": "painterly graphic novel",
+                "palette": "monsoon teal and warm tungsten",
+                "lighting": "motivated window light",
+            },
+            "characters": [
+                {
+                    "character_id": "arjun", "display_name": "अर्जुन",
+                    "visual_age_description": "adult Indian man in his thirties",
+                    "appearance": "olive shirt, short hair, silver watch",
+                }
+            ],
+        }
+        beat = {
+            "narrative_role": "hook",
+            "state_change": "He discovers the unopened letter under the old steel box.",
+            "causal_link": "A missed phone call made him search the locked drawer.",
+            "video_prompt": "Close-up of an adult man's hand pulling a folded letter from a steel box.",
+        }
+        graph = runner["build_flux_image_workflow"](
+            {}, beat, story, 1, "offline/flux_scene_01"
+        )
+        classes = {node["class_type"] for node in graph.values()}
+        self.assertIn("UnetLoaderGGUF", classes)
+        self.assertIn("DualCLIPLoader", classes)
+        self.assertIn("CLIPTextEncodeFlux", classes)
+        self.assertIn("EmptySD3LatentImage", classes)
+        self.assertIn("SaveImage", classes)
+        self.assertNotIn("Wan22ImageToVideoLatent", classes)
+        self.assertNotIn("CreateVideo", classes)
+        sampler = next(node["inputs"] for node in graph.values() if node["class_type"] == "KSampler")
+        self.assertEqual(sampler["steps"], 4)
+        self.assertEqual(sampler["cfg"], 1.0)
+        latent = next(node["inputs"] for node in graph.values() if node["class_type"] == "EmptySD3LatentImage")
+        self.assertEqual((latent["width"], latent["height"]), (704, 1280))
+        prompt = next(node["inputs"]["clip_l"] for node in graph.values() if node["class_type"] == "CLIPTextEncodeFlux")
+        self.assertIn("Same adult cast", prompt)
+        self.assertIn("olive shirt", prompt)
+        self.assertIn("monsoon teal", prompt)
+        self.assertIn("STATE CHANGE", prompt)
+        self.assertIn("CAUSAL LINK", prompt)
+
+    def test_scene_still_is_validated_and_center_cropped_to_vertical_canvas(self):
+        from PIL import Image
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "wide.png"
+            destination = root / "scene_01.png"
+            Image.effect_noise((1600, 900), 80).convert("RGB").save(source)
+            result = runner["prepare_scene_still"](source, destination)
+            with Image.open(destination) as image:
+                self.assertEqual(image.size, (704, 1280))
+            self.assertEqual(result["width"], 704)
+            self.assertEqual(result["height"], 1280)
+            self.assertEqual(result["sha256"], runner["sha256_file"](destination))
+            self.assertGreater(result["bytes"], 100_000)
+
+    def test_image_first_comfy_preflight_requires_flux_nodes_only(self):
+        runner = load_gpu_runner_namespace()
+        required = {
+            "UnetLoaderGGUF", "DualCLIPLoader", "VAELoader", "CLIPTextEncodeFlux",
+            "ConditioningZeroOut", "EmptySD3LatentImage", "KSampler", "VAEDecode", "SaveImage",
+        }
+        class Response:
+            status = 200
+            def read(self):
+                return json.dumps({name: {} for name in required}).encode("utf-8")
+        with patch.object(runner["urllib"].request, "urlopen", return_value=Response()):
+            objects = runner["wait_for_comfy"](primary_image_first=True)
+        self.assertEqual(set(objects), required)
+
+
 class CharacterReferenceTests(unittest.TestCase):
     def test_first_scene_reference_is_extracted_validated_and_hashed(self):
         from PIL import Image
