@@ -23,6 +23,7 @@ DATA = ROOT / 'data'
 OUT = ROOT / 'output'
 PENDING = DATA / 'pending_gpu_job.json'
 TOOLCHAIN_LOCK = DATA / 'toolchain_lock.json'
+IMAGE_TOOLCHAIN_LOCK = DATA / 'image_toolchain_lock.json'
 TZ = ZoneInfo('Asia/Kolkata')
 sys.path.insert(0, str(ROOT / 'scripts'))
 import producer  # noqa: E402
@@ -266,17 +267,18 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
             'deliver the video/cover/review message/publish kit to Telegram, and send '
             '/approve title=Exact Reel Title. Then run Telegram Feedback Sync and retry plan-week.'
         )
-    benchmark = saved_lock.get('gpu_benchmark') if isinstance(saved_lock, dict) else None
+    image_lock = load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {}
+    benchmark = image_lock.get('gpu_benchmark') if isinstance(image_lock, dict) else None
     if not isinstance(benchmark, dict) or benchmark.get('qualified') is not True:
         raise RuntimeError(
-            'Weekly 3-Reel production is also locked until the one-Reel GPU benchmark qualifies. '
-            'Owner approval alone cannot replace the measured GPU runtime check.'
+            'Weekly 3-Reel production is locked until the image-first FLUX + depth-parallax '
+            'GPU benchmark qualifies. The old Wan benchmark is not valid evidence for the new renderer.'
         )
     estimated_hours = float(benchmark.get('estimated_3_reel_hours', 999))
     if estimated_hours > 8.0:
         raise RuntimeError(
             f'Weekly batch is not qualified for the Kaggle 12-hour session: conservative estimate is '
-            f'{estimated_hours:.1f} hours. Keep one-Reel jobs only; no paid fallback will be used.'
+            f'{estimated_hours:.1f} hours for the image-first renderer. Keep one-Reel jobs only; no paid fallback will be used.'
         )
 
 
@@ -893,6 +895,79 @@ def verify_or_lock_toolchain(gpu_manifest: dict, job_id: str | None = None) -> d
     return locked
 
 
+def verify_or_lock_image_toolchain(gpu_manifest: dict, job_id: str | None = None) -> dict:
+    """Pin FLUX still generation, its text encoders, VAE and depth model separately from legacy Wan."""
+    observed = {
+        'comfyui_commit': str(gpu_manifest.get('comfyui_commit', '')).strip(),
+        'comfyui_gguf_commit': str(gpu_manifest.get('comfyui_gguf_commit', '')).strip(),
+        'model_revisions': gpu_manifest.get('model_revisions'),
+        'runtime_packages': gpu_manifest.get('runtime_packages') if isinstance(gpu_manifest.get('runtime_packages'), dict) else {},
+    }
+    required_models = ('unet', 'clip_l', 't5xxl', 'vae', 'depth')
+    if not re.fullmatch(r'[0-9a-f]{40}', observed['comfyui_commit']):
+        raise RuntimeError('Image-first manifest lacks an immutable ComfyUI commit SHA.')
+    if not re.fullmatch(r'[0-9a-f]{40}', observed['comfyui_gguf_commit']):
+        raise RuntimeError('Image-first manifest lacks an immutable ComfyUI-GGUF commit SHA.')
+    if not isinstance(observed['model_revisions'], dict) or any(
+        not re.fullmatch(r'[0-9a-f]{40}', str(observed['model_revisions'].get(key, '')))
+        for key in required_models
+    ):
+        raise RuntimeError('Image-first manifest lacks one or more immutable FLUX/text-encoder/VAE/depth model revisions.')
+
+    existing = load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {}
+    if existing.get('status') == 'locked':
+        for key in ('comfyui_commit', 'comfyui_gguf_commit'):
+            if existing.get(key) != observed[key]:
+                raise RuntimeError(f'Image toolchain drift detected for {key}; refusing silent upstream changes.')
+        for key in required_models:
+            if (existing.get('model_revisions') or {}).get(key) != observed['model_revisions'].get(key):
+                raise RuntimeError(f'Image model revision drift detected for {key}; refusing silent model changes.')
+        locked_packages = existing.get('runtime_packages') or {}
+        changed = sorted(
+            name for name, version in locked_packages.items()
+            if observed['runtime_packages'].get(name) != version
+        )
+        if changed:
+            raise RuntimeError('Image GPU runtime dependency drift detected: ' + ', '.join(changed))
+    else:
+        existing = {
+            'status': 'locked',
+            'generation_mode': 'still_image_first',
+            'model_family': 'FLUX.1-schnell-Q4_K_S-GGUF',
+            'comfyui_commit': observed['comfyui_commit'],
+            'comfyui_gguf_commit': observed['comfyui_gguf_commit'],
+            'model_revisions': observed['model_revisions'],
+            'runtime_packages': observed['runtime_packages'],
+            'locked_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+            'source_job_id': job_id or gpu_manifest.get('job_id'),
+            'note': 'Separate immutable image-first toolchain lock. Does not overwrite or reinterpret the legacy Wan toolchain.',
+        }
+
+    elapsed = float(gpu_manifest.get('total_elapsed_seconds', 0) or 0)
+    scene_times = [
+        float(item.get('generation_elapsed_seconds', 0))
+        for item in gpu_manifest.get('scenes', [])
+        if float(item.get('generation_elapsed_seconds', 0) or 0) > 0
+    ]
+    if gpu_manifest.get('status') == 'complete' and elapsed > 0 and len(scene_times) >= 5:
+        # Conservative estimate: one clean 6-scene image+parallax run, repeated
+        # three times, with 50% safety margin. This is not a runtime guarantee.
+        estimate = elapsed * 3.0 * 1.5 / 3600.0
+        existing['gpu_benchmark'] = {
+            'qualified': estimate <= 8.0,
+            'sample_scene_count': len(scene_times),
+            'sample_scene_mean_seconds': round(statistics.mean(scene_times), 2),
+            'measured_one_reel_seconds': round(elapsed, 2),
+            'estimated_3_reel_hours': round(estimate, 2),
+            'safety_factor': 1.5,
+            'note': 'Measured end-to-end FLUX still + depth + checkpoint runtime from one completed Reel; repeat runs may vary.',
+        }
+        existing['last_benchmark_job_id'] = job_id or gpu_manifest.get('job_id')
+        existing['last_benchmark_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    write_json(IMAGE_TOOLCHAIN_LOCK, existing)
+    return existing
+
+
 def _poll_and_finalize_impl() -> int:
     producer.require_env()
     pending = load_json(PENDING, {})
@@ -950,7 +1025,10 @@ def _poll_and_finalize_impl() -> int:
         if len(existing) < expected:
             resumed = handle_gpu_failure(root, pending, f'Expected {expected} AI scene clips, received {len(existing)}.')
             return 0 if resumed else 1
-        verify_or_lock_toolchain(gpu_manifest, pending.get('job_id'))
+        if gpu_manifest.get('generation_mode') == 'still_image_first':
+            verify_or_lock_image_toolchain(gpu_manifest, pending.get('job_id'))
+        else:
+            verify_or_lock_toolchain(gpu_manifest, pending.get('job_id'))
         pending['status'] = 'finalizing'
         write_json(PENDING, pending)
         clips_by_path = {str(p.relative_to(root)): p for p in existing}
