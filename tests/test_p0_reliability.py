@@ -54,6 +54,9 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "reel_id": "reel_01_123456",
                 "job_id": "job-123",
                 "qa_passed": True,
+                "visual_qa_status": "reviewed",
+                "motion_diagnostics_status": "passed",
+                "metadata_ocr_status": "passed",
                 "telegram_delivered": True,
             }]
         }
@@ -82,7 +85,9 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "title": "दरवाज़े पर रखा खाना",
                 "status": "ready_for_manual_publish_not_confirmed_published",
                 "reel_id": "reel_01_pilot", "job_id": "pilot-job",
-                "qa_passed": True, "telegram_delivered": True,
+                "qa_passed": True, "visual_qa_status": "reviewed",
+                "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
+                "telegram_delivered": True,
             }]}), encoding="utf-8")
             lock_path = base / "toolchain_lock.json"
             lock_path.write_text(json.dumps({"gpu_benchmark": {
