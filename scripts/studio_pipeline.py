@@ -1408,30 +1408,35 @@ def retry_failed_gpu() -> int:
     if any(reel.get('delivery_status') == 'delivered' for reel in pending.get('reels', [])):
         raise RuntimeError('At least one Reel from this manifest is already delivered. Refusing to retry the whole GPU manifest.')
 
-    # Reconcile the worker manifest with the repository's corrected, immutable model snapshot pins.
-    saved_lock = load_json(TOOLCHAIN_LOCK, {}) or {}
+    # Reconcile the worker manifest with the correct immutable model snapshot lock.
+    # Primary image-first retries must never borrow the old Wan UNet/CLIP/VAE lock.
+    image_first_retry = manifest.get('generation_mode') == 'still_image_first'
+    lock_path = IMAGE_TOOLCHAIN_LOCK if image_first_retry else TOOLCHAIN_LOCK
+    saved_lock = load_json(lock_path, {}) or {}
     if saved_lock.get('status') != 'locked':
-        raise RuntimeError('The verified GPU toolchain lock is missing or not locked. Refusing a retry.')
+        raise RuntimeError('The selected GPU toolchain lock is missing or not locked. Refusing a retry.')
     saved_model_revisions = saved_lock.get('model_revisions')
-    required_model_keys = ('unet', 'clip', 'vae')
+    required_model_keys = ('unet', 'clip_l', 't5xxl', 'vae', 'depth') if image_first_retry else ('unet', 'clip', 'vae')
     if not isinstance(saved_model_revisions, dict) or not all(
         re.fullmatch(r'[0-9a-f]{40}', str(saved_model_revisions.get(key, '')))
         for key in required_model_keys
     ):
         raise RuntimeError(
-            'The saved Hugging Face model lock is invalid. All UNet, CLIP and VAE revisions must be 40-character snapshot SHAs.'
+            'The saved Hugging Face model lock is invalid. Every selected model revision must be a 40-character snapshot SHA.'
         )
-    previous_manifest_lock = manifest.get('toolchain_lock') if isinstance(manifest.get('toolchain_lock'), dict) else {}
+    previous_manifest_key = 'image_toolchain_lock' if image_first_retry else 'toolchain_lock'
+    previous_manifest_lock = manifest.get(previous_manifest_key) if isinstance(manifest.get(previous_manifest_key), dict) else {}
     for key in ('comfyui_commit', 'comfyui_gguf_commit'):
         previous = previous_manifest_lock.get(key)
         current = saved_lock.get(key)
         if previous and previous != current:
-            raise RuntimeError(f'Toolchain source mismatch for {key}; refusing to change the ComfyUI code version during a GPU retry.')
-    manifest['toolchain_lock'] = {
+            raise RuntimeError(f'Toolchain source mismatch for {key}; refusing to change ComfyUI code during a GPU retry.')
+    lock_payload = {
         'comfyui_commit': saved_lock['comfyui_commit'],
         'comfyui_gguf_commit': saved_lock['comfyui_gguf_commit'],
         'model_revisions': {key: saved_model_revisions[key] for key in required_model_keys},
     }
+    manifest[previous_manifest_key] = lock_payload
     pending['manifest'] = manifest
     write_json(PENDING, pending)
 
@@ -1448,7 +1453,7 @@ def retry_failed_gpu() -> int:
     retry_reason = (
         'Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained.'
         if allowed_timeout_retry
-        else 'Corrected Hugging Face snapshot SHA pins for Wan2.2 text encoder/VAE; original Reel manifest retained.'
+        else 'Corrected immutable Hugging Face image-first or legacy model snapshot pins; original Reel manifest retained.'
         if known_hf_revision_failure
         else 'ComfyUI KSampler API schema compatibility fix; original Reel manifest retained.'
     )
