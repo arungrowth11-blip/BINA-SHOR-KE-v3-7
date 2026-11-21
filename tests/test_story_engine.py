@@ -131,6 +131,7 @@ class MotionComicTests(unittest.TestCase):
     def test_filter_graph_combines_hero_and_parallax_with_exact_cuts(self):
         graph = motion_comic.build_editorial_filter_graph(self.shots, video_speed_ratio=1.0)
         self.assertIn("[0:v]setpts=PTS*1.0000000", graph)
+        self.assertIn("fps=30", graph)
         self.assertIn("[1:v]setpts=PTS*1.0000000", graph)
         self.assertIn("trim=start=0.0000:end=2.5000", graph)
         self.assertIn("trim=start=2.5000:end=5.0000", graph)
@@ -172,7 +173,7 @@ class MotionComicTests(unittest.TestCase):
                 {"source": "depth_parallax", "start_seconds": 0.0, "end_seconds": 1.5, "zoom": 1.08, "crop_x": 0.5, "crop_y": 0.5},
             ]
             result = motion_comic.render_editorial_montage(
-                hero, depth, output, shots, target_duration=3.0, fps=24,
+                hero, depth, output, shots, target_duration=3.0, fps=30,
             )
             self.assertTrue(result.is_file())
             self.assertGreater(result.stat().st_size, 100_000)
