@@ -726,7 +726,10 @@ def load_depth_estimator(revision: str):
     )
 
 
-def create_25d_parallax_clip(source: Path, destination: Path, duration: float, depth_estimator):
+def create_25d_parallax_clip(
+    source: Path, destination: Path, duration: float, depth_estimator,
+    *, camera_move: str = "gentle_push",
+):
     """Extract, stylize and depth-warp one scene keyframe into a real parallax video."""
     import math
     import numpy as np
@@ -788,14 +791,34 @@ def create_25d_parallax_clip(source: Path, destination: Path, duration: float, d
         if encoder.stdin is None:
             raise RuntimeError("FFmpeg did not expose a raw-video input pipe.")
         disparity = (depth - 0.5)
+        # Distinct camera grammar per beat keeps 2.5D shots alive and story-led.
+        camera_profiles = {
+            "punch_in": (0.045, 0.0, 0.0),
+            "reveal_left": (0.025, -13.0, 0.0),
+            "wide_drift_right": (0.010, 12.0, 0.0),
+            "gentle_push": (0.020, 0.0, 0.0),
+            "reaction_close": (0.038, 0.0, -4.0),
+            "slow_push": (0.024, 0.0, 0.0),
+            "track_left": (0.014, -20.0, 1.5),
+            "track_right": (0.014, 20.0, 1.5),
+            "detail_insert": (0.040, 4.0, 8.0),
+            "reveal_push": (0.045, 0.0, 0.0),
+            "clue_insert": (0.035, 4.0, 7.0),
+            "emotional_hold": (0.020, 0.0, -2.0),
+            "slow_pull_frame": (-0.008, 0.0, 0.0),
+        }
+        zoom_delta, drift_x, drift_y = camera_profiles.get(camera_move, camera_profiles["gentle_push"])
         for frame_index in range(frame_count):
             progress = frame_index / max(1, frame_count - 1)
-            eased = math.sin(math.pi * progress)
-            zoom = 1.0 + 0.018 * progress
-            parallax_x = disparity * (14.0 * eased)
-            parallax_y = disparity * (6.0 * eased)
-            map_x = ((grid_x - center_x) / zoom + center_x + parallax_x).astype(np.float32)
-            map_y = ((grid_y - center_y) / zoom + center_y + parallax_y).astype(np.float32)
+            eased = progress * progress * (3.0 - 2.0 * progress)
+            depth_breath = math.sin(math.pi * progress)
+            zoom = 1.0 + zoom_delta * eased
+            parallax_x = disparity * (14.0 * depth_breath)
+            parallax_y = disparity * (6.0 * depth_breath)
+            camera_x = drift_x * eased
+            camera_y = drift_y * eased
+            map_x = ((grid_x - center_x) / zoom + center_x + parallax_x + camera_x).astype(np.float32)
+            map_y = ((grid_y - center_y) / zoom + center_y + parallax_y + camera_y).astype(np.float32)
             warped = cv2.remap(
                 frame, map_x, map_y, interpolation=cv2.INTER_LINEAR,
                 borderMode=cv2.BORDER_REFLECT_101,
@@ -826,7 +849,8 @@ def create_25d_parallax_clip(source: Path, destination: Path, duration: float, d
         "depth_model": "depth-anything/Depth-Anything-V2-Small-hf",
         "depth_model_license": "Apache-2.0",
         "keyframe_style": "posterized painterly graphic-novel",
-        "camera_motion": "depth-displaced parallax + 1.8% eased push-in",
+        "camera_motion": camera_move,
+        "camera_motion_model": "eased genre-role camera move + depth-displaced foreground/midground/background parallax",
     }
 
 
@@ -884,7 +908,7 @@ def main():
                 result_manifest.pop('current_scene', None)
                 source = latest_video(output_dir, before, prefix)
                 transcode_scene(source, final_out)
-                if i == 1 and reel.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1':
+                if i == 1 and is_25d_pipeline(reel.get('visual_pipeline')):
                     persist_character_reference(reel, reel_id, final_out, result_manifest)
                 result_manifest['scenes'].append({
                     'reel_id': reel_id, 'scene_index': i, 'path': str(final_out.relative_to(WORK)),
@@ -925,7 +949,20 @@ def main():
                     continue
                 if depth_estimator is None:
                     depth_estimator = load_depth_estimator(toolchain_info['depth_model_revision'])
-                metadata = create_25d_parallax_clip(source, parallax, scene_duration, depth_estimator)
+                beat = reel.get('beats', [])[scene_index - 1]
+                editorial_shots = beat.get('editorial_shots', []) if isinstance(beat, dict) else []
+                depth_shots = [
+                    shot for shot in editorial_shots
+                    if isinstance(shot, dict) and shot.get('source') == 'depth_parallax'
+                ]
+                camera_move = str(
+                    depth_shots[0].get('camera_move') if depth_shots
+                    else (beat.get('narrative_role', 'gentle_push') if isinstance(beat, dict) else 'gentle_push')
+                )
+                metadata = create_25d_parallax_clip(
+                    source, parallax, scene_duration, depth_estimator,
+                    camera_move=camera_move,
+                )
                 result_manifest['parallax_scenes'].append({
                     'reel_id': reel_id, 'scene_index': scene_index,
                     'depth_model_revision': toolchain_info['depth_model_revision'],
