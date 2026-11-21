@@ -50,6 +50,19 @@ def write_json(path: Path, obj):
     temporary.replace(path)
 
 
+def verify_model_file_sha256(path: Path, expected_sha256: str, model_name: str) -> str:
+    """Verify a downloaded model blob against an independently published file digest."""
+    expected = str(expected_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[0-9a-f]{64}", expected):
+        raise ValueError(f"Invalid expected SHA-256 for model {model_name}: {expected!r}")
+    actual = sha256_file(path)
+    if actual != expected:
+        raise RuntimeError(
+            f"{model_name} model file SHA-256 mismatch: expected {expected}, got {actual}."
+        )
+    return actual
+
+
 def sha256_file(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open('rb') as handle:
@@ -396,6 +409,9 @@ def install_comfyui():
                 resolved = hf_cache_revision(destination)
                 if expected_revision and resolved != expected_revision:
                     raise RuntimeError(f'Existing {key} model snapshot {resolved} differs from locked {expected_revision}.')
+                expected_file_sha = expected_image_file_hashes.get(key)
+                if expected_file_sha:
+                    verify_model_file_sha256(destination, expected_file_sha, key)
                 model_revisions[key] = resolved
                 continue
             if destination.exists():
@@ -414,11 +430,7 @@ def install_comfyui():
                 raise RuntimeError(f'{key} model cache snapshot {resolved} differs from resolved revision {revision}.')
             expected_file_sha = expected_image_file_hashes.get(key)
             if expected_file_sha:
-                actual_file_sha = sha256_file(cached)
-                if actual_file_sha != expected_file_sha:
-                    raise RuntimeError(
-                        f'{key} model bytes SHA-256 mismatch: expected {expected_file_sha}, got {actual_file_sha}.'
-                    )
+                verify_model_file_sha256(cached, expected_file_sha, key)
             destination.symlink_to(cached)
             model_revisions[key] = resolved
     else:
