@@ -2121,7 +2121,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         target_duration = audio_duration + 0.08
         audio_tempo = 1.0
 
-        # Primary mode: reference-locked illustrated source clip from the Kaggle Wan render stage.
+        # Primary mode: visual-bible-prompt-conditioned illustrated source clip (no reference-image identity conditioning) from the Kaggle Wan render stage.
         ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
         if require_ai_video and not ai_clip.exists():
             raise RuntimeError(f"AI-video mode requires scene clip {ai_clip.name}; refusing to silently downgrade to static graphics.")

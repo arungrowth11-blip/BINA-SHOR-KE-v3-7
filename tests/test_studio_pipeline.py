@@ -221,12 +221,30 @@ class StudioPipelineTests(unittest.TestCase):
                 self.assertEqual(locked["status"], "locked")
                 self.assertEqual(locked["comfyui_commit"], "comfy-sha-1")
                 self.assertEqual(studio_pipeline.verify_or_lock_toolchain(observed, "test-job")["status"], "locked")
-                changed = dict(observed)
+                extended = dict(observed)
+                extended["model_revisions"] = {**observed["model_revisions"], "depth": "d" * 40}
+                extended["runtime_packages"] = {
+                    **observed["runtime_packages"],
+                    "opencv-python": "not-installed",
+                    "opencv-python-headless": "4.10.0.84",
+                }
+                migrated = studio_pipeline.verify_or_lock_toolchain(extended, "test-job")
+                self.assertEqual(migrated["model_revisions"]["depth"], "d" * 40)
+                self.assertEqual(migrated["runtime_packages"]["torch"], "2.7.0")
+                self.assertEqual(migrated["runtime_packages"]["opencv-python-headless"], "4.10.0.84")
+                self.assertIn("runtime_packages_extended_at_ist", migrated)
+                self.assertEqual(
+                    studio_pipeline.verify_or_lock_toolchain(extended, "test-job")["runtime_packages"],
+                    migrated["runtime_packages"],
+                )
+                changed = dict(extended)
                 changed["comfyui_commit"] = "new-sha"
                 with self.assertRaisesRegex(RuntimeError, "Toolchain drift detected"):
                     studio_pipeline.verify_or_lock_toolchain(changed, "test-job")
-                changed_runtime = dict(observed)
-                changed_runtime['runtime_packages'] = {'torch': '2.8.0', 'numpy': '2.1.0'}
+                changed_runtime = dict(extended)
+                changed_runtime['runtime_packages'] = {
+                    **extended['runtime_packages'], 'torch': '2.8.0'
+                }
                 with self.assertRaisesRegex(RuntimeError, 'GPU runtime dependency drift detected'):
                     studio_pipeline.verify_or_lock_toolchain(changed_runtime, 'test-job')
             finally:

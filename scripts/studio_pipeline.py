@@ -795,20 +795,42 @@ def verify_or_lock_toolchain(gpu_manifest: dict, job_id: str | None = None) -> d
         observed_depth = observed['model_revisions'].get('depth')
         if locked_depth and observed_depth != locked_depth:
             raise RuntimeError('Depth Anything model revision drift detected; refusing to silently change the proven depth estimator.')
-        if observed_depth and not locked_depth:
+        depth_revision_addition = bool(observed_depth and not locked_depth)
+        if depth_revision_addition:
             existing.setdefault('model_revisions', {})['depth'] = observed_depth
             existing['depth_model_locked_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        locked_packages = existing.get('runtime_packages') or {}
+        if not isinstance(locked_packages, dict):
+            raise RuntimeError('GPU runtime package lock is malformed; refusing to continue without a reproducible dependency baseline.')
+        changed = sorted(
+            name for name, locked_version in locked_packages.items()
+            if observed['runtime_packages'].get(name) != locked_version
+        )
+        if changed:
+            raise RuntimeError(
+                'GPU runtime dependency drift detected; refusing to change or omit previously locked packages: '
+                + ', '.join(changed)
+            )
+        package_additions = {
+            name: version for name, version in observed['runtime_packages'].items()
+            if name not in locked_packages
+        }
+        lock_updated = depth_revision_addition
+        if package_additions:
+            # Additive migration only: preserve every previously qualified version.
+            existing.setdefault('runtime_packages', {}).update(package_additions)
+            existing['runtime_packages_extended_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            prior_additions = existing.get('runtime_package_additions', [])
+            if not isinstance(prior_additions, list) or not all(isinstance(item, str) for item in prior_additions):
+                prior_additions = []
+            existing['runtime_package_additions'] = sorted(set(prior_additions) | set(package_additions))
+            lock_updated = True
+        if lock_updated:
             write_json(TOOLCHAIN_LOCK, existing)
-            log('Added the first immutable Depth Anything V2 revision to the existing Wan toolchain lock.')
-        if existing.get('runtime_packages'):
-            if existing.get('runtime_packages') != observed['runtime_packages']:
-                changed = sorted(set(existing['runtime_packages']) | set(observed['runtime_packages']))
-                changed = [name for name in changed if existing['runtime_packages'].get(name) != observed['runtime_packages'].get(name)]
-                raise RuntimeError('GPU runtime dependency drift detected; refusing to silently continue with changed package versions: ' + ', '.join(changed))
-        elif observed['runtime_packages']:
-            existing['runtime_packages'] = observed['runtime_packages']
-            existing['runtime_packages_locked_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-            write_json(TOOLCHAIN_LOCK, existing)
+            if depth_revision_addition:
+                log('Added the first immutable Depth Anything V2 revision to the existing Wan toolchain lock.')
+            if package_additions:
+                log('Extended the existing GPU runtime lock with newly required packages: ' + ', '.join(sorted(package_additions)))
         scene_times = [float(x.get('generation_elapsed_seconds', 0)) for x in gpu_manifest.get('scenes', []) if float(x.get('generation_elapsed_seconds', 0)) > 0]
         if not existing.get('gpu_benchmark') and scene_times and len(scene_times) >= 5:
             startup = max(0.0, float(gpu_manifest.get('total_elapsed_seconds', 0)) - sum(scene_times))
