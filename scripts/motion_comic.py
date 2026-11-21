@@ -46,7 +46,9 @@ def build_editorial_filter_graph(
             outputs = "".join(f"[{prefix}{index}]" for index in range(count))
             filters.append(f"split={count}{outputs}")
         else:
-            filters.append(f"[{prefix}0]")
+            # Output labels belong to the preceding filter; inserting them as
+            # a comma-separated item creates an invalid empty FFmpeg filter.
+            filters[-1] += f"[{prefix}0]"
         parts.append(",".join(filters))
     source_indexes = {"hero_video": 0, "depth_parallax": 0}
     hero_position = 0
