@@ -2150,45 +2150,75 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     stock_scenes = 0
 
     require_ai_video = os.getenv("REQUIRE_AI_VIDEO", "0").strip() == "1"
-    # Wan source clips remain at their qualified 24 FPS cadence. The default
-    # 2.5D editorial master is a separate 30 FPS output timeline.
+    primary_image_first = (
+        require_ai_video
+        and concept.get("visual_pipeline") == story_engine.PRIMARY_25D_PIPELINE
+    )
+    # Wan legacy source clips stay at 24 FPS. Primary 2.5D masters are rendered at 30 FPS.
     target_fps = (
         30 if story_engine.is_25d_pipeline(concept.get("visual_pipeline"))
         else (24 if require_ai_video else 30)
     )
     if require_ai_video:
-        # Fail before any TTS quota is consumed if GPU generation did not produce a full scene set.
-        missing_ai = [f"scene_{i+1:02d}.mp4" for i in range(len(concept["beats"]))
-                      if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()]
-        if missing_ai:
-            raise RuntimeError("AI-video mode is missing required clips before TTS starts: " + ", ".join(missing_ai))
-        if story_engine.is_25d_pipeline(concept.get("visual_pipeline")):
-            if not isinstance(editorial_plan, dict):
-                raise RuntimeError("Hybrid motion-comic mode requires a voice-locked editorial_shot_plan; refusing legacy fallback.")
-            if int(editorial_plan.get("source_beat_count", 0)) != len(concept["beats"]):
-                raise RuntimeError("Editorial shot plan source beat count does not match the screenplay.")
-            expected_shots = int(editorial_plan.get("editorial_shot_count", 0))
-            policy = story_engine.policy_for(concept.get("story_type", "emotional"))
-            if not policy["min_shots"] <= expected_shots <= policy["max_shots"]:
-                raise RuntimeError(f"Editorial shot plan has {expected_shots} shots; expected {policy['min_shots']}–{policy['max_shots']} for {policy['story_type']}.")
+        if not isinstance(editorial_plan, dict):
+            raise RuntimeError("AI production requires a voice-locked editorial_shot_plan; refusing a legacy fallback.")
+        if int(editorial_plan.get("source_beat_count", 0)) != len(concept["beats"]):
+            raise RuntimeError("Editorial shot plan source beat count does not match the screenplay.")
+        expected_shots = int(editorial_plan.get("editorial_shot_count", 0))
+        policy = story_engine.policy_for(concept.get("story_type", "emotional"))
+        if not policy["min_shots"] <= expected_shots <= policy["max_shots"]:
+            raise RuntimeError(f"Editorial shot plan has {expected_shots} shots; expected {policy['min_shots']}–{policy['max_shots']} for {policy['story_type']}.")
+        if primary_image_first:
+            sources = [shot.get("source") for shot in editorial_plan.get("shots", [])]
+            if not sources or any(source != "depth_parallax" for source in sources):
+                raise RuntimeError("Primary 2.5D must use only depth-parallax editorial shots; a Wan hero-video route is not permitted in the default image-first mode.")
+            for i, beat in enumerate(concept["beats"], start=1):
+                still = reel_dir / "ai_clips" / f"scene_{i:02d}.png"
+                depth_clip = reel_dir / "ai_clips" / f"scene_{i:02d}_25d.mp4"
+                if not still.is_file() or still.stat().st_size < 100_000:
+                    raise RuntimeError(f"Image-first 2.5D is missing or has an invalid still asset: {still.name}")
+                try:
+                    with Image.open(still) as image:
+                        image.verify()
+                    with Image.open(still) as image:
+                        if image.size != (704, 1280):
+                            raise RuntimeError(f"Image-first still {still.name} must be 704x1280; got {image.size}.")
+                except Exception as exc:
+                    raise RuntimeError(f"Image-first still {still.name} failed image validation: {exc}") from exc
+                if not depth_clip.is_file() or depth_clip.stat().st_size < 100_000:
+                    raise RuntimeError(f"Image-first 2.5D is missing required depth-parallax clip {depth_clip.name}.")
+                measured = probe_duration(depth_clip)
+                planned = float((beat.get("voice_timing") or {}).get("target_duration_seconds", 0) or 0)
+                if planned <= 0 or abs(measured - planned) > 0.20:
+                    raise RuntimeError(
+                        f"Image-first parallax duration mismatch for beat {i}: planned {planned:.3f}s, "
+                        f"measured {measured:.3f}s."
+                    )
+        elif story_engine.is_25d_pipeline(concept.get("visual_pipeline")):
+            missing_ai = [
+                f"scene_{i:02d}.mp4" for i in range(1, len(concept["beats"]) + 1)
+                if not (reel_dir / "ai_clips" / f"scene_{i:02d}.mp4").is_file()
+            ]
+            if missing_ai:
+                raise RuntimeError("Legacy hybrid video mode is missing required Wan source clips: " + ", ".join(missing_ai))
             for i in range(len(concept["beats"])):
                 source_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
                 depth_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
-                if not depth_clip.is_file():
-                    raise RuntimeError(f"Hybrid motion-comic mode is missing {depth_clip.name}; refusing a silent downgrade.")
-                if depth_clip.stat().st_size < 100_000:
-                    raise RuntimeError(f"Depth-parallax scene {depth_clip.name} is too small to be a valid video.")
-                source_duration = probe_duration(source_clip)
-                depth_duration = probe_duration(depth_clip)
-                if abs(source_duration - depth_duration) > 0.20:
-                    raise RuntimeError(
-                        f"Depth-parallax duration mismatch for beat {i+1}: source {source_duration:.3f}s, "
-                        f"parallax {depth_duration:.3f}s. Refusing mismatched editorial coverage."
-                    )
-        for i in range(len(concept["beats"])):
-            clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
-            if clip.stat().st_size < 100_000 or probe_duration(clip) < 2.5:
-                raise RuntimeError(f"AI scene {clip.name} is missing, too small or too short; refusing to spend TTS quota on an invalid batch.")
+                if not depth_clip.is_file() or depth_clip.stat().st_size < 100_000:
+                    raise RuntimeError(f"Legacy hybrid mode is missing a valid depth-parallax scene {depth_clip.name}.")
+                if abs(probe_duration(source_clip) - probe_duration(depth_clip)) > 0.20:
+                    raise RuntimeError(f"Legacy hybrid depth-parallax duration mismatch for beat {i+1}.")
+        else:
+            missing_ai = [
+                f"scene_{i+1:02d}.mp4" for i in range(len(concept["beats"]))
+                if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()
+            ]
+            if missing_ai:
+                raise RuntimeError("AI-video mode is missing required clips before TTS starts: " + ", ".join(missing_ai))
+            for i in range(len(concept["beats"])):
+                clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
+                if clip.stat().st_size < 100_000 or probe_duration(clip) < 2.5:
+                    raise RuntimeError(f"AI scene {clip.name} is missing, too small or too short; refusing to spend TTS quota on an invalid batch.")
 
     for i, beat in enumerate(concept["beats"]):
         log(f"[{concept['title']}] Voice-first render {i+1}/{len(concept['beats'])}: {beat['visual_query']}")
@@ -2242,13 +2272,24 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         target_duration = audio_duration + 0.08
         audio_tempo = 1.0
 
-        # Primary mode: visual-bible-prompt-conditioned illustrated source clip (no reference-image identity conditioning) from the Kaggle Wan render stage.
-        ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
-        if require_ai_video and not ai_clip.exists():
-            raise RuntimeError(f"AI-video mode requires scene clip {ai_clip.name}; refusing to silently downgrade to static graphics.")
+        # Image-first primary 2.5D uses one generated still plus its real depth-parallax
+        # motion master per beat. Legacy Wan routes remain available only for old manifests.
+        if primary_image_first:
+            still_image = reel_dir / "ai_clips" / f"scene_{i+1:02d}.png"
+            ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
+            if not still_image.is_file() or not ai_clip.is_file():
+                raise RuntimeError(f"Image-first primary 2.5D is missing still/parallax assets for beat {i+1}; refusing static or legacy downgrade.")
+            if first_visual is None:
+                first_visual = still_image
+                first_beat = beat
+        else:
+            still_image = None
+            ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
+            if require_ai_video and not ai_clip.exists():
+                raise RuntimeError(f"AI-video mode requires scene clip {ai_clip.name}; refusing to silently downgrade to static graphics.")
         if ai_clip.exists():
             if first_visual is None:
-                first_visual = ai_clip
+                first_visual = still_image if primary_image_first else ai_clip
                 first_beat = beat
             clip_duration = probe_duration(ai_clip)
             if clip_duration < 2.5:
@@ -2286,7 +2327,8 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                 editorial_clip = clips_dir / f"scene_{i+1:02d}_editorial.mp4"
                 beat_shots = story_engine.retime_beat_shots(beat.get("editorial_shots", []), target_duration)
                 motion_comic.render_editorial_montage(
-                    ai_clip, parallax_clip, editorial_clip, beat_shots,
+                    None if primary_image_first else ai_clip,
+                    parallax_clip, editorial_clip, beat_shots,
                     target_duration=target_duration,
                     video_speed_ratio=ratio,
                     video_hold_duration=video_hold_duration,
