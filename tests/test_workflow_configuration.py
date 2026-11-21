@@ -95,6 +95,23 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('उसने छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
         self.assertIn("'new_kaggle_gpu_dispatch': False", pipeline)
 
+    def test_finalizer_skips_redundant_apt_installs_and_uses_only_required_fonts(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        setup = body[body.index('Install only missing FFmpeg and Devanagari prerequisites'):]
+        setup = setup[:setup.index('Restore local Hindi narration ASR model cache')]
+        self.assertIn('if ! command -v ffmpeg', setup)
+        self.assertIn('ffmpeg -filters 2>/dev/null | grep -q subtitles', setup)
+        self.assertIn('NotoSansDevanagari-Regular.ttf', setup)
+        self.assertIn('NotoSansDevanagari-Bold.ttf', setup)
+        self.assertIn('NotoSans-Regular.ttf', setup)
+        self.assertIn('NotoSans-Bold.ttf', setup)
+        self.assertIn('fonts-noto-core', setup)
+        self.assertNotIn('fonts-noto-extra', setup)
+        self.assertIn('--no-install-recommends', setup)
+        self.assertIn('skipping apt update/install', setup)
+        self.assertIn('cache: pip', body)
+        self.assertIn('cache-dependency-path: |', body)
+
     def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)

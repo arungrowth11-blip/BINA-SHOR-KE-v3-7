@@ -270,6 +270,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-asr.txt
 
       - name: Quick remote Kaggle status check (minimal CLI only)
         id: remote
@@ -321,12 +325,44 @@ jobs:
           restore-keys: |
             bsk-tts-${{ runner.os }}-
 
-      - name: Install FFmpeg and Devanagari fonts
+      - name: Install only missing FFmpeg and Devanagari prerequisites
         if: steps.work.outputs.finalize == 'true'
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          set -euo pipefail
+          packages=()
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1 || ! ffmpeg -filters 2>/dev/null | grep -q subtitles; then
+            packages+=(ffmpeg)
+          fi
+          required_fonts=(
+            /usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf
+            /usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf
+            /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
+            /usr/share/fonts/truetype/noto/NotoSans-Bold.ttf
+          )
+          missing_fonts=false
+          for font in "${required_fonts[@]}"; do
+            if [ ! -s "$font" ]; then
+              missing_fonts=true
+              break
+            fi
+          done
+          if [ "$missing_fonts" = true ]; then
+            packages+=(fonts-noto-core)
+          fi
+          if [ "${#packages[@]}" -gt 0 ]; then
+            echo "Installing missing prerequisites only: ${packages[*]}"
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends "${packages[@]}"
+          else
+            echo "FFmpeg subtitle filter and required Noto fonts already available; skipping apt update/install."
+          fi
+          command -v ffmpeg
+          command -v ffprobe
           ffmpeg -filters 2>/dev/null | grep -q subtitles
+          for font in "${required_fonts[@]}"; do
+            test -s "$font" || { echo "Required Devanagari font missing after setup: $font" >&2; exit 1; }
+          done
 
       - name: Restore local Hindi narration ASR model cache
         if: steps.work.outputs.finalize == 'true'
