@@ -115,6 +115,36 @@ class CharacterReferenceTests(unittest.TestCase):
             self.assertEqual(len(commands), 1)
             self.assertIn("1.800", commands[0])
 
+    def test_character_reference_persistence_records_source_hash_and_resume_targets(self):
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_comfy, old_out = runner["COMFY"], runner["OUT"]
+            runner["COMFY"], runner["OUT"] = root / "ComfyUI", root / "bsk_output"
+            scene = root / "scene_01.mp4"
+            scene.write_bytes(b"verified source clip")
+            reel = {"reel_id": "reel_reference_test", "beats": [{}, {}, {}, {}, {}, {}]}
+            manifest = {}
+            metadata = {
+                "filename": "reel_reference_test_identity_anchor.png", "width": 704, "height": 1280,
+                "timestamp_seconds": 1.8, "bytes": 12345, "sha256": "a" * 64,
+                "conditioning": "ComfyUI LoadImage -> Wan22ImageToVideoLatent.start_image for later scenes",
+            }
+            try:
+                with patch.dict(runner, {
+                    "valid_scene_file": lambda _path: (True, 4.0),
+                    "create_character_reference_image": lambda _source, _destination, _duration: metadata,
+                    "write_json": lambda _path, _payload: None,
+                }):
+                    result = runner["persist_character_reference"](reel, "reel_reference_test", scene, manifest)
+                self.assertEqual(reel["character_reference_image"], metadata["filename"])
+                self.assertEqual(result["sha256"], "a" * 64)
+                self.assertEqual(result["source_scene_index"], 1)
+                self.assertEqual(result["used_for_scenes"], [2, 3, 4, 5, 6])
+                self.assertEqual(manifest["character_references"], [result])
+            finally:
+                runner["COMFY"], runner["OUT"] = old_comfy, old_out
+
     def test_first_scene_reference_rejects_non_finite_or_too_short_duration(self):
         runner = load_gpu_runner_namespace()
         with tempfile.TemporaryDirectory() as folder:

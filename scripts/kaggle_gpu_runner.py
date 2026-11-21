@@ -472,7 +472,7 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
         "No readable text, subtitles, logos or watermarks."
     )
     if reference_image and scene_index > 1:
-        full_prompt += "\\nVISUAL IDENTITY ANCHOR: the supplied first-scene image is a continuity reference for recurring character face, age, hair, clothing and palette. Animate the requested new action; do not copy the previous pose or freeze the reference composition."
+        full_prompt += f"\nVISUAL IDENTITY ANCHOR: the supplied first-scene image is a continuity reference for recurring character face, age, hair, clothing and palette. Animate the requested new action; do not copy the previous pose or freeze the reference composition."
     seed = int(hashlib.sha256(f"{MANIFEST.get('job_id')}|{story['reel_id']}|{scene_index}|{prompt_text}".encode()).hexdigest()[:15], 16) % (2**63 - 1)
 
     g = {}
