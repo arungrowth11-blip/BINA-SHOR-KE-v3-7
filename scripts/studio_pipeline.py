@@ -693,6 +693,24 @@ def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
     dataset_slug = str((pending.get('resume_dataset_id') or '').split('/')[-1] or f'bsk-resume-{job_token}')
     dataset_id = f'{username}/{dataset_slug}'
     expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
+    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) or {}
+    checkpoint_manifest = load_json(root / 'gpu_checkpoint_manifest.json', {}) or {}
+    generation_mode = str(worker_manifest.get('generation_mode') or checkpoint_manifest.get('generation_mode') or '')
+    toolchain = checkpoint_manifest.get('toolchain') if isinstance(checkpoint_manifest.get('toolchain'), dict) else {}
+    if generation_mode == 'still_image_first':
+        required_model_keys = ('unet', 'clip_l', 't5xxl', 'vae', 'depth')
+        if (
+            not re.fullmatch(r'[0-9a-f]{40}', str(toolchain.get('comfyui_commit', '')))
+            or not re.fullmatch(r'[0-9a-f]{40}', str(toolchain.get('comfyui_gguf_commit', '')))
+            or not isinstance(toolchain.get('model_revisions'), dict)
+            or not all(re.fullmatch(r'[0-9a-f]{40}', str((toolchain.get('model_revisions') or {}).get(key, ''))) for key in required_model_keys)
+            or not isinstance(toolchain.get('runtime_packages'), dict)
+            or not toolchain.get('runtime_packages')
+        ):
+            raise RuntimeError(
+                'Image-first checkpoint lacks exact ComfyUI/GGUF/model/runtime revision pins; '
+                'saving it as resumable could mix model builds. Keep the original job diagnostics and do not auto-resume.'
+            )
     with tempfile.TemporaryDirectory(prefix='bsk-private-checkpoint-') as folder:
         stage = Path(folder)
         total_bytes = 0
@@ -709,8 +727,10 @@ def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
         if total_bytes > 8 * 1024**3:
             raise RuntimeError('Recovered clips exceed the 8 GiB safety cap; refusing to upload a large checkpoint dataset.')
         write_json(stage / 'checkpoint_manifest.json', {
-            'schema_version': 1, 'job_id': pending.get('job_id'), 'expected_scenes': expected,
+            'schema_version': 2, 'job_id': pending.get('job_id'), 'expected_scenes': expected,
             'completed_scenes': len(scene_rows), 'scenes': scene_rows,
+            'generation_mode': generation_mode,
+            'toolchain': toolchain,
             'privacy': 'Kaggle dataset created without --public; intended to remain private.',
         })
         metadata = {
@@ -805,6 +825,42 @@ def handle_gpu_failure(root: Path | None, pending: dict, reason: str) -> bool:
         write_json(PENDING, pending)
         alert_failure('BINA SHOR KE GPU job failed and Kaggle exposed no output bundle to recover. No paid fallback or duplicate GPU job was started. ' + reason[:1200])
         return False
+    # Preserve the exact image-first model/ComfyUI/runtime snapshot in the manifest
+    # that is pushed for resume. Never retry missing stills with moving model revisions.
+    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) or {}
+    if worker_manifest.get('generation_mode') == 'still_image_first':
+        model_revisions = worker_manifest.get('model_revisions') if isinstance(worker_manifest.get('model_revisions'), dict) else {}
+        runtime_packages = worker_manifest.get('runtime_packages') if isinstance(worker_manifest.get('runtime_packages'), dict) else {}
+        required_keys = ('unet', 'clip_l', 't5xxl', 'vae', 'depth')
+        image_lock = {
+            'status': 'locked',
+            'generation_mode': 'still_image_first',
+            'model_family': 'FLUX.1-schnell-Q4_K_S-GGUF',
+            'comfyui_commit': worker_manifest.get('comfyui_commit'),
+            'comfyui_gguf_commit': worker_manifest.get('comfyui_gguf_commit'),
+            'model_revisions': model_revisions,
+            'runtime_packages': runtime_packages,
+            'source_job_id': pending.get('job_id'),
+            'note': 'Resume-only snapshot captured from the interrupted original job; not a successful performance qualification.',
+        }
+        complete_lock = (
+            re.fullmatch(r'[0-9a-f]{40}', str(image_lock['comfyui_commit'] or ''))
+            and re.fullmatch(r'[0-9a-f]{40}', str(image_lock['comfyui_gguf_commit'] or ''))
+            and all(re.fullmatch(r'[0-9a-f]{40}', str(model_revisions.get(key, ''))) for key in required_keys)
+            and bool(runtime_packages)
+        )
+        if complete_lock:
+            pending['manifest'] = dict(pending.get('manifest') or {})
+            pending['manifest']['image_toolchain_lock'] = image_lock
+            pending['resume_image_toolchain_lock'] = image_lock
+            write_json(PENDING, pending)
+        else:
+            pending['status'] = 'gpu_checkpoint_saved'
+            pending['gpu_error'] = reason[:5000]
+            pending['resume_blocked_reason'] = 'Interrupted image-first job has no complete immutable toolchain manifest; safe same-build resume cannot be guaranteed.'
+            write_json(PENDING, pending)
+            alert_failure('Image-first GPU stopped, but its exact model/runtime snapshot is incomplete. Checkpoint resume was blocked to prevent mixed model builds; no second GPU job was started.')
+            return False
     try:
         checkpoint = persist_private_resume_dataset(root, pending)
     except Exception as exc:
