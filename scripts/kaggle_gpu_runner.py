@@ -402,18 +402,29 @@ def install_comfyui():
     }
 
 
-def wait_for_comfy(base='http://127.0.0.1:8188', timeout=600):
+def wait_for_comfy(base='http://127.0.0.1:8188', timeout=600, *, primary_image_first: bool = False):
     deadline = time.time() + timeout
     last_error = None
+    if primary_image_first:
+        required = [
+            'UnetLoaderGGUF', 'DualCLIPLoader', 'VAELoader', 'CLIPTextEncodeFlux',
+            'ConditioningZeroOut', 'EmptySD3LatentImage', 'KSampler',
+            'VAEDecode', 'SaveImage',
+        ]
+    else:
+        required = [
+            'UnetLoaderGGUF', 'CLIPLoader', 'VAELoader', 'CLIPTextEncode',
+            'ModelSamplingSD3', 'KSampler', 'Wan22ImageToVideoLatent',
+            'VAEDecode', 'CreateVideo', 'SaveVideo',
+        ]
     while time.time() < deadline:
         try:
             with urllib.request.urlopen(base + '/object_info', timeout=5) as r:
                 if r.status == 200:
                     body = json.loads(r.read().decode('utf-8'))
-                    required = ['UnetLoaderGGUF', 'CLIPLoader', 'VAELoader', 'CLIPTextEncode', 'ModelSamplingSD3', 'KSampler', 'Wan22ImageToVideoLatent', 'VAEDecode', 'CreateVideo', 'SaveVideo']
                     missing = [name for name in required if name not in body]
                     if missing:
-                        raise RuntimeError('ComfyUI did not register required native/custom nodes: ' + ', '.join(missing))
+                        raise RuntimeError('ComfyUI did not register required nodes for the selected mode: ' + ', '.join(missing))
                     return body
         except RuntimeError:
             raise
@@ -487,6 +498,73 @@ def shot_coverage_instruction(scene_index, total_scenes):
         "INTERMEDIATE COVERAGE: choose a distinct, beat-appropriate shot size and camera angle; "
         "preserve the same subject, clothing, setting and physical action."
     )
+
+
+def build_flux_image_workflow(objects, beat, story, scene_index, prefix):
+    """Build a validated FLUX.1 Schnell still-image graph for the primary 2.5D path."""
+    style_profile = story.get('visual_style_profile') if isinstance(story.get('visual_style_profile'), dict) else {}
+    bible = str(story.get('visual_bible') or '').strip()
+    character_lines = []
+    for character in story.get('characters', []):
+        if not isinstance(character, dict):
+            continue
+        character_lines.append(
+            f"{character.get('display_name', character.get('character_id', 'Character'))}: "
+            f"{character.get('visual_age_description', '')}; {character.get('appearance', '')}; "
+            f"wardrobe and distinguishing features must remain unchanged."
+        )
+    style = (
+        "High-end semi-painterly Indian graphic-novel film still, illustrated not photorealistic, "
+        "tactile brush texture, clean intentional ink contours, expressive adult characters, "
+        "credible Indian environments and objects, cinematic composition, deep but readable tonal separation. "
+        f"Art direction: {style_profile.get('surface_language', 'painterly Indian graphic-novel cinema')}. "
+        f"Palette: {style_profile.get('palette', 'warm tungsten amber, muted earth and monsoon teal')}. "
+        f"Lighting: {style_profile.get('lighting', 'motivated practical lighting, soft falloff')}. "
+        "Vertical 9:16 shot, subject clearly readable on a phone screen, strong foreground/midground/background "
+        "separation for depth estimation, no text, captions, typography, logos or watermark."
+    )
+    prompt = (
+        f"{style}\nVISUAL BIBLE: {bible}\nRECURRING CAST: "
+        + " ".join(character_lines)
+        + f"\nNARRATIVE ROLE: {beat.get('narrative_role', 'story beat')}."
+        + f"\nSTATE CHANGE: {beat.get('state_change', beat.get('visual_direction', 'Show the approved action clearly.'))}"
+        + f"\nCAUSAL LINK: {beat.get('causal_link', 'Preserve the screenplay order and story logic.')}"
+        + f"\nSHOT: {beat.get('video_prompt', beat.get('visual_query', ''))}"
+    )
+    if len(prompt.strip()) < 80:
+        raise ValueError(f"Scene {scene_index} image prompt is too short to establish a coherent illustrated shot.")
+    seed = int(hashlib.sha256(
+        f"{MANIFEST.get('job_id')}|{story['reel_id']}|{scene_index}|{prompt}".encode()
+    ).hexdigest()[:15], 16) % (2**63 - 1)
+    g = {}
+    g['37'] = node_prompt(objects, 'UnetLoaderGGUF', {
+        'unet_name': 'flux1-schnell-Q4_K_S.gguf',
+    })
+    g['38'] = node_prompt(objects, 'DualCLIPLoader', {
+        'clip_name1': 'clip_l.safetensors',
+        'clip_name2': 't5xxl_fp8_e4m3fn_scaled.safetensors',
+        'type': 'flux',
+        'device': 'default',
+    })
+    g['39'] = node_prompt(objects, 'VAELoader', {'vae_name': 'ae.safetensors'})
+    g['27'] = node_prompt(objects, 'EmptySD3LatentImage', {
+        'width': 704, 'height': 1280, 'batch_size': 1,
+    })
+    g['41'] = node_prompt(objects, 'CLIPTextEncodeFlux', {
+        'clip': ['38', 0], 'clip_l': prompt, 't5xxl': prompt, 'guidance': 3.5,
+    })
+    g['42'] = node_prompt(objects, 'ConditioningZeroOut', {'conditioning': ['41', 0]})
+    g['31'] = node_prompt(objects, 'KSampler', {
+        'seed': seed, 'steps': 4, 'cfg': 1.0,
+        'sampler_name': 'euler', 'scheduler': 'simple', 'denoise': 1.0,
+        'model': ['37', 0], 'positive': ['41', 0], 'negative': ['42', 0],
+        'latent_image': ['27', 0],
+    })
+    g['8'] = node_prompt(objects, 'VAEDecode', {'samples': ['31', 0], 'vae': ['39', 0]})
+    g['9'] = node_prompt(objects, 'SaveImage', {
+        'images': ['8', 0], 'filename_prefix': prefix,
+    })
+    return g
 
 
 def build_api_workflow(objects, beat, story, scene_index, prefix):
@@ -659,6 +737,61 @@ def wait_prompt(prompt_id, timeout=DEFAULT_PROMPT_TIMEOUT_SECONDS, base='http://
         f'ComfyUI scene generation timed out after {timeout}s for prompt {prompt_id}. '
         f'Last observed state={json.dumps(last_status, ensure_ascii=False)[:2000]}'
     )
+
+
+def latest_image(output_dir: Path, before: float, prefix: str) -> Path:
+    """Find the exact scene PNG created by this ComfyUI prompt, never a stale image."""
+    parts = [part.lower() for part in prefix.split('/') if part]
+    files = []
+    for path in output_dir.rglob('*'):
+        if not path.is_file() or path.suffix.lower() not in {'.png', '.webp'} or path.stat().st_mtime < before - 1:
+            continue
+        normalized = [part.lower() for part in path.parts]
+        if parts and not all(any(token in actual for actual in normalized) for token in parts):
+            continue
+        files.append(path)
+    if not files:
+        raise RuntimeError(f'ComfyUI completed but no matching still-image output found after prompt prefix {prefix}.')
+    return max(files, key=lambda path: path.stat().st_mtime)
+
+
+def prepare_scene_still(source: Path, destination: Path) -> dict:
+    """Validate and crop a generated still to the pinned 9:16 motion-comic working canvas."""
+    from PIL import Image, ImageOps
+    if not source.is_file() or source.stat().st_size < 100_000:
+        raise RuntimeError(f'ComfyUI still is missing or too small: {source}')
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.stem + '.partial.png')
+    temporary.unlink(missing_ok=True)
+    with Image.open(source) as image:
+        image = ImageOps.exif_transpose(image).convert('RGB')
+        target_ratio = 704 / 1280
+        width, height = image.size
+        if width <= 0 or height <= 0:
+            raise RuntimeError('Generated still has invalid image dimensions.')
+        current_ratio = width / height
+        if current_ratio > target_ratio:
+            new_width = max(1, int(round(height * target_ratio)))
+            left = (width - new_width) // 2
+            image = image.crop((left, 0, left + new_width, height))
+        else:
+            new_height = max(1, int(round(width / target_ratio)))
+            top = (height - new_height) // 2
+            image = image.crop((0, top, width, top + new_height))
+        image = image.resize((704, 1280), Image.Resampling.LANCZOS)
+        image.save(temporary, format='PNG', optimize=True)
+    with Image.open(temporary) as check:
+        check.verify()
+    temporary.replace(destination)
+    with Image.open(destination) as final:
+        width, height = final.size
+    return {
+        'bytes': destination.stat().st_size,
+        'sha256': sha256_file(destination),
+        'width': width,
+        'height': height,
+        'format': 'PNG',
+    }
 
 
 def latest_video(output_dir: Path, before: float, prefix: str) -> Path:
