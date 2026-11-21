@@ -19,7 +19,8 @@ The selected primary renderer is **image-first, primarily 2.5D illustrated motio
 - FLUX still-image ComfyUI graph, immutable model-revision capture, vertical image validation and SHA-256 manifests.
 - Depth Anything V2 parallax generation directly from still PNGs; pure-parallax FFmpeg assembly without dummy hero-video inputs.
 - Separate image-first toolchain lock and runtime benchmark logic; legacy Wan lock is kept separate.
-- Private Kaggle PNG still checkpoint save/restore, hash validation and regeneration of missing parallax assets.
+- Private Kaggle PNG still checkpoint save/restore, hash validation and regeneration of missing parallax assets. Recovery manifests now also preserve the exact ComfyUI/GGUF commits, FLUX/CLIP/T5/VAE/Depth revisions and runtime package versions; a resumed worker refuses to mix checkpoints with a different model/runtime build.
+- Image-first recovery estimates rebuild the parallax phase from restored PNG stills. At least five measured per-scene parallax timings are required; without enough measurements the estimate is unknown/unsafe and automatic resume is blocked rather than assuming a 1.5-hour placeholder.
 - VLM schema validation (finite numeric 1–5 scores, mandatory boolean critical flag), full-video black/freeze scan, 1 FPS Hindi+English Tesseract OCR for leaked internal labels, and fail-closed delivery/approval gate.
 - Weekly 3-Reel plan gate requires one complete image-first Reel, VLM/OCR/motion/technical QA, all four Telegram delivery receipts, owner /approve and a qualified image-first GPU estimate.
 - English/Hindi README, pilot design note, and operator notes updated for the new default and explicit qualification gaps.
