@@ -28,6 +28,13 @@ NEGATIVE = (
     "unrealistic physics, unnatural reflections, blurry, low-resolution, oversaturated, inconsistent clothing"
 )
 
+PRIMARY_25D_PIPELINE = "primary_25d_motion_comic_v2"
+LEGACY_25D_PIPELINE = "hybrid_25d_motion_comic_v1"
+
+
+def is_25d_pipeline(value) -> bool:
+    return str(value or "") in {PRIMARY_25D_PIPELINE, LEGACY_25D_PIPELINE}
+
 
 def run(cmd, cwd=None, timeout=1800):
     p = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
@@ -452,12 +459,17 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     causal_link = str(beat.get('causal_link') or 'Preserve the approved order and causal relationship of the screenplay.').strip()
     if not narrative_role or len(state_change.split()) < 3 or len(causal_link.split()) < 3:
         raise ValueError(f'Scene {scene_index} is missing its narrative role, state change or causal link.')
+    style_profile = story.get('visual_style_profile') if isinstance(story.get('visual_style_profile'), dict) else {}
+    style_palette = str(style_profile.get('palette') or 'warm tungsten amber, muted earth and monsoon teal shadows')
+    style_lighting = str(style_profile.get('lighting') or 'motivated practical lighting with soft falloff')
+    style_camera = str(style_profile.get('camera_grammar') or 'motivated push-ins, lateral drift and expressive reaction close-ups')
+    style_surface = str(style_profile.get('surface_language') or 'semi-painterly Indian graphic-novel illustration with tactile brush grain')
     style = (
-        'Mature semi-painterly 2.5D Indian graphic-novel motion-comic cinema, clearly illustrated rather than photoreal live action, '
-        'layered foreground/midground/background cues, tactile brush-textured surfaces, restrained expressive character design, '
-        'warm tungsten interiors, monsoon blues and rich shadows when appropriate, physically plausible subtle movement, '
-        'motivated practical lighting, coherent cinematic colour. Vertical 9:16 composition, one clear action, clean visual hierarchy. '
-        'No text or typography is to appear in-frame. '
+        'Mature illustrated 2.5D Indian motion-comic cinema, clearly graphic-novel art rather than photoreal live action, '
+        'layered foreground/midground/background cues, tactile brush-textured surfaces, consistent expressive character design, '
+        f'{style_surface}. PALETTE: {style_palette}. LIGHTING: {style_lighting}. CAMERA LANGUAGE: {style_camera}. '
+        'Physically plausible subtle movement, coherent cinematic colour, vertical 9:16 composition, one clear action, '
+        'clean visual hierarchy. No text, subtitles or typography may appear in-frame. '
     )
     full_prompt = (
         f"{style}\nCONTINUITY / LOOK BIBLE: {bible}"
@@ -487,9 +499,7 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     latent_inputs = {
         'width': 704, 'height': 1280, 'length': target_frames, 'batch_size': 1, 'vae': ['39', 0]
     }
-    uses_hybrid_reference = (
-        scene_index > 1 and story.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1'
-    )
+    uses_hybrid_reference = scene_index > 1 and is_25d_pipeline(story.get('visual_pipeline'))
     if uses_hybrid_reference:
         if not reference_image or Path(reference_image).name != reference_image:
             raise RuntimeError(
@@ -755,8 +765,9 @@ def create_25d_parallax_clip(source: Path, destination: Path, duration: float, d
     if float(depth.std()) < 0.015:
         raise RuntimeError("Depth Anything produced a nearly flat depth map; refusing fake 2.5D movement.")
 
-    width, height, fps = 704, 1280, 24
-    frame_count = max(61, int(math.ceil(duration * fps)))
+    # The source Wan generation stays 24 FPS; the derived primary 2.5D motion master is 30 FPS.
+    width, height, fps = 704, 1280, 30
+    frame_count = max(1, int(round(duration * fps)))
     grid_x, grid_y = np.meshgrid(
         np.arange(width, dtype=np.float32),
         np.arange(height, dtype=np.float32),
@@ -824,7 +835,7 @@ def main():
     result_manifest = {
         'job_id': MANIFEST.get('job_id'), 'status': 'running', 'model': 'Wan2.2 TI2V 5B Q4_K_M GGUF',
         'license_note': 'Wan2.2 upstream is Apache-2.0; this quantized derivative has its own attribution/notice. Review licenses before commercial use.',
-        'scenes': [], 'parallax_scenes': [], 'character_references': [], 'visual_pipeline': 'hybrid_25d_motion_comic_v1',
+        'scenes': [], 'parallax_scenes': [], 'character_references': [], 'visual_pipeline': MANIFEST.get('visual_pipeline', PRIMARY_25D_PIPELINE),
         'depth_model': 'depth-anything/Depth-Anything-V2-Small-hf', 'depth_model_license': 'Apache-2.0',
         'started_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
@@ -855,7 +866,7 @@ def main():
             for i, beat in enumerate(reel['beats'], start=1):
                 final_out = OUT / reel_id / f'scene_{i:02d}.mp4'
                 if final_out.exists() and final_out.stat().st_size > 100_000:
-                    if i == 1 and reel.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1':
+                    if i == 1 and is_25d_pipeline(reel.get('visual_pipeline')):
                         persist_character_reference(reel, reel_id, final_out, result_manifest)
                     continue
                 prefix = f"bsk/{reel_id}/scene_{i:02d}"
