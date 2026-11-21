@@ -576,7 +576,7 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             reel_dir = Path(folder)
             def fake_extract(command, timeout=240):
-                Path(command[-1]).write_bytes(b"frame")
+                Path(command[-1]).write_bytes(b"frame" * 500)
             response = {
                 "scores": {
                     "text_legibility": 5, "devanagari_rendering": 5,
@@ -605,7 +605,7 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             reel_dir = Path(folder)
             def fake_extract(command, timeout=240):
-                Path(command[-1]).write_bytes(b"frame")
+                Path(command[-1]).write_bytes(b"frame" * 500)
             incomplete = {
                 "scores": {"text_legibility": 5, "visual_quality": 5},
                 "critical_issue": False, "notes": [], "confidence": "low",
