@@ -33,8 +33,28 @@ class FactoryLogicTests(unittest.TestCase):
         overlays = ["अनुरोधों की शुरुआत", "बढ़ती अपेक्षाएँ", "छूटा हुआ काम", "नई सीमा", "दो अलग प्रतिक्रियाएँ", "सीख का निष्कर्ष"]
         queries = ["hands writing notebook desk", "phone notification desk", "unfinished notebook coffee", "hand turning phone down", "quiet empty office chair", "closed notebook warm lamp"]
         beats = []
+        narrative_roles = ("hook", "context", "conflict", "escalation", "turn", "payoff")
+        state_changes = (
+            "A habitual request creates the opening pressure",
+            "Repeated help becomes an assumed responsibility",
+            "The protagonist loses time for a necessary personal task",
+            "The protagonist states a boundary for the first time",
+            "Two people react differently to the new boundary",
+            "The final choice reframes what being dependable means",
+        )
+        causal_links = (
+            "The opening establishes the pressure that needs explanation",
+            "The earlier request is treated as a routine expectation",
+            "That expectation now creates a visible personal cost",
+            "The missed task forces a clear decision",
+            "The boundary causes different reactions from friends",
+            "Those reactions reveal the cost and meaning of the choice",
+        )
         for i in range(6):
             beats.append({
+                "narrative_role": narrative_roles[i],
+                "state_change": state_changes[i],
+                "causal_link": causal_links[i],
                 "voiceover": voice[i],
                 "screen_text": f"दृश्य {i+1} की बात",
                 "visual_query": queries[i],
@@ -156,6 +176,8 @@ class FactoryLogicTests(unittest.TestCase):
             )
         self.assertEqual(len(result["beats"]), 6)
         self.assertIn("exactly 6 narrative beats", mocked.call_args.args[1])
+        self.assertIn("narrative_role", mocked.call_args.args[1])
+        self.assertIn("causal_link", mocked.call_args.args[1])
         prompt = mocked.call_args.args[1]
         self.assertIn(feedback, prompt)
         self.assertIn("young_adult male=hi_male_young_puck", prompt)
@@ -380,6 +402,9 @@ class FactoryLogicTests(unittest.TestCase):
             sid = f"beat_{i+1:02d}_line_01"
             speaker_id = concept["characters"][i % 2]["character_id"]
             concept["beats"].append({
+                "narrative_role": ("hook", "context", "conflict", "escalation", "turn", "payoff")[i],
+                "state_change": f"A distinct story development number {i+1} changes the situation",
+                "causal_link": f"The previous beat leads into story development number {i+1}",
                 "visual_query": "two friends kitchen conversation",
                 "visual_direction": "A small misunderstanding becomes clear through a quiet response.",
                 "video_prompt": "Initial prompt, replaced after voice lock.",
@@ -411,6 +436,9 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(result["beats"][0]["voice_timing"]["target_frames"], 120)
         self.assertIn("actual_audio_duration_seconds", mocked.call_args.args[1])
         self.assertIn("target_duration_seconds", mocked.call_args.args[1])
+        self.assertIn("narrative_role", mocked.call_args.args[1])
+        self.assertIn("state_change", mocked.call_args.args[1])
+        self.assertIn("causal_link", mocked.call_args.args[1])
 
     def test_final_storyboard_refuses_to_run_before_voice_lock(self):
         with self.assertRaisesRegex(RuntimeError, "requires measured TTS audio"):
@@ -543,6 +571,54 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_visual_qa_outage_keeps_manual_review_path_open(self):
         producer.enforce_visual_qa({"status": "not_completed", "human_review_required": True})
+
+    def test_visual_qa_requires_character_continuity_and_metadata_dimensions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            def fake_extract(command, timeout=240):
+                Path(command[-1]).write_bytes(b"frame")
+            response = {
+                "scores": {
+                    "text_legibility": 5, "devanagari_rendering": 5,
+                    "anatomy_integrity": 5, "story_visual_match": 5,
+                    "safe_composition": 5, "visual_quality": 4,
+                    "character_continuity": 2, "metadata_text_cleanliness": 1,
+                },
+                "critical_issue": True, "notes": ["Wardrobe drift and internal overlay label visible."],
+                "confidence": "high",
+            }
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
+                producer, "gemini_json_with_images", return_value=response
+            ) as audit:
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 35.0,
+                    segment_durations=[5.8] * 6,
+                )
+            prompt = audit.call_args.args[1]
+            self.assertIn("Compare recurring characters across all frames", prompt)
+            self.assertIn("KEYWORD, STEP, CONTRAST", prompt)
+            self.assertEqual(result["scores"]["character_continuity"], 2)
+            self.assertEqual(result["scores"]["metadata_text_cleanliness"], 1)
+            self.assertEqual(result["status"], "warning")
+
+    def test_visual_qa_does_not_mark_reviewed_when_required_dimensions_are_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            def fake_extract(command, timeout=240):
+                Path(command[-1]).write_bytes(b"frame")
+            incomplete = {
+                "scores": {"text_legibility": 5, "visual_quality": 5},
+                "critical_issue": False, "notes": [], "confidence": "low",
+            }
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
+                producer, "gemini_json_with_images", return_value=incomplete
+            ):
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 35.0,
+                    segment_durations=[5.8] * 6,
+                )
+            self.assertEqual(result["status"], "not_completed")
+            self.assertIn("character_continuity", result["missing_required_scores"])
 
     def test_pexels_is_optional_when_free_local_graphics_are_available(self):
         with patch.object(producer, "GEMINI_API_KEY", "test-key"), \

@@ -45,6 +45,40 @@ def normalise_story_type(value: Any) -> str:
     return raw
 
 
+NARRATIVE_BEAT_ROLES = ("hook", "context", "conflict", "escalation", "turn", "payoff")
+
+
+def validate_narrative_arc(beats: list[dict[str, Any]]) -> dict[str, Any]:
+    """Fail before voice/GPU spend when a screenplay has missing or disconnected story beats."""
+    if not isinstance(beats, list) or len(beats) != len(NARRATIVE_BEAT_ROLES):
+        raise ValueError("Narrative arc requires exactly six beats: hook, context, conflict, escalation, turn, payoff.")
+    seen_changes: set[str] = set()
+    for index, (beat, expected_role) in enumerate(zip(beats, NARRATIVE_BEAT_ROLES), start=1):
+        if not isinstance(beat, dict):
+            raise ValueError(f"Narrative beat {index} must be an object.")
+        role = str(beat.get("narrative_role") or "").strip().lower()
+        if role != expected_role:
+            raise ValueError(f"Narrative beat {index} must have role {expected_role!r}; received {role or 'missing'!r}.")
+        state_change = " ".join(str(beat.get("state_change") or "").split())
+        if not 4 <= len(state_change.split()) <= 32:
+            raise ValueError(f"Narrative beat {index} ({expected_role}) needs a concrete state_change of 4–32 words.")
+        normalized = state_change.casefold()
+        if normalized in seen_changes:
+            raise ValueError(f"Narrative beat {index} repeats an earlier state_change; every beat must change the story.")
+        seen_changes.add(normalized)
+        if index > 1:
+            causal_link = " ".join(str(beat.get("causal_link") or "").split())
+            if not 4 <= len(causal_link.split()) <= 32:
+                raise ValueError(f"Narrative beat {index} ({expected_role}) needs a causal_link of 4–32 words explaining its connection to the previous beat.")
+    return {
+        "status": "validated",
+        "beat_roles": list(NARRATIVE_BEAT_ROLES),
+        "beat_count": len(beats),
+        "distinct_state_changes": len(seen_changes),
+        "causal_links_required": len(beats) - 1,
+    }
+
+
 def infer_story_type(concept: dict[str, Any]) -> str:
     explicit = concept.get("story_type")
     if explicit:

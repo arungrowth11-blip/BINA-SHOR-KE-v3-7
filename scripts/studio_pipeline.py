@@ -404,6 +404,9 @@ def plan_week(reel_count: int = 3) -> int:
             'concept': concept,
             'beats': [{
                 'video_prompt': b['video_prompt'],
+                'narrative_role': b['narrative_role'],
+                'state_change': b['state_change'],
+                'causal_link': b['causal_link'],
                 'visual_direction': b['visual_direction'],
                 'scene_index': b['scene_index'],
                 'voice_timing': b['voice_timing'],

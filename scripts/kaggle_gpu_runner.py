@@ -446,6 +446,11 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
         raise ValueError("Voice-first Wan scenes must use the qualified 24 FPS timeline.")
     total_scenes = len(story.get('beats', [])) or 6
     coverage = shot_coverage_instruction(scene_index, total_scenes)
+    narrative_role = str(beat.get('narrative_role') or ('hook' if scene_index == 1 else 'payoff' if scene_index == total_scenes else 'intermediate')).strip().lower()
+    state_change = str(beat.get('state_change') or beat.get('visual_direction') or 'Preserve the beat-specific action and visual meaning.').strip()
+    causal_link = str(beat.get('causal_link') or 'Preserve the approved order and causal relationship of the screenplay.').strip()
+    if not narrative_role or len(state_change.split()) < 3 or len(causal_link.split()) < 3:
+        raise ValueError(f'Scene {scene_index} is missing its narrative role, state change or causal link.')
     style = (
         'Mature semi-painterly 2.5D Indian graphic-novel motion-comic cinema, clearly illustrated rather than photoreal live action, '
         'layered foreground/midground/background cues, tactile brush-textured surfaces, restrained expressive character design, '
@@ -455,6 +460,9 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     )
     full_prompt = (
         f"{style}\nCONTINUITY / LOOK BIBLE: {bible}"
+        f"\nNARRATIVE ROLE: {narrative_role}."
+        f"\nSTATE CHANGE THIS SHOT MUST COMMUNICATE: {state_change}"
+        f"\nCAUSAL LINK TO THE STORY: {causal_link}"
         f"\nSHOT FUNCTION / CAMERA COVERAGE: {coverage}"
         f"\nSHOT {scene_index}: {prompt_text}"
         "\nCamera coverage is guidance only: preserve the exact beat, action and subject from the shot prompt. "

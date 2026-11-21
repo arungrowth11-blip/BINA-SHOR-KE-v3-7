@@ -21,6 +21,40 @@ class StoryEngineTests(unittest.TestCase):
         self.assertEqual(story_engine.policy_for("twist")["target_seconds"], 25)
         self.assertEqual(story_engine.policy_for("poetry")["target_seconds"], 22)
 
+    def test_narrative_arc_requires_ordered_roles_unique_changes_and_causal_links(self):
+        roles = story_engine.NARRATIVE_BEAT_ROLES
+        beats = [
+            {
+                "narrative_role": role,
+                "state_change": f"Distinct story development number {index} changes the situation",
+                "causal_link": "Opening pressure establishes why this beat matters" if index == 1 else
+                               f"Previous beat leads directly into this development number {index}",
+            }
+            for index, role in enumerate(roles, start=1)
+        ]
+        result = story_engine.validate_narrative_arc(beats)
+        self.assertEqual(result["status"], "validated")
+        self.assertEqual(result["distinct_state_changes"], 6)
+        self.assertEqual(result["causal_links_required"], 5)
+
+    def test_narrative_arc_rejects_role_order_and_repeated_state_change(self):
+        roles = story_engine.NARRATIVE_BEAT_ROLES
+        beats = [
+            {
+                "narrative_role": role,
+                "state_change": f"Distinct situation change number {index} affects the character",
+                "causal_link": "A concrete prior action explains this next development",
+            }
+            for index, role in enumerate(roles, start=1)
+        ]
+        beats[2]["narrative_role"] = "payoff"
+        with self.assertRaisesRegex(ValueError, "must have role 'conflict'"):
+            story_engine.validate_narrative_arc(beats)
+        beats[2]["narrative_role"] = "conflict"
+        beats[2]["state_change"] = beats[1]["state_change"]
+        with self.assertRaisesRegex(ValueError, "repeats an earlier state_change"):
+            story_engine.validate_narrative_arc(beats)
+
     def test_screenplay_length_is_genre_aware(self):
         concept = {
             "story_type": "comedy",

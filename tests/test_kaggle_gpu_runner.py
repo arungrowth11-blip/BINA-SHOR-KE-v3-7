@@ -73,12 +73,15 @@ class CameraCoverageTests(unittest.TestCase):
         prompts = []
         for scene_index in range(1, 7):
             graph = runner["build_api_workflow"](
-                {}, {"video_prompt": f"Photoreal shot {scene_index}, one simple action."},
+                {}, {"video_prompt": f"Photoreal shot {scene_index}, one simple action.", "narrative_role": ("hook", "context", "conflict", "escalation", "turn", "payoff")[scene_index-1], "state_change": f"Distinct beat {scene_index} changes the scene meaning", "causal_link": f"Previous beat leads into development {scene_index}"},
                 story, scene_index, f"offline/scene_{scene_index:02d}"
             )
             prompt = graph["6"]["inputs"]["text"]
             self.assertIn("CONTINUITY / LOOK BIBLE: " + bible, prompt)
             self.assertIn("SHOT FUNCTION / CAMERA COVERAGE:", prompt)
+            self.assertIn("NARRATIVE ROLE: " + ("hook", "context", "conflict", "escalation", "turn", "payoff")[scene_index-1], prompt)
+            self.assertIn("STATE CHANGE THIS SHOT MUST COMMUNICATE:", prompt)
+            self.assertIn("CAUSAL LINK TO THE STORY:", prompt)
             self.assertIn(runner["shot_coverage_instruction"](scene_index, 6), prompt)
             self.assertIn(f"SHOT {scene_index}:", prompt)
             self.assertIn("Do not add people, props, dialogue or events", prompt)
