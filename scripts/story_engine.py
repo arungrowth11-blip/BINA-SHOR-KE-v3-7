@@ -172,7 +172,13 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
     beat_roles = ("hook", "context", "conflict", "escalation", "turn", "payoff")
     total_shots = sum(counts)
     hero_count = max(1, int(round(total_shots * 0.25)))
-    hero_indices = set(sorted({0, total_shots // 2, total_shots - 1})[:hero_count])
+    if hero_count == 1:
+        hero_indices = {total_shots - 1}
+    else:
+        hero_indices = {
+            int(round(index * (total_shots - 1) / (hero_count - 1)))
+            for index in range(hero_count)
+        }
     shots: list[dict[str, Any]] = []
     reel_cursor = 0.0
     shot_number = 0
