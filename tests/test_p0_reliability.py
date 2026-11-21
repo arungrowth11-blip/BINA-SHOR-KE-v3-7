@@ -90,7 +90,14 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "telegram_delivered": True,
             }]}), encoding="utf-8")
             lock_path = base / "toolchain_lock.json"
-            lock_path.write_text(json.dumps({"gpu_benchmark": {
+            lock_path.write_text(json.dumps({
+                "status": "locked",
+                "comfyui_commit": "a" * 40,
+                "comfyui_gguf_commit": "b" * 40,
+                "model_revisions": {"unet": "c" * 40, "clip": "d" * 40, "vae": "e" * 40},
+            }), encoding="utf-8")
+            image_lock_path = base / "image_toolchain_lock.json"
+            image_lock_path.write_text(json.dumps({"gpu_benchmark": {
                 "qualified": True, "estimated_3_reel_hours": 6.0
             }}), encoding="utf-8")
 
