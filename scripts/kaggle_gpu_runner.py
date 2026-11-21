@@ -922,14 +922,19 @@ def create_25d_parallax_clip(
     import cv2
     from PIL import Image, ImageFilter, ImageOps
 
-    scratch = WORK / "motion_comic_tmp"
-    scratch.mkdir(parents=True, exist_ok=True)
-    keyframe_path = scratch / f"{destination.stem}_keyframe.png"
-    run([
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-ss", f"{max(0.1, duration * 0.45):.3f}", "-i", str(source),
-        "-frames:v", "1", "-vf", "scale=704:1280:flags=lanczos", str(keyframe_path),
-    ], timeout=180)
+    if source.suffix.lower() == ".png":
+        # Image-first production: the AI-generated still is the source asset;
+        # no Wan clip is created merely to extract a keyframe.
+        keyframe_path = source
+    else:
+        scratch = WORK / "motion_comic_tmp"
+        scratch.mkdir(parents=True, exist_ok=True)
+        keyframe_path = scratch / f"{destination.stem}_keyframe.png"
+        run([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-ss", f"{max(0.1, duration * 0.45):.3f}", "-i", str(source),
+            "-frames:v", "1", "-vf", "scale=704:1280:flags=lanczos", str(keyframe_path),
+        ], timeout=180)
     with Image.open(keyframe_path) as original:
         image = original.convert("RGB").filter(ImageFilter.MedianFilter(3))
         image = ImageOps.posterize(image, bits=5)
@@ -1035,6 +1040,7 @@ def create_25d_parallax_clip(
         "depth_model": "depth-anything/Depth-Anything-V2-Small-hf",
         "depth_model_license": "Apache-2.0",
         "keyframe_style": "posterized painterly graphic-novel",
+        "source_asset_type": "AI-generated image-first still" if source.suffix.lower() == ".png" else "legacy Wan video keyframe",
         "camera_motion": camera_move,
         "camera_motion_model": "eased genre-role camera move + depth-displaced foreground/midground/background parallax",
     }
