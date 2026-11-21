@@ -341,10 +341,12 @@ class FactoryLogicTests(unittest.TestCase):
     def test_ass_includes_story_overlay_and_scene_counter(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "test.ass"
-            producer.write_ass(path, "यह एक कहानी है", 3.2, overlay_text="नया संदर्भ", overlay_type="note", scene_index=2, scene_count=6)
+            producer.write_ass(path, "यह एक कहानी है", 3.2, overlay_text="नया संदर्भ", overlay_type="contrast", scene_index=2, scene_count=6)
             content = path.read_text(encoding="utf-8")
             self.assertIn("BINA SHOR KE", content)
             self.assertIn("नया संदर्भ", content)
+            self.assertNotIn("CONTRAST", content)
+            self.assertNotIn("  |  ", content)
             self.assertIn("02 / 06", content)
 
 
