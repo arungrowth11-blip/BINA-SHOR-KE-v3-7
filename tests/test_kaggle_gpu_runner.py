@@ -211,6 +211,113 @@ class FluxImageFirstWorkflowTests(unittest.TestCase):
         self.assertTrue(image_first_valid)
         self.assertAlmostEqual(measured, 8.041667)
 
+    def test_image_first_checkpoint_manifest_preserves_exact_toolchain_snapshot(self):
+        from PIL import Image
+        runner = load_gpu_runner_namespace()
+        revisions = {
+            "unet": "c" * 40, "clip_l": "d" * 40, "t5xxl": "e" * 40,
+            "vae": "f" * 40, "depth": "1" * 40,
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            output = root / "output"
+            scene_dir = output / "reel_resume"
+            scene_dir.mkdir(parents=True)
+            Image.effect_noise((704, 1280), 80).convert("RGB").save(
+                scene_dir / "scene_01.png", format="PNG"
+            )
+            runner["OUT"] = output
+            runner["MANIFEST"] = {
+                "job_id": "resume-lock-test",
+                "reels": [{
+                    "reel_id": "reel_resume",
+                    "visual_pipeline": runner["PRIMARY_25D_PIPELINE"],
+                    "beats": [{}],
+                }],
+            }
+            result_manifest = {
+                "generation_mode": "still_image_first",
+                "comfyui_commit": "a" * 40,
+                "comfyui_gguf_commit": "b" * 40,
+                "model_revisions": revisions,
+                "runtime_packages": {"torch": "2.10.0+cu128"},
+            }
+            runner["write_checkpoint_manifest"](result_manifest, "running")
+            checkpoint = json.loads((output / "gpu_checkpoint_manifest.json").read_text(encoding="utf-8"))
+        self.assertEqual(checkpoint["generation_mode"], "still_image_first")
+        self.assertEqual(checkpoint["toolchain"]["model_revisions"], revisions)
+        self.assertEqual(checkpoint["toolchain"]["comfyui_commit"], "a" * 40)
+        self.assertEqual(checkpoint["completed_scenes"], 1)
+        self.assertEqual(checkpoint["scenes"][0]["media_type"], "image/png")
+
+    def test_image_first_checkpoint_restore_refuses_different_model_revision(self):
+        from PIL import Image
+        runner = load_gpu_runner_namespace()
+        revisions = {
+            "unet": "c" * 40, "clip_l": "d" * 40, "t5xxl": "e" * 40,
+            "vae": "f" * 40, "depth": "1" * 40,
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            dataset = root / "input" / "resume-dataset"
+            dataset.mkdir(parents=True)
+            source = dataset / "reel_resume__scene_01.png"
+            Image.effect_noise((704, 1280), 80).convert("RGB").save(source, format="PNG")
+            toolchain = {
+                "generation_mode": "still_image_first",
+                "comfyui_commit": "a" * 40,
+                "comfyui_gguf_commit": "b" * 40,
+                "model_revisions": revisions,
+                "runtime_packages": {"torch": "2.10.0+cu128"},
+            }
+            checkpoint = {
+                "schema_version": 2,
+                "job_id": "resume-lock-test",
+                "generation_mode": "still_image_first",
+                "toolchain": toolchain,
+                "scenes": [{
+                    "reel_id": "reel_resume", "scene_index": 1,
+                    "file": source.name, "bytes": source.stat().st_size,
+                    "sha256": runner["sha256_file"](source), "media_type": "image/png",
+                    "width": 704, "height": 1280,
+                }],
+            }
+            (dataset / "checkpoint_manifest.json").write_text(
+                json.dumps(checkpoint), encoding="utf-8"
+            )
+            runner["KAGGLE_INPUT_ROOT"] = root / "input"
+            runner["WORK"] = root
+            runner["OUT"] = root / "output"
+            runner["OUT"].mkdir()
+            runner["MANIFEST"] = {
+                "job_id": "resume-lock-test",
+                "resume_dataset_id": "owner/resume-dataset",
+                "reels": [{
+                    "reel_id": "reel_resume",
+                    "visual_pipeline": runner["PRIMARY_25D_PIPELINE"],
+                    "beats": [{}],
+                }],
+            }
+            result = {
+                "generation_mode": "still_image_first",
+                "comfyui_commit": "a" * 40,
+                "comfyui_gguf_commit": "b" * 40,
+                "model_revisions": dict(revisions),
+                "runtime_packages": {"torch": "2.10.0+cu128"},
+                "scenes": [], "parallax_scenes": [],
+            }
+            runner["restore_checkpoint_dataset"](result)
+            restored = runner["OUT"] / "reel_resume" / "scene_01.png"
+            self.assertTrue(restored.is_file())
+            self.assertEqual(runner["sha256_file"](restored), checkpoint["scenes"][0]["sha256"])
+            result["model_revisions"]["unet"] = "9" * 40
+            with self.assertRaisesRegex(RuntimeError, "toolchain mismatch for model_revisions"):
+                runner["restore_checkpoint_dataset"]({
+                    **result,
+                    "scenes": [],
+                    "parallax_scenes": [],
+                })
+
     def test_image_first_comfy_preflight_requires_flux_nodes_only(self):
         runner = load_gpu_runner_namespace()
         required = {
