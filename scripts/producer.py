@@ -779,7 +779,13 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
     missing = [k for k in required if not concept.get(k)]
     if missing:
         raise ValueError("Generated concept misses required fields: " + ", ".join(missing))
-    recipient = str(concept.get("share_recipient") or "").strip()\n    if not 1 <= len(recipient.split()) <= 12 or len(recipient) > 100:\n        raise ValueError("Share recipient must identify one specific person or relationship (1–12 words), not a broad audience.")\n    recipient_normalized = normalize_for_similarity(recipient)\n    if recipient_normalized in {"everyone", "anyone", "all people", "sabko", "har kisi ko", "kisi ko", "logon ko", "people"}:\n        raise ValueError("Share recipient is too generic; name a concrete relationship or person.")\n    if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
+    recipient = str(concept.get("share_recipient") or "").strip()
+    if not 1 <= len(recipient.split()) <= 12 or len(recipient) > 100:
+        raise ValueError("Share recipient must identify one specific person or relationship (1–12 words), not a broad audience.")
+    recipient_normalized = normalize_for_similarity(recipient)
+    if recipient_normalized in {"everyone", "anyone", "all people", "sabko", "har kisi ko", "kisi ko", "logon ko", "people"}:
+        raise ValueError("Share recipient is too generic; name a concrete relationship or person.")
+    if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
         raise ValueError("Screenplay must contain exactly 6 narrative beats; editorial coverage is derived after measured voice timing.")
     allowed_overlay_types = {"message", "note", "step", "contrast", "keyword"}
     structured_script = all(isinstance(beat.get("speech_segments"), list) for beat in concept["beats"] if isinstance(beat, dict))
