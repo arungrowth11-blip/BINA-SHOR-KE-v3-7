@@ -75,21 +75,37 @@ class StoryEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "allowed range is 20–30s"):
             story_engine.validate_measured_duration(34, "comedy")
 
-    def test_35_second_emotional_story_gets_fourteen_meaningful_shots(self):
+    def test_35_second_emotional_story_is_primarily_2_5d_with_editorial_camera_grammar(self):
         plan = story_engine.build_editorial_shot_plan([5.8, 5.7, 5.9, 5.8, 5.9, 5.9], "emotional")
         self.assertEqual(plan["editorial_shot_count"], 14)
         self.assertEqual(plan["source_beat_count"], 6)
-        self.assertEqual(plan["hero_video_shot_count"], 4)
-        self.assertEqual(plan["depth_parallax_shot_count"], 10)
+        self.assertEqual(plan["hero_video_shot_count"], 2)
+        self.assertEqual(plan["depth_parallax_shot_count"], 12)
         self.assertEqual(plan["gpu_generation_count"], 6)
+        self.assertEqual(plan["visual_pipeline"], story_engine.PRIMARY_25D_PIPELINE)
+        self.assertGreaterEqual(plan["depth_parallax_share_actual"], 0.80)
+        self.assertLessEqual(plan["hero_video_share_actual"], 0.20)
+        self.assertEqual(plan["visual_style_profile"]["profile_id"], "warm_indian_melodrama")
+        self.assertTrue(all(item.get("camera_move") for item in plan["shots"]))
+        self.assertTrue(all(item.get("style_profile_id") == "warm_indian_melodrama" for item in plan["shots"]))
         self.assertFalse(plan["gpu_generation_saving_claim"])
         self.assertAlmostEqual(sum(s["duration_seconds"] for s in plan["shots"]), plan["measured_duration_seconds"], places=2)
 
-    def test_comedy_uses_fewer_shots_and_shorter_story_duration(self):
+    def test_comedy_uses_fewer_shots_and_remains_primarily_2_5d(self):
         plan = story_engine.build_editorial_shot_plan([4.1, 4.0, 4.1, 4.0, 4.1, 4.1], "comedy")
         self.assertGreaterEqual(plan["editorial_shot_count"], 7)
         self.assertLessEqual(plan["editorial_shot_count"], 10)
-        self.assertEqual(plan["hero_video_shot_count"], int(round(plan["editorial_shot_count"] * 0.25)))
+        self.assertEqual(plan["hero_video_shot_count"], max(1, int(plan["editorial_shot_count"] * 0.20)))
+        self.assertGreaterEqual(plan["depth_parallax_share_actual"], 0.80)
+        self.assertEqual(plan["visual_style_profile"]["profile_id"], "bright_everyday_comedy")
+
+    def test_story_categories_receive_distinct_visual_style_profiles(self):
+        emotional = story_engine.visual_style_for("emotional")
+        suspense = story_engine.visual_style_for("suspense")
+        poetry = story_engine.visual_style_for("poetry")
+        self.assertNotEqual(emotional["palette"], suspense["palette"])
+        self.assertNotEqual(suspense["camera_grammar"], poetry["camera_grammar"])
+        self.assertEqual(story_engine.PRIMARY_25D_PIPELINE, "primary_25d_motion_comic_v2")
 
     def test_shot_allocation_rejects_scene_too_short_for_editorial_cuts(self):
         with self.assertRaisesRegex(ValueError, "at least 2.5 seconds"):
