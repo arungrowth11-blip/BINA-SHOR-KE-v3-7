@@ -39,7 +39,7 @@ STORY_TYPE_ALIASES = {
 
 PRIMARY_25D_PIPELINE = "primary_25d_motion_comic_v2"
 LEGACY_25D_PIPELINE = "hybrid_25d_motion_comic_v1"
-HERO_VIDEO_SHARE = 0.20
+HERO_VIDEO_SHARE = 0.0
 
 # Distinct art-direction profiles prevent every story from using the same flat visual grammar.
 VISUAL_STYLE_PROFILES: dict[str, dict[str, str]] = {
@@ -277,8 +277,10 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
     total_shots = sum(counts)
     # 2.5D is the default visual language. Reserve a small number of high-value
     # hook/turn/payoff cuts for the Wan source motion; do not let video dominate.
-    hero_count = max(1, int(total_shots * HERO_VIDEO_SHARE))
-    if hero_count == 1:
+    hero_count = 0 if HERO_VIDEO_SHARE <= 0 else max(1, int(total_shots * HERO_VIDEO_SHARE))
+    if hero_count == 0:
+        hero_indices: set[int] = set()
+    elif hero_count == 1:
         hero_indices = {total_shots - 1}
     else:
         hero_indices = {
@@ -331,6 +333,8 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
         "visual_style_profile": style_profile,
         "primary_2_5d_share_target": 1.0 - HERO_VIDEO_SHARE,
         "hero_video_share_target": HERO_VIDEO_SHARE,
+        "visual_generation_mode": "image_first_flux_stills",
+        "image_generation_count": source_beat_count,
         "story_type": policy["story_type"],
         "measured_duration_seconds": measured["measured_seconds"],
         "source_beat_count": len(beat_durations),
