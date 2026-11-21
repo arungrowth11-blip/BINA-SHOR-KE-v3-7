@@ -22,10 +22,10 @@ KAGGLE_INPUT_ROOT = Path('/kaggle/input')
 HF_CACHE = Path('/kaggle/temp/bsk-hf-cache')
 NEGATIVE = (
     "text, subtitles, caption, watermark, logo, words, signs with readable text, "
-    "cartoon, illustration, CGI, plastic skin, waxy face, over-smoothing, over-sharpening, "
+    "photoreal skin pores, live-action footage, glossy plastic 3D, waxy face, over-smoothing, over-sharpening, "
     "warped architecture, flicker, strobing, jitter, rubber motion, morphing objects, "
     "extra fingers, malformed hands, fused fingers, duplicated people, distorted faces, "
-    "unrealistic physics, unnatural reflections, blurry, low-resolution, oversaturated"
+    "unrealistic physics, unnatural reflections, blurry, low-resolution, oversaturated, inconsistent clothing"
 )
 
 
@@ -195,7 +195,7 @@ def runtime_package_versions() -> dict[str, str]:
     distributions = (
         "torch", "torchvision", "torchaudio", "numpy", "Pillow", "safetensors",
         "gguf", "transformers", "accelerate", "huggingface-hub", "sentencepiece",
-        "tokenizers", "einops", "torchsde", "requests",
+        "tokenizers", "einops", "torchsde", "requests", "opencv-python", "opencv-python-headless",
     )
     observed = {}
     for package in distributions:
@@ -275,9 +275,17 @@ def install_comfyui():
 
     # Ensure the one download helper exists without changing the notebook's CUDA-enabled Torch.
     run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'huggingface_hub'], timeout=900)
+    try:
+        import cv2  # noqa: F401
+    except ImportError:
+        run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'opencv-python-headless==4.10.0.84'], timeout=900)
+    try:
+        import transformers  # noqa: F401
+    except ImportError:
+        run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'transformers>=4.46,<5'], timeout=900)
 
     # Resolve large licensed model files into Hugging Face cache and symlink them into ComfyUI model folders.
-    from huggingface_hub import hf_hub_download
+    from huggingface_hub import hf_hub_download, model_info
     paths = {
         'unet': ('timfromhcs/Wan2.2-TI2V-5B-GGUF', 'Wan2.2-TI2V-5B-Q4_K_M.gguf', COMFY / 'models' / 'unet' / 'Wan2.2-TI2V-5B-Q4_K_M.gguf'),
         # The Wan2.2 repackaged snapshot contains the compatible UMT5 text encoder and Wan2.2 VAE.
@@ -316,8 +324,17 @@ def install_comfyui():
                 f'Downloaded {key} snapshot {model_revisions[key]} does not match the locked SHA {revision}.'
             )
         dest.symlink_to(cached)
+    depth_revision = locked_revisions.get('depth')
+    depth_info = model_info('depth-anything/Depth-Anything-V2-Small-hf', revision=depth_revision)
+    resolved_depth_revision = str(getattr(depth_info, 'sha', '') or '').strip()
+    if not re.fullmatch(r'[0-9a-f]{40}', resolved_depth_revision):
+        raise RuntimeError('Depth Anything V2 model did not resolve to an immutable commit SHA.')
+    if depth_revision and resolved_depth_revision != depth_revision:
+        raise RuntimeError(f'Depth model revision drift: expected {depth_revision}, resolved {resolved_depth_revision}.')
+    model_revisions['depth'] = resolved_depth_revision
     return {
         'gpu': gpu_name,
+        'depth_model_revision': resolved_depth_revision,
         'comfyui_commit': comfy_sha,
         'comfyui_gguf_commit': gguf_sha,
         'model_revisions': model_revisions,
@@ -430,9 +447,11 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     total_scenes = len(story.get('beats', [])) or 6
     coverage = shot_coverage_instruction(scene_index, total_scenes)
     style = (
-        'Photoreal live-action cinema, physically plausible natural movement, realistic skin and material texture, '
-        'subtle sensor grain, practical motivated lighting, restrained film colour science, natural imperfect detail. '
-        'Vertical 9:16 composition, one clear action, clean visual hierarchy. No text or typography is to appear in-frame. '
+        'Mature semi-painterly 2.5D Indian graphic-novel motion-comic cinema, clearly illustrated rather than photoreal live action, '
+        'layered foreground/midground/background cues, tactile brush-textured surfaces, restrained expressive character design, '
+        'warm tungsten interiors, monsoon blues and rich shadows when appropriate, physically plausible subtle movement, '
+        'motivated practical lighting, coherent cinematic colour. Vertical 9:16 composition, one clear action, clean visual hierarchy. '
+        'No text or typography is to appear in-frame. '
     )
     full_prompt = (
         f"{style}\nCONTINUITY / LOOK BIBLE: {bible}"
@@ -582,12 +601,132 @@ def transcode_scene(source: Path, destination: Path):
     temporary.replace(destination)
 
 
+def load_depth_estimator(revision: str):
+    """Load a small Apache-2.0 monocular depth model on CPU to protect Wan GPU memory."""
+    import torch
+    from transformers import pipeline
+    torch.set_num_threads(2)
+    print("Loading Depth Anything V2 Small (Apache-2.0) on CPU for 2.5D parallax.", flush=True)
+    return pipeline(
+        "depth-estimation",
+        model="depth-anything/Depth-Anything-V2-Small-hf",
+        revision=revision,
+        device=-1,
+        model_kwargs={"cache_dir": str(HF_CACHE)},
+    )
+
+
+def create_25d_parallax_clip(source: Path, destination: Path, duration: float, depth_estimator):
+    """Extract, stylize and depth-warp one scene keyframe into a real parallax video."""
+    import math
+    import numpy as np
+    import cv2
+    from PIL import Image, ImageFilter, ImageOps
+
+    scratch = WORK / "motion_comic_tmp"
+    scratch.mkdir(parents=True, exist_ok=True)
+    keyframe_path = scratch / f"{destination.stem}_keyframe.png"
+    run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{max(0.1, duration * 0.45):.3f}", "-i", str(source),
+        "-frames:v", "1", "-vf", "scale=704:1280:flags=lanczos", str(keyframe_path),
+    ], timeout=180)
+    with Image.open(keyframe_path) as original:
+        image = original.convert("RGB").filter(ImageFilter.MedianFilter(3))
+        image = ImageOps.posterize(image, bits=5)
+        edges = image.filter(ImageFilter.FIND_EDGES).convert("L")
+        edge_mask = edges.point(lambda value: max(0, min(105, int((value - 30) * 1.8))))
+        outline = Image.new("RGB", image.size, (25, 29, 38))
+        image = Image.composite(outline, image, edge_mask)
+        keyframe = image.copy()
+    prediction = depth_estimator(keyframe)
+    depth_image = prediction.get("depth") if isinstance(prediction, dict) else None
+    if depth_image is None:
+        raise RuntimeError("Depth Anything did not return a depth image for the illustrated keyframe.")
+    if not isinstance(depth_image, Image.Image):
+        raise RuntimeError("Depth Anything returned an unsupported depth-image type.")
+    depth_array = np.asarray(depth_image.convert("L").resize((704, 1280), Image.Resampling.BICUBIC), dtype=np.uint8)
+    colour = np.asarray(keyframe, dtype=np.uint8)
+    frame = cv2.cvtColor(colour, cv2.COLOR_RGB2BGR)
+    if frame.shape[:2] != (1280, 704):
+        raise RuntimeError(f"Illustrated keyframe has an unexpected shape: {frame.shape}.")
+    depth = cv2.normalize(depth_array, None, 0.0, 1.0, cv2.NORM_MINMAX, dtype=cv2.CV_32F)
+    depth = cv2.GaussianBlur(depth, (0, 0), sigmaX=2.0)
+    if float(depth.std()) < 0.015:
+        raise RuntimeError("Depth Anything produced a nearly flat depth map; refusing fake 2.5D movement.")
+
+    width, height, fps = 704, 1280, 24
+    frame_count = max(61, int(math.ceil(duration * fps)))
+    grid_x, grid_y = np.meshgrid(
+        np.arange(width, dtype=np.float32),
+        np.arange(height, dtype=np.float32),
+    )
+    center_x, center_y = (width - 1) / 2.0, (height - 1) / 2.0
+    temporary = destination.with_name(destination.stem + ".partial.mp4")
+    temporary.unlink(missing_ok=True)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "bgr24",
+        "-s", f"{width}x{height}", "-r", str(fps), "-i", "-",
+        "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
+        "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(temporary),
+    ]
+    encoder = subprocess.Popen(command, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
+    try:
+        if encoder.stdin is None:
+            raise RuntimeError("FFmpeg did not expose a raw-video input pipe.")
+        disparity = (depth - 0.5)
+        for frame_index in range(frame_count):
+            progress = frame_index / max(1, frame_count - 1)
+            eased = math.sin(math.pi * progress)
+            zoom = 1.0 + 0.018 * progress
+            parallax_x = disparity * (14.0 * eased)
+            parallax_y = disparity * (6.0 * eased)
+            map_x = ((grid_x - center_x) / zoom + center_x + parallax_x).astype(np.float32)
+            map_y = ((grid_y - center_y) / zoom + center_y + parallax_y).astype(np.float32)
+            warped = cv2.remap(
+                frame, map_x, map_y, interpolation=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_REFLECT_101,
+            )
+            encoder.stdin.write(warped.tobytes())
+        encoder.stdin.close()
+        return_code = encoder.wait(timeout=900)
+        error_text = encoder.stderr.read().decode("utf-8", errors="replace") if encoder.stderr else ""
+        if return_code:
+            raise RuntimeError(f"FFmpeg depth-parallax encode failed ({return_code}): {error_text[-2500:]}")
+    except Exception:
+        encoder.kill()
+        encoder.wait(timeout=30)
+        temporary.unlink(missing_ok=True)
+        raise
+    finally:
+        if encoder.stderr:
+            encoder.stderr.close()
+    valid, measured = valid_scene_file(temporary)
+    if not valid or abs(measured - duration) > 0.20:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError(f"2.5D parallax clip failed media validation: valid={valid}, target={duration:.3f}s, actual={measured:.3f}s.")
+    temporary.replace(destination)
+    return {
+        "duration_seconds": round(measured, 3),
+        "bytes": destination.stat().st_size,
+        "sha256": sha256_file(destination),
+        "depth_model": "depth-anything/Depth-Anything-V2-Small-hf",
+        "depth_model_license": "Apache-2.0",
+        "keyframe_style": "posterized painterly graphic-novel",
+        "camera_motion": "depth-displaced parallax + 1.8% eased push-in",
+    }
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
     result_manifest = {
         'job_id': MANIFEST.get('job_id'), 'status': 'running', 'model': 'Wan2.2 TI2V 5B Q4_K_M GGUF',
         'license_note': 'Wan2.2 upstream is Apache-2.0; this quantized derivative has its own attribution/notice. Review licenses before commercial use.',
-        'scenes': [], 'started_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'scenes': [], 'parallax_scenes': [], 'visual_pipeline': 'hybrid_25d_motion_comic_v1',
+        'depth_model': 'depth-anything/Depth-Anything-V2-Small-hf', 'depth_model_license': 'Apache-2.0',
+        'started_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     server = None
     worker_started = time.monotonic()
@@ -597,6 +736,7 @@ def main():
         result_manifest['comfyui_commit'] = toolchain_info['comfyui_commit']
         result_manifest['comfyui_gguf_commit'] = toolchain_info['comfyui_gguf_commit']
         result_manifest['model_revisions'] = toolchain_info['model_revisions']
+        result_manifest['depth_model_revision'] = toolchain_info['depth_model_revision']
         result_manifest['runtime_packages'] = toolchain_info['runtime_packages']
         restore_checkpoint_dataset(result_manifest)
         output_dir = COMFY / 'output'
@@ -644,6 +784,40 @@ def main():
                     source.unlink()
                 except OSError:
                     pass
+        depth_estimator = None
+        for reel in MANIFEST.get('reels', []):
+            reel_id = reel['reel_id']
+            for scene_index in range(1, len(reel.get('beats', [])) + 1):
+                source = OUT / reel_id / f'scene_{scene_index:02d}.mp4'
+                parallax = OUT / reel_id / f'scene_{scene_index:02d}_25d.mp4'
+                valid_source, scene_duration = valid_scene_file(source)
+                if not valid_source:
+                    raise RuntimeError(f'Missing Wan source scene for 2.5D derivation: {source}')
+                valid_parallax, existing_duration = valid_scene_file(parallax)
+                if valid_parallax:
+                    result_manifest['parallax_scenes'].append({
+                        'reel_id': reel_id, 'scene_index': scene_index,
+                        'depth_model_revision': toolchain_info['depth_model_revision'],
+                        'path': str(parallax.relative_to(WORK)),
+                        'duration_seconds': round(existing_duration, 3),
+                        'bytes': parallax.stat().st_size,
+                        'sha256': sha256_file(parallax),
+                        'depth_model': 'depth-anything/Depth-Anything-V2-Small-hf',
+                        'depth_model_license': 'Apache-2.0',
+                        'reused_existing': True,
+                    })
+                    write_json(OUT / 'gpu_output_manifest.json', result_manifest)
+                    continue
+                if depth_estimator is None:
+                    depth_estimator = load_depth_estimator(toolchain_info['depth_model_revision'])
+                metadata = create_25d_parallax_clip(source, parallax, scene_duration, depth_estimator)
+                result_manifest['parallax_scenes'].append({
+                    'reel_id': reel_id, 'scene_index': scene_index,
+                    'depth_model_revision': toolchain_info['depth_model_revision'],
+                    'path': str(parallax.relative_to(WORK)), **metadata,
+                })
+                write_json(OUT / 'gpu_output_manifest.json', result_manifest)
+                print(f"Created depth-parallax scene {reel_id} {scene_index}: {metadata['duration_seconds']:.2f}s", flush=True)
         expected = sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', []))
         found = sum(1 for r in MANIFEST.get('reels', []) for i in range(1, len(r.get('beats', [])) + 1) if (OUT / r['reel_id'] / f'scene_{i:02d}.mp4').exists())
         if found != expected:

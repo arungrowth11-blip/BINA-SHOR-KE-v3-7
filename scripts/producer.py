@@ -34,6 +34,8 @@ from zoneinfo import ZoneInfo
 import requests
 from PIL import Image, ImageDraw, ImageFont
 import voice_first
+import story_engine
+import motion_comic
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output"
@@ -593,7 +595,7 @@ def generate_concept(
     narrative_engine = NARRATIVE_ENGINES[(int(history.get("generated_count", 0)) + index) % len(NARRATIVE_ENGINES)]
     recent_engines = [str(x.get("narrative_engine", "")) for x in recent_topics[-6:] if x.get("narrative_engine")]
     recent_story_anchors = [str(x.get("human_detail", "")) for x in recent_topics[-12:] if x.get("human_detail")]
-    system = """You are the lead screenwriter of BINA SHOR KE. Write a tiny human film, not a motivational post disguised as cinema. The viewer should recognise a real feeling before they recognise the message. Prioritise emotional truth, subtext, human contradiction, consequence and restraint. Begin from a specific person in a specific ordinary moment with a concrete want, pressure or misunderstanding. Let an action, object, omission or choice carry meaning. Do not explain emotions that the image can show. Never make every character a saint or villain; give people mixed motives and believable limits. The ending must be earned by earlier details and leave a small aftertaste—not a lecture, slogan, twist for its own sake, or forced tearjerker. Avoid ready-made moral lines such as 'ज़िंदगी यही सिखाती है', 'अपनों की कदर', 'वक्त सब सिखा देता है', 'कभी-कभी खामोशी', and other interchangeable motivational clichés. Do not rely on poverty porn, illness/death reveals, abandoned-child twists, rich-vs-poor humiliation, miracle coincidences or manipulative guilt. Do not repeatedly use a phone notification, rain, a letter, an old person or a missed call as the reveal; only use such devices when causally essential and fresh. Vary sentence length, syntax, silence and point of view. Spoken Hindi must sound like a thoughtful person speaking—not translated English, formal essay Hindi or artificial shayari. Use simple vivid words, idiomatic Devanagari and natural pauses; Hinglish only when an actual speaker would use it. Give every spoken turn a distinct, restrained vocal delivery and assign each line to its actual speaker. If two or more characters speak, never merge their words into one voice: each turn needs its own speaker_id. Do not invent a speaker just to fill a cast. A narrator is optional and must be a separate character when used. Output valid JSON only. Do not imitate any creator, film, book, song or viral script. Avoid fake factual claims, medical/legal/financial advice, real allegations, identifiable real people, copyrighted lyrics, rage bait, deceptive hooks and forced engagement bait. Fictional stories must never be presented as verified true events. Every beat must advance a causal story, reveal information, change the audience's interpretation, or earn the ending. Visual prompts are for a photoreal open-weight text-to-video model: one physically plausible action, shot size/lens, controlled camera movement, motivated practical light, realistic materials and restrained grade. Never ask the model to render words, subtitles, logos or watermarks. Avoid complex hand interactions, fast choreographed movement, multiple speaking faces, visible brand marks and impossible actions. Keep recurring subject/clothes/setting consistent; prefer partial profiles, backs, silhouettes and object-led scenes when faces are not essential. Each Reel must be understandable without sound. Editorial scores are quality controls, not a Meta monetization/recommendation guarantee."""
+    system = """You are the lead screenwriter of BINA SHOR KE. Write a tiny human film, not a motivational post disguised as cinema. The viewer should recognise a real feeling before they recognise the message. Prioritise emotional truth, subtext, human contradiction, consequence and restraint. Begin from a specific person in a specific ordinary moment with a concrete want, pressure or misunderstanding. Let an action, object, omission or choice carry meaning. Do not explain emotions that the image can show. Never make every character a saint or villain; give people mixed motives and believable limits. The ending must be earned by earlier details and leave a small aftertaste—not a lecture, slogan, twist for its own sake, or forced tearjerker. Avoid ready-made moral lines such as 'ज़िंदगी यही सिखाती है', 'अपनों की कदर', 'वक्त सब सिखा देता है', 'कभी-कभी खामोशी', and other interchangeable motivational clichés. Do not rely on poverty porn, illness/death reveals, abandoned-child twists, rich-vs-poor humiliation, miracle coincidences or manipulative guilt. Do not repeatedly use a phone notification, rain, a letter, an old person or a missed call as the reveal; only use such devices when causally essential and fresh. Vary sentence length, syntax, silence and point of view. Spoken Hindi must sound like a thoughtful person speaking—not translated English, formal essay Hindi or artificial shayari. Use simple vivid words, idiomatic Devanagari and natural pauses; Hinglish only when an actual speaker would use it. Give every spoken turn a distinct, restrained vocal delivery and assign each line to its actual speaker. If two or more characters speak, never merge their words into one voice: each turn needs its own speaker_id. Do not invent a speaker just to fill a cast. A narrator is optional and must be a separate character when used. Output valid JSON only. Do not imitate any creator, film, book, song or viral script. Avoid fake factual claims, medical/legal/financial advice, real allegations, identifiable real people, copyrighted lyrics, rage bait, deceptive hooks and forced engagement bait. Fictional stories must never be presented as verified true events. Every beat must advance a causal story, reveal information, change the audience's interpretation, or earn the ending. Visual prompts are for a semi-painterly 2.5D Indian graphic-novel motion-comic video model: separated foreground/midground/background cues, one physically plausible action, controlled camera movement, warm practical light, tactile illustrated materials and restrained cinematic colour. Never ask the model to render words, subtitles, logos or watermarks. Avoid complex hand interactions, fast choreographed movement, multiple speaking faces, visible brand marks and impossible actions. Keep recurring subject/clothes/setting consistent; prefer partial profiles, backs, silhouettes and object-led scenes when faces are not essential. Each Reel must be understandable without sound. Editorial scores are quality controls, not a Meta monetization/recommendation guarantee."""
     pillar_rules = {
         "micro_story": "Create a compact fictional everyday story about human choices: trust, work, family, friendship, responsibility, misunderstanding, dignity, kindness or boundaries. Include a conflict, a consequential turn and an earned payoff. Avoid gender stereotypes and moralising.",
         "cinematic_moment": "Create a compact cinematic mini-story using everyday environments and objects with a genuine reveal or re-interpretation. The aesthetic must serve the story; no random pretty footage plus vague quote.",
@@ -607,7 +609,7 @@ Brand promise: 'कम शब्द। साफ़ कहानी। ऐसा
 NARRATIVE ENGINE TO EXPLORE (do not use it as a formula): {narrative_engine}. If this feels forced for the pillar, use a fresh variation but avoid the recent engines {json.dumps(recent_engines, ensure_ascii=False)}.
 Human-depth test: name a small human_detail (an observable gesture, object, unfinished task, habit or sensory detail) that feels lived-in; state the character_contradiction (what they want versus what they do or cannot say); identify the cost_of_choice (a small, believable consequence); let the audience infer emotion from behaviour; let the final line change the meaning of an earlier detail. Do not end with a generic moral. Avoid repeating recent story anchors {json.dumps(recent_story_anchors, ensure_ascii=False)}. One brief line of natural direct speech is allowed only when a real person would say it; do not turn every beat into a quote.
 Target audience hypothesis: Hindi-understanding adults across genders, regions and life stages who enjoy grounded stories about everyday decisions, relationships, work, trust, digital life and useful habits. Do not write only for men or only for romance audiences.
-Duration target: 22–32 seconds as an editorial hypothesis, not a hard video-length cap. Use exactly 6 story beats. Write the complete screenplay first. Each beat contains an ordered speech_segments array; each segment has one speaker_id and one complete spoken turn. Multiple speakers may speak in the same beat, but never merge their lines or assign the same voice to different characters. Some beats may be silent when the visual action carries the story. Keep individual turns naturally speakable (usually 3–18 words) and target 45–72 total spoken Hindi words across the Reel. Never shorten a line merely to fit a fixed-duration clip. Every speaking character must appear in characters, and every speaker_id must match exactly one cast member.
+Choose one story_type from emotional, suspense, twist, comedy, poetry or insight. Duration is adaptive: emotional/suspense target 35s (30–45s, 75–110 Hindi words); twist/comedy target 25s (20–30s, 52–78 words); poetry target 22s (18–26s, 32–60 words); insight target 28s (20–35s, 50–82 words). Use exactly 6 narrative beats, not six final editorial shots. Write the complete screenplay first. Each beat contains an ordered speech_segments array; each segment has one speaker_id and one complete spoken turn. Multiple speakers may speak in the same beat, but never merge their lines or assign the same voice to different characters. Some beats may be silent when visual action carries the story. Keep individual turns naturally speakable (usually 8–20 words) and stay inside the chosen story_type word range. Never shorten a line merely to fit a fixed-duration clip. Every speaking character must appear in characters, and every speaker_id must match exactly one cast member.
 
 PREVIOUS STRUCTURAL FEEDBACK (must be corrected in this candidate): {correction_feedback or 'No previous candidate feedback.'}
 
@@ -624,10 +626,12 @@ Return one JSON object with exactly these fields:
     {{"character_id":"protagonist","display_name":"natural Hindi name","role":"protagonist|supporting|narrator","gender_presentation":"male|female|unspecified","age_band":"child|teen|young_adult|adult|older_adult|elder","visual_age_description":"visible age anchor consistent with age_band; normalized by the pipeline","appearance":"specific visual identity and exact age-consistent face/body/clothing anchors","personality":"brief behaviour traits","voice_profile_id":"use the exact canonical ID: young_adult male=hi_male_young_puck/female=hi_female_young_leda; adult male=hi_male_adult_charon/female=hi_female_adult_aoede; older_adult or elder male=hi_male_older_algenib/female=hi_female_older_gacrux; narrator=hi_narrator_kore; child/teen=empty because no qualified age-appropriate voice is available. Never put the Gemini display name (Puck, Leda, Charon, Aoede, Algenib, Gacrux or Kore) in voice_profile_id.","voice_direction":"natural Hindi performance direction for this character"}}
   ],
   "pillar": "{pillar}",
+  "story_type": "emotional|suspense|twist|comedy|poetry|insight",
   "series_name": "one of the brand's three editorial series; it will be normalized from the pillar",
   "theme": "one-sentence theme, specific and not generic",
   "audience_reason": "one sentence why this audience may care; state as a hypothesis, not certainty",
   "share_reason": "the genuine human insight or practical utility that could make someone naturally send this to a friend; no forced CTA",
+  "share_recipient": "one specific relationship/person this story naturally fits, e.g. younger sister, father, office friend, old school friend",
   "narrative_engine": "brief name of the story device actually used",
   "emotional_aftertaste": "the quiet feeling or thought the ending should leave; not a moral",
   "human_detail": "one small, observable, non-generic lived-in detail used in the story",
@@ -644,7 +648,7 @@ Return one JSON object with exactly these fields:
   "posting_note": "one sentence explaining the test hypothesis for this reel"
 }}
 
-Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 beats and 45–72 total spoken Hindi words. speech_segments is the source of truth; voiceover must be the exact joined text of those segments and may be empty only when speech_segments is empty. Never impose 7–12 words on each beat. Audio is generated before video; the video renderer reads measured audio duration. Do not compress or shorten dialogue to fit a generated clip. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately.
+SHARE-RECIPIENT GATE: identify one concrete real-world recipient for the story, not generic "everyone" or "people". The premise, detail and emotional turn should make sense for why this exact person would receive it. Do not force a call-to-action.\n\nRules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 narrative beats; the selected story_type controls the total spoken-word range described above. speech_segments is the source of truth; voiceover must be the exact joined text of those segments and may be empty only when speech_segments is empty. Never force every beat to the same word count. Audio is generated before video; the measured voice duration selects the final Reel duration and editorial shot timing. Do not compress or shorten dialogue to fit a generated clip. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately.
 
 CAST AGE/VOICE HARD GATE: visible age is selected first and is immutable. The age_band controls the canonical visual_age_description and the voice profile; the appearance description must visibly agree with it. Adult women use Aoede, not Gacrux. Gacrux is only for older-adult/elder women; apply the equivalent age mapping to male profiles. Child/teen characters may appear silently, but no speech segment may be assigned to them until a dedicated age-appropriate Hindi voice has been auditioned. Never make a child/teen sound adult, and never age a character up/down just to fit a voice. The pipeline rejects an explicit voice-profile mismatch before TTS/GPU work. Return JSON only."""
 
@@ -708,7 +712,7 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(voiceover, str):
             continue  # Main validator reports missing/invalid required fields.
         word_count = len(voiceover.split())
-        if not 7 <= word_count <= 12:
+        if not 7 <= word_count <= 18:
             invalid_lines.append({
                 "beat": i + 1,
                 "voiceover": voiceover,
@@ -733,7 +737,7 @@ Character contradiction: {concept.get('character_contradiction', '')}
 Lines requiring repair (beat numbers are one-based):
 {json.dumps(invalid_lines, ensure_ascii=False)}
 
-For EVERY listed beat, return exactly one replacement line with 7–12 whitespace-separated Hindi words (aim for 8–10). Preserve the same event and emotional meaning. Do not add facts, change the plot, use a moral slogan, or combine two sentences. Do not rewrite any other beat.
+For EVERY listed beat, return exactly one replacement line with 7–18 whitespace-separated Hindi words. Preserve the same event and emotional meaning. Do not add facts, change the plot, use a moral slogan, or combine two sentences. Do not rewrite any other beat.
 Return exactly this JSON shape:
 {{"replacements":[{{"beat":1,"voiceover":"short natural Hindi line"}}]}}
 The replacements array must contain every requested beat exactly once and no other beat numbers."""
@@ -754,10 +758,10 @@ The replacements array must contain every requested beat exactly once and no oth
                 raise ValueError("Targeted narration repair returned an unexpected or duplicate beat.")
             line = line.strip()
             repaired_word_count = len(line.split())
-            if not 7 <= repaired_word_count <= 12:
+            if not 7 <= repaired_word_count <= 18:
                 raise ValueError(
                     f"Targeted narration repair left Beat {beat_number} at {repaired_word_count} words; "
-                    "the allowed range is 7–12."
+                    "the allowed range is 7–18."
                 )
             received[beat_number] = line
         if set(received) != expected:
@@ -771,12 +775,12 @@ The replacements array must contain every requested beat exactly once and no oth
 
 
 def validate_concept_shape(concept: dict[str, Any]) -> None:
-    required = ["title", "theme", "hook", "beats", "caption", "hashtags", "cover_text", "visual_bible", "share_reason", "narrative_engine", "emotional_aftertaste", "human_detail", "character_contradiction", "cost_of_choice"]
+    required = ["title", "theme", "hook", "beats", "story_type", "caption", "hashtags", "cover_text", "visual_bible", "share_reason", "share_recipient", "narrative_engine", "emotional_aftertaste", "human_detail", "character_contradiction", "cost_of_choice"]
     missing = [k for k in required if not concept.get(k)]
     if missing:
         raise ValueError("Generated concept misses required fields: " + ", ".join(missing))
-    if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
-        raise ValueError("Reel must contain exactly 6 beats (one cinematic shot per beat; weekly GPU budget is 18 shots max).")
+    recipient = str(concept.get("share_recipient") or "").strip()\n    if not 1 <= len(recipient.split()) <= 12 or len(recipient) > 100:\n        raise ValueError("Share recipient must identify one specific person or relationship (1–12 words), not a broad audience.")\n    recipient_normalized = normalize_for_similarity(recipient)\n    if recipient_normalized in {"everyone", "anyone", "all people", "sabko", "har kisi ko", "kisi ko", "logon ko", "people"}:\n        raise ValueError("Share recipient is too generic; name a concrete relationship or person.")\n    if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
+        raise ValueError("Screenplay must contain exactly 6 narrative beats; editorial coverage is derived after measured voice timing.")
     allowed_overlay_types = {"message", "note", "step", "contrast", "keyword"}
     structured_script = all(isinstance(beat.get("speech_segments"), list) for beat in concept["beats"] if isinstance(beat, dict))
     character_ids = {
@@ -805,8 +809,8 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
             beat["voiceover"] = " ".join(segment["text"] for segment in beat["speech_segments"])
         else:
             spoken_words = len(beat["voiceover"].split())
-            if not 7 <= spoken_words <= 12:
-                raise ValueError(f"Beat {i+1} narration has {spoken_words} words; use 7–12 words so the spoken line fits a short cinematic shot.")
+            if not 7 <= spoken_words <= 18:
+                raise ValueError(f"Beat {i+1} narration has {spoken_words} words; use 7–18 words; measured audio, not a fixed beat template, controls shot timing.")
         if len(beat["screen_text"]) > 70 or len(beat["overlay_text"]) > 42:
             raise ValueError(f"Beat {i+1} text exceeds mobile-safe limits.")
         prompt_words = len(beat["video_prompt"].split())
@@ -838,9 +842,7 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
         concept["hashtags"].insert(0, "#BinaShorKe")
         concept["hashtags"] = concept["hashtags"][:5]
     concept["hashtags"] = [str(t).strip().replace(" ", "") for t in concept["hashtags"]]
-    total_words = len(" ".join(b.get("voiceover", "") for b in concept["beats"]).split())
-    if not 45 <= total_words <= 72:
-        raise ValueError(f"Complete screenplay has {total_words} spoken words; the production range is 45–72 natural Hindi words (target 48–60).")
+    story_engine.validate_screenplay_length(concept)
     hook_word_count = len(str(concept["hook"]).split())
     if len(concept["hook"]) > 70 or not 3 <= hook_word_count <= 10:
         raise ValueError("Hook must be a clear 3–10-word first-screen line and under 70 characters.")
@@ -902,7 +904,7 @@ def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
         })
 
     system = (
-        "You are the animation director and shot designer for a premium Hindi short-film studio. "
+        "You are the animation director and shot designer for a premium Hindi 2.5D motion-comic studio. "
         "The screenplay and all character voices are already final and measured. You are writing the "
         "FINAL video-generation shot prompts AFTER audio lock. Never rewrite dialogue, change the cast, "
         "add a character, add a prop, invent an event, or change the established story outcome. "
@@ -911,14 +913,14 @@ def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
         "micro-expressions and restrained gestures. For the listener, use a believable reaction without "
         "moving the mouth as if speaking. If there are multiple turns, plan a clear camera cut or deliberate "
         "shot composition that follows the turn order; the final editor will preserve the full audio timeline. "
-        "Use the visual bible, canonical visual_age_description and character appearance verbatim for continuity. "
+        "Use the visual bible, canonical visual_age_description and character appearance verbatim for continuity. Keep the same illustrated character design, outfit, palette and environment across every source beat. "
         "The visible age/gender presentation of every speaker must match that speaker's locked voice profile; "
         "never age a character up or down to fit a voice. One clear physical action per "
-        "shot, plausible anatomy and physics, purposeful camera coverage, natural lighting and readable "
+        "shot, plausible anatomy and physics, purposeful camera coverage, illustrated surface treatment, layered foreground/midground/background separation and readable "
         "silhouette. Never put any readable text, subtitles, logo or watermark inside the generated video. "
         "Do not shorten any line or force every beat to the same length. Return valid JSON only."
     )
-    user_prompt = f"""Create exactly six FINAL video shot prompts from this voice-locked Hindi screenplay.
+    user_prompt = f"""Create exactly six source-scene prompts from this voice-locked Hindi screenplay. These are narrative-beat source clips; final editorial cuts are assembled from measured timing.
 
 TITLE: {concept.get("title", "")}
 STYLE / VISUAL BIBLE: {concept.get("visual_bible", "")}
@@ -932,7 +934,7 @@ Return exactly:
 ]}}
 Rules:
 - Exactly one entry for every beat_index 1 through 6, no missing or duplicate indices.
-- The video_prompt is final and must be 55–180 whitespace-separated words, <=1600 characters.
+- The video_prompt is final and must be 55–180 whitespace-separated words, <=1600 characters. Use a mature semi-painterly Indian graphic-novel motion-comic style, not photoreal live-action or generic glossy 3D.
 - The measured target_duration_seconds and target_frames are authoritative; do not change them.
 - If a beat is silent, do not invent dialogue or fake speech mouth motion.
 - Keep every character's visible age exactly aligned with the canonical visual_age_description and age_band in CAST; never de-age or age-up a speaker.
@@ -970,18 +972,26 @@ Return JSON only."""
     concept["voice_aware_storyboard"] = {
         "status": "generated_after_voice_lock",
         "timing_basis": "measured_tts_wav_before_gpu",
-        "shot_count": 6,
+        "source_scene_count": 6,
         "dialogue_rewritten": False,
         "target_frames_changed": False,
     }
-    log("Final six-shot storyboard generated from the measured speaker WAV timelines; screenplay and audio remain locked.")
+    beat_durations = [float(beat["voice_timing"]["target_duration_seconds"]) for beat in concept["beats"]]
+    duration_lock = story_engine.validate_measured_duration(sum(beat_durations), concept.get("story_type", "emotional"))
+    shot_plan = story_engine.build_editorial_shot_plan(beat_durations, concept.get("story_type", "emotional"))
+    concept["duration_lock"] = duration_lock
+    concept["editorial_shot_plan"] = shot_plan
+    concept["visual_pipeline"] = shot_plan["visual_pipeline"]
+    for beat_index, beat in enumerate(concept["beats"], start=1):
+        beat["editorial_shots"] = story_engine.shots_for_beat(shot_plan, beat_index)
+    log(f"Locked {duration_lock['measured_seconds']:.2f}s {duration_lock['story_type']} story; {shot_plan['editorial_shot_count']} editorial shots from {shot_plan['source_beat_count']} source-video generations.")
     return concept
 
 
 def judge_concept(concept: dict[str, Any]) -> dict[str, Any]:
     system = (
         "You are an independent Hindi short-film story editor, dialogue doctor, "
-        "audience psychologist and photoreal AI-shot supervisor. Evaluate the story "
+        "audience psychologist and illustrated motion-comic shot supervisor. Evaluate the story "
         "as a human experience before evaluating production craft. Return JSON only. "
         "Reject generic motivation, forced sentiment, emotional manipulation, "
         "recycled twists, implausible behaviour and AI-artifact-prone prompts."
@@ -989,23 +999,23 @@ def judge_concept(concept: dict[str, Any]) -> dict[str, Any]:
     prompt = f"""Evaluate this BINA SHOR KE Reel concept as a strict second-opinion editor:
 {json.dumps(concept, ensure_ascii=False)}
 
-Score every dimension from 1 to 5. In addition to craft, explicitly test whether a real person could recognise themselves in the situation, whether the emotion is earned by specific behaviour rather than stated, and whether the ending leaves a memorable human aftertaste without preaching.
-Required scores: hook_clarity, specificity, human_specificity, emotional_resonance, story_progression, payoff, readability, originality, creative_contribution_beyond_stock, visual_match, photoreal_prompt_quality, motion_feasibility, continuity_coherence, voiceover_rhythm, caption_quality, share_value, platform_safety.
+Score every dimension from 1 to 5. Test whether a real person recognises the situation, whether emotion is earned through specific behaviour, and whether the ending leaves a memorable human aftertaste without preaching. Inspect share_recipient: it must name a concrete person/relationship and match the story's real emotional or practical reason for sending.
+Required scores: hook_clarity, specificity, human_specificity, emotional_resonance, story_progression, payoff, readability, originality, creative_contribution_beyond_stock, visual_match, illustrated_visual_quality, motion_feasibility, continuity_coherence, voiceover_rhythm, caption_quality, share_value, platform_safety.
 
-Human-specificity test: at least one small, observable, non-generic detail should make the scene feel lived-in. Emotional-resonance test: the audience should infer a feeling from a choice, pause, object or consequence; do not reward tears, tragedy or melodrama by themselves. Dialogue test: read every Hindi line aloud mentally; flag essay-like syntax, unnatural translation, over-poetic language, repeated sentence rhythm, generic moral endings and lines that explain what the scene already shows. Depth test: the ending should change the meaning of an earlier detail or reveal a cost/choice, not merely announce a lesson.
+Human-specificity: at least one small, observable, non-generic detail should make the scene feel lived-in. Emotional resonance must come from a choice, pause, object or consequence; do not reward tragedy or melodrama alone. Dialogue must sound natural when read aloud, not like an essay, translation or generic moral. The ending should change the meaning of an earlier detail or reveal a cost/choice.
 
-Visual test: every prompt must describe one visible action, physically plausible movement, coherent camera/lens, motivated light, tactile material details and continuity. Penalize impossible physics, unnecessary hand/face close-ups, inconsistent people/clothes, generated text, vague “cinematic 8K” filler and repeated shots.
+Visual test: every prompt must describe a mature illustrated graphic-novel shot, clear action, physically plausible motion, foreground/midground/background depth cues, coherent camera framing, motivated light, tactile painterly detail and continuity. Penalize impossible physics, inconsistent clothing/characters, generated text, vague "cinematic 8K" filler and repeated shots.
 
 Return JSON exactly in this shape:
-{{"scores":{{"hook_clarity":1,"specificity":1,"human_specificity":1,"emotional_resonance":1,"story_progression":1,"payoff":1,"readability":1,"originality":1,"creative_contribution_beyond_stock":1,"visual_match":1,"photoreal_prompt_quality":1,"motion_feasibility":1,"continuity_coherence":1,"voiceover_rhythm":1,"caption_quality":1,"share_value":1,"platform_safety":1}},"approved":true,"revision_notes":["..."],"main_risk":"...","human_truth":"one sentence describing the recognisable human truth, or state what is missing"}}
+{{"scores":{{"hook_clarity":1,"specificity":1,"human_specificity":1,"emotional_resonance":1,"story_progression":1,"payoff":1,"readability":1,"originality":1,"creative_contribution_beyond_stock":1,"visual_match":1,"illustrated_visual_quality":1,"motion_feasibility":1,"continuity_coherence":1,"voiceover_rhythm":1,"caption_quality":1,"share_value":1,"platform_safety":1}},"approved":true,"revision_notes":["..."],"main_risk":"...","human_truth":"one sentence describing the recognisable human truth, or what is missing"}}
 
-Approve only if average >=4.2, human_specificity >=4, emotional_resonance >=4, originality >=4, creative_contribution_beyond_stock >=4, photoreal_prompt_quality >=4, motion_feasibility >=4, continuity_coherence >=4, voiceover_rhythm >=4, share_value >=4 and platform_safety >=4. A high emotional score must be earned by the writing, not dramatic subject matter. This is an editorial gate, not a Meta eligibility or reach verdict."""
+Approve only if average >=4.2 and every critical dimension is >=4: human_specificity, emotional_resonance, originality, creative_contribution_beyond_stock, illustrated_visual_quality, motion_feasibility, continuity_coherence, voiceover_rhythm, share_value and platform_safety. A high emotional score must be earned by writing, not dramatic subject matter. This is an editorial gate, not a Meta eligibility or reach verdict."""
     return independent_review_json(system, prompt, temperature=0.2)
 
 
 def revise_concept(concept: dict[str, Any], review: dict[str, Any], history: dict[str, Any], slot: datetime) -> dict[str, Any]:
     notes = review.get("revision_notes", []) if isinstance(review, dict) else []
-    prompt = f"""Revise this Reel using the specific editorial critique. Do not merely paraphrase it. Preserve the useful core only if original enough; replace the angle completely if needed. Return the full production JSON schema including share_reason, visual_bible, narrative_engine, emotional_aftertaste, human_detail, character_contradiction, cost_of_choice and every beat's voice_direction, video_prompt, overlay_type and overlay_text. Choose exactly one overlay_type from message, note, step, contrast, keyword. Every overlay adds context and must not repeat narration. Use exactly 6 beats; keep every voiceover line to 7–12 whitespace-separated Hindi words and the total narration to 45–72 words. Each video_prompt must be one physically plausible photoreal vertical shot with a single action, practical light, camera/lens language, natural imperfect texture, no generated text/logo/watermark, and continuity with visual_bible.
+    prompt = f"""Revise this Reel using the specific editorial critique. Do not merely paraphrase it. Preserve the useful core only if original enough; replace the angle completely if needed. Return the full production JSON schema including story_type, share_reason, share_recipient, visual_bible, narrative_engine, emotional_aftertaste, human_detail, character_contradiction, cost_of_choice and every beat's voice_direction, video_prompt, overlay_type and overlay_text. Choose exactly one overlay_type from message, note, step, contrast, keyword. Every overlay adds context and must not repeat narration. Use exactly 6 beats; keep every voiceover line to story_type-specific spoken-word ranges. Each video_prompt must be one physically plausible semi-painterly 2.5D illustrated vertical shot with a single action, practical light, camera/lens language, natural imperfect texture, no generated text/logo/watermark, and continuity with visual_bible.
 CURRENT DRAFT: {json.dumps(concept, ensure_ascii=False)}
 REVIEW NOTES: {json.dumps(notes, ensure_ascii=False)}
 PRIMARY RISK: {str(review.get('main_risk',''))[:500]}
@@ -1013,6 +1023,7 @@ RECENT TITLES/THEMES TO AVOID: {json.dumps([{ "title": x.get("title", ""), "them
 Return one valid JSON object only."""
     revised = text_json("You are a senior editor rewriting original Hindi short-form content. Apply the critique directly. Output JSON only.", prompt, temperature=0.55)
     revised["pillar"] = concept["pillar"]
+    revised["story_type"] = concept["story_type"]
     revised["series_name"] = SERIES_BY_PILLAR[concept["pillar"]]
     revised["planned_publish_at"] = slot.isoformat()
     revised["planned_publish_label"] = slot.strftime("%a %d %b, %I:%M %p IST")
@@ -1070,7 +1081,7 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
     def verdict(result: dict[str, Any]) -> tuple[bool, dict[str, Any], float, float, float, float, float]:
         expected_scores = (
             "hook_clarity", "specificity", "human_specificity", "emotional_resonance", "story_progression", "payoff", "readability",
-            "originality", "creative_contribution_beyond_stock", "visual_match", "photoreal_prompt_quality",
+            "originality", "creative_contribution_beyond_stock", "visual_match", "illustrated_visual_quality",
             "motion_feasibility", "continuity_coherence", "voiceover_rhythm", "caption_quality", "share_value", "platform_safety",
         )
         scores = result.get("scores", {})
@@ -1083,14 +1094,14 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
         orig = float(scores["originality"])
         creative = float(scores["creative_contribution_beyond_stock"])
         safety = float(scores["platform_safety"])
-        photo = float(scores["photoreal_prompt_quality"])
+        visual_quality = float(scores["illustrated_visual_quality"])
         motion = float(scores["motion_feasibility"])
         share = float(scores["share_value"])
         human = float(scores["human_specificity"])
         emotion = float(scores["emotional_resonance"])
         continuity = float(scores["continuity_coherence"])
         rhythm = float(scores["voiceover_rhythm"])
-        approved = bool(result.get("approved")) and avg >= 4.2 and orig >= 4 and creative >= 4 and photo >= 4 and motion >= 4 and continuity >= 4 and rhythm >= 4 and share >= 4 and human >= 4 and emotion >= 4 and safety >= 4
+        approved = bool(result.get("approved")) and avg >= 4.2 and orig >= 4 and creative >= 4 and visual_quality >= 4 and motion >= 4 and continuity >= 4 and rhythm >= 4 and share >= 4 and human >= 4 and emotion >= 4 and safety >= 4
         return approved, scores, avg, orig, creative, safety, share
 
     approved, scores, avg, orig, creative, safety, share = verdict(review)
@@ -1998,6 +2009,11 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     segments_dir = reel_dir / "segments"
     for folder in (clips_dir, art_dir, voice_dir, segments_dir):
         folder.mkdir(parents=True, exist_ok=True)
+    editorial_plan = concept.get("editorial_shot_plan")
+    if isinstance(editorial_plan, dict):
+        (reel_dir / "editorial_shot_plan.json").write_text(
+            json.dumps(editorial_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     pexels_credits: list[dict[str, Any]] = []
     current_ids = set(asset_ids)
     used_assets: list[str] = []
@@ -2019,6 +2035,29 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                       if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()]
         if missing_ai:
             raise RuntimeError("AI-video mode is missing required clips before TTS starts: " + ", ".join(missing_ai))
+        if concept.get("visual_pipeline") == "hybrid_25d_motion_comic_v1":
+            if not isinstance(editorial_plan, dict):
+                raise RuntimeError("Hybrid motion-comic mode requires a voice-locked editorial_shot_plan; refusing legacy fallback.")
+            if int(editorial_plan.get("source_beat_count", 0)) != len(concept["beats"]):
+                raise RuntimeError("Editorial shot plan source beat count does not match the screenplay.")
+            expected_shots = int(editorial_plan.get("editorial_shot_count", 0))
+            policy = story_engine.policy_for(concept.get("story_type", "emotional"))
+            if not policy["min_shots"] <= expected_shots <= policy["max_shots"]:
+                raise RuntimeError(f"Editorial shot plan has {expected_shots} shots; expected {policy['min_shots']}–{policy['max_shots']} for {policy['story_type']}.")
+            for i in range(len(concept["beats"])):
+                source_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
+                depth_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
+                if not depth_clip.is_file():
+                    raise RuntimeError(f"Hybrid motion-comic mode is missing {depth_clip.name}; refusing a silent downgrade.")
+                if depth_clip.stat().st_size < 100_000:
+                    raise RuntimeError(f"Depth-parallax scene {depth_clip.name} is too small to be a valid video.")
+                source_duration = probe_duration(source_clip)
+                depth_duration = probe_duration(depth_clip)
+                if abs(source_duration - depth_duration) > 0.20:
+                    raise RuntimeError(
+                        f"Depth-parallax duration mismatch for beat {i+1}: source {source_duration:.3f}s, "
+                        f"parallax {depth_duration:.3f}s. Refusing mismatched editorial coverage."
+                    )
         for i in range(len(concept["beats"])):
             clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
             if clip.stat().st_size < 100_000 or probe_duration(clip) < 2.5:
@@ -2076,7 +2115,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         target_duration = audio_duration + 0.08
         audio_tempo = 1.0
 
-        # Primary mode: locally generated photoreal AI clip from the Kaggle Wan render stage.
+        # Primary mode: reference-locked illustrated source clip from the Kaggle Wan render stage.
         ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
         if require_ai_video and not ai_clip.exists():
             raise RuntimeError(f"AI-video mode requires scene clip {ai_clip.name}; refusing to silently downgrade to static graphics.")
@@ -2115,16 +2154,33 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                     f"Timed AI scene {i+1}: video ratio={ratio:.4f}x, "
                     f"end hold={video_hold_duration:.3f}s, audio pad={audio_pad_duration:.3f}s."
                 )
-            input_args = ["-i", str(ai_clip), "-i", str(audio_path)]
-            hold_filter = (
-                f",tpad=stop_mode=clone:stop_duration={video_hold_duration:.3f}"
-                if video_hold_duration > 0.001 else ""
-            )
-            video_filter = (
-                f"setpts=PTS*{ratio:.5f}{hold_filter},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                f"fps={target_fps},eq=contrast=1.035:saturation=0.94:brightness=-0.008,vignette=PI/6,"
-                f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
-            )
+            if concept.get("visual_pipeline") == "hybrid_25d_motion_comic_v1":
+                parallax_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
+                editorial_clip = clips_dir / f"scene_{i+1:02d}_editorial.mp4"
+                beat_shots = story_engine.retime_beat_shots(beat.get("editorial_shots", []), target_duration)
+                motion_comic.render_editorial_montage(
+                    ai_clip, parallax_clip, editorial_clip, beat_shots,
+                    target_duration=target_duration,
+                    video_speed_ratio=ratio,
+                    video_hold_duration=video_hold_duration,
+                    fps=target_fps,
+                )
+                input_args = ["-i", str(editorial_clip), "-i", str(audio_path)]
+                video_filter = (
+                    f"fps={target_fps},eq=contrast=1.035:saturation=0.96:brightness=-0.006,vignette=PI/6,"
+                    f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
+                )
+            else:
+                input_args = ["-i", str(ai_clip), "-i", str(audio_path)]
+                hold_filter = (
+                    f",tpad=stop_mode=clone:stop_duration={video_hold_duration:.3f}"
+                    if video_hold_duration > 0.001 else ""
+                )
+                video_filter = (
+                    f"setpts=PTS*{ratio:.5f}{hold_filter},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+                    f"fps={target_fps},eq=contrast=1.035:saturation=0.94:brightness=-0.008,vignette=PI/6,"
+                    f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
+                )
             original_graphic_scenes += 0
             stock_clip = None
         else:
@@ -2216,8 +2272,12 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     mixed_path.replace(video_path)
     final_duration = probe_duration(video_path)
     media_info = probe_media(video_path, expected_fps=target_fps)
-    if not 16.0 <= final_duration <= 38.0:
-        raise RuntimeError(f"Technical QA rejected duration {final_duration:.1f}s; expected 16–38 seconds.")
+    duration_policy = story_engine.policy_for(concept.get("story_type", "emotional"))
+    if not duration_policy["min_seconds"] - 0.5 <= final_duration <= duration_policy["max_seconds"] + 0.5:
+        raise RuntimeError(
+            f"Technical QA rejected {final_duration:.1f}s {duration_policy['story_type']} Reel; "
+            f"expected {duration_policy['min_seconds']}–{duration_policy['max_seconds']} seconds."
+        )
     if video_path.stat().st_size > 45 * 1024 * 1024:
         raise RuntimeError("Technical QA rejected video over 45 MB (Telegram delivery safety limit).")
 
@@ -2247,9 +2307,11 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         "duration_seconds": round(final_duration, 2),
         "resolution": "1080x1920", "aspect_ratio": "9:16", "frame_rate_target": f"{target_fps} fps" + (" (native Wan cadence)" if require_ai_video else ""),
         "ffprobe_media_info": media_info, "file_size_mb": round(video_path.stat().st_size / 1024 / 1024, 2),
-        "voice_segments": len(concept["beats"]), "stock_video_segments": stock_scenes,
+        "voice_segments": len(concept["beats"]), "editorial_shots": int((concept.get("editorial_shot_plan") or {}).get("editorial_shot_count", len(concept["beats"]))), "stock_video_segments": stock_scenes,
         "original_custom_graphic_scenes": original_graphic_scenes,
-        "photoreal_ai_video_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").exists()),
+        "ai_source_video_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").exists()),
+        "depth_parallax_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4").exists()),
+        "visual_pipeline": concept.get("visual_pipeline", "legacy_wan_video"),
         "custom_story_specific_overlays": sum(1 for beat in concept["beats"] if beat.get("overlay_text")),
         "unique_pexels_video_ids_in_reel": len(set(used_assets)),
         "originality_safeguards": concept.get("originality_safeguards", {}),
@@ -2260,7 +2322,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             "Listen once for Hindi pronunciation and pacing.",
             "Check every subtitle on a phone screen before publishing.",
             "Confirm the cover and caption match the intended Page brand.",
-            "Check natural motion, scene continuity, realistic lighting/materials and obvious AI defects. If anything feels visibly synthetic or broken, do not publish; regenerate that scene.",
+            "Check illustrated style consistency, character continuity, parallax depth, natural motion and obvious AI defects. If anything feels visibly broken, do not publish; regenerate that beat.",
             "Evaluate whether the story and editing add meaningful creative value beyond AI-generated footage.",
             "Use Meta's current AI disclosure/label option when required for realistic synthetic media; do not imply a fictional story is a verified real event.",
         ],
@@ -2864,7 +2926,7 @@ def director_10k_readiness(concept: dict[str, Any], build: dict[str, Any]) -> di
         "hook_clarity": 12, "story_progression": 10, "payoff": 10,
         "originality": 10, "creative_contribution_beyond_stock": 8,
         "share_value": 8, "human_specificity": 9, "emotional_resonance": 9,
-        "photoreal_prompt_quality": 7, "continuity_coherence": 5,
+        "illustrated_visual_quality": 7, "continuity_coherence": 5,
         "voiceover_rhythm": 4, "readability": 3, "platform_safety": 5,
     }
     available = [(key, weight, scores.get(key)) for key, weight in weights.items()]

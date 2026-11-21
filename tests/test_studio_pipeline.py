@@ -72,6 +72,7 @@ class StudioPipelineTests(unittest.TestCase):
     def test_voice_first_plan_generates_measured_audio_before_gpu_timing(self):
         concept = {
             "title": "दो दोस्तों की बात",
+            "story_type": "poetry",
             "theme": "एक बातचीत में दो दोस्तों के बीच की गलतफहमी साफ होती है।",
             "characters": [
                 {"character_id": "arjun", "display_name": "अर्जुन", "gender_presentation": "male", "age_band": "young_adult"},
@@ -1024,6 +1025,21 @@ class StudioPipelineTests(unittest.TestCase):
 
     def test_offline_graph_has_native_t2v_shape(self):
         self.assertEqual(studio_pipeline.self_test(), 0)
+
+
+    def test_hybrid_motion_comic_worker_pins_depth_model_and_finalizer_verifies_assets(self):
+        runner_source = (ROOT / "scripts" / "kaggle_gpu_runner.py").read_text(encoding="utf-8")
+        producer_source = (ROOT / "scripts" / "producer.py").read_text(encoding="utf-8")
+        pipeline_source = (ROOT / "scripts" / "studio_pipeline.py").read_text(encoding="utf-8")
+        self.assertIn("model_info('depth-anything/Depth-Anything-V2-Small-hf'", runner_source)
+        self.assertIn("model_revisions['depth'] = resolved_depth_revision", runner_source)
+        self.assertIn("revision=revision", runner_source)
+        self.assertIn("scene_{scene_index:02d}_25d.mp4", runner_source)
+        self.assertIn("'sha256': sha256_file(parallax)", runner_source)
+        self.assertIn("motion_comic.render_editorial_montage", producer_source)
+        self.assertIn("depth_rows", pipeline_source)
+        self.assertIn("_sha256(depth_source)", pipeline_source)
+        self.assertIn("depth_model_locked_at_ist", pipeline_source)
 
 
 if __name__ == "__main__":

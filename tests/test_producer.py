@@ -39,12 +39,14 @@ class FactoryLogicTests(unittest.TestCase):
                 "screen_text": f"दृश्य {i+1} की बात",
                 "visual_query": queries[i],
                 "visual_direction": f"This shot adds narrative context number {i+1}.",
-                "video_prompt": f"Photoreal vertical live-action film shot {i+1}, close-up of a real notebook on a scratched oak desk under a warm practical tungsten lamp, 50mm macro lens with shallow depth of field, slow controlled handheld camera drift, soft natural shadows and realistic wood grain, faint dust in the light beam, muted charcoal and amber colour grade, believable exposure and slight sensor grain, one simple physically plausible movement, no visible face, no readable text, subtitles, logos or watermark.",
+                "video_prompt": f"Semi-painterly Indian graphic-novel motion-comic frame {i+1}, layered foreground notebook, midground hand and background desk, tactile ink-and-gouache surfaces, warm tungsten practical light, slow cinematic camera drift, soft charcoal shadows and amber highlights, subtle paper grain, one physically plausible action, mature illustrated visual design, a consistent visual bible, stable wardrobe anchors, clean negative space, controlled perspective and a balanced mobile composition, no readable text, subtitles, logos or watermark.",
                 "overlay_type": "note" if i != 3 else "contrast",
                 "overlay_text": overlays[i],
             })
         return {
             "title": "सीमा तय करना",
+            "story_type": "insight",
+            "share_recipient": "अपने छोटे भाई को",
             "theme": "एक मददगार व्यक्ति को देर से पता चलता है कि दूसरों की अपेक्षाएँ उसकी जिम्मेदारी नहीं हैं।",
             "visual_bible": "Restrained naturalistic cinematic visuals, charcoal and warm amber practical light, anonymous everyday environments.",
             "share_reason": "The story gives a friend a simple way to think about boundaries without telling them what to do.",
@@ -153,7 +155,7 @@ class FactoryLogicTests(unittest.TestCase):
                 correction_feedback=feedback,
             )
         self.assertEqual(len(result["beats"]), 6)
-        self.assertIn("exactly 6 beats", mocked.call_args.args[1])
+        self.assertIn("exactly 6 narrative beats", mocked.call_args.args[1])
         prompt = mocked.call_args.args[1]
         self.assertIn(feedback, prompt)
         self.assertIn("young_adult male=hi_male_young_puck", prompt)
@@ -219,7 +221,7 @@ class FactoryLogicTests(unittest.TestCase):
             repaired = producer.repair_concept_structure(concept)
         self.assertEqual(repaired["beats"][1]["voiceover"], replacement)
         self.assertEqual(repaired["beats"][0]["voiceover"], self.sample_concept()["beats"][0]["voiceover"])
-        self.assertTrue(7 <= len(replacement.split()) <= 12)
+        self.assertTrue(7 <= len(replacement.split()) <= 18)
         mocked.assert_called_once()
 
     def test_structural_repair_rejects_a_still_overlong_ai_rewrite(self):
@@ -230,10 +232,20 @@ class FactoryLogicTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "left Beat 2 at"):
                 producer.repair_concept_structure(concept)
 
+    def test_share_recipient_gate_rejects_missing_or_generic_recipient(self):
+        missing = self.sample_concept()
+        missing.pop("share_recipient", None)
+        with self.assertRaisesRegex(ValueError, "share_recipient"):
+            producer.validate_concept_shape(missing)
+        generic = self.sample_concept()
+        generic["share_recipient"] = "everyone"
+        with self.assertRaisesRegex(ValueError, "too generic"):
+            producer.validate_concept_shape(generic)
+
     def test_concept_validation_requires_exactly_six_beats(self):
         concept = self.sample_concept()
         concept["beats"] = concept["beats"][:5]
-        with self.assertRaisesRegex(ValueError, "exactly 6 beats"):
+        with self.assertRaisesRegex(ValueError, "exactly 6 narrative beats"):
             producer.validate_concept_shape(concept)
 
     def test_repeated_lived_in_detail_is_rejected(self):
@@ -656,7 +668,7 @@ class FactoryLogicTests(unittest.TestCase):
             "hook_clarity": 5, "human_specificity": 5, "emotional_resonance": 5,
             "story_progression": 5, "payoff": 5,
             "originality": 5, "creative_contribution_beyond_stock": 5,
-            "share_value": 5, "photoreal_prompt_quality": 5,
+            "share_value": 5, "illustrated_visual_quality": 5,
             "continuity_coherence": 5, "voiceover_rhythm": 5,
             "readability": 5, "platform_safety": 5,
         }}
@@ -677,7 +689,7 @@ class FactoryLogicTests(unittest.TestCase):
             "hook_clarity": 12, "story_progression": 10, "payoff": 10,
             "originality": 10, "creative_contribution_beyond_stock": 8,
             "share_value": 8, "human_specificity": 9, "emotional_resonance": 9,
-            "photoreal_prompt_quality": 7, "continuity_coherence": 5,
+            "illustrated_visual_quality": 7, "continuity_coherence": 5,
             "voiceover_rhythm": 4, "readability": 3, "platform_safety": 5,
         }
         self.assertEqual(sum(weights.values()), 100)

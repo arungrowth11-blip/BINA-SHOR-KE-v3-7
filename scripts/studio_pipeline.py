@@ -395,6 +395,9 @@ def plan_week(reel_count: int = 3) -> int:
             'reel_id': reel_id,
             'title': concept['title'],
             'pillar': pillar,
+            'story_type': concept.get('story_type', 'emotional'),
+            'visual_pipeline': concept.get('visual_pipeline', 'legacy_wan_video'),
+            'visual_bible': concept.get('visual_bible', ''),
             'theme': concept['theme'],
             'planned_publish_at': slot.isoformat(),
             'planned_publish_label': slot.strftime('%a %d %b, %I:%M %p IST'),
@@ -405,11 +408,15 @@ def plan_week(reel_count: int = 3) -> int:
                 'scene_index': b['scene_index'],
                 'voice_timing': b['voice_timing'],
                 'target_frames': b['target_frames'],
+                'editorial_shots': b.get('editorial_shots', []),
             } for b in beats],
             'delivery_status': 'planned',
         })
         local_history.setdefault('topics', []).append({
             'title': concept['title'], 'theme': concept['theme'], 'pillar': pillar,
+            'story_type': concept.get('story_type', 'emotional'),
+            'share_recipient': concept.get('share_recipient', ''),
+            'share_reason': concept.get('share_reason', ''),
             'narrative_engine': concept.get('narrative_engine', ''),
             'emotional_aftertaste': concept.get('emotional_aftertaste', ''),
             'human_detail': concept.get('human_detail', ''),
@@ -429,10 +436,12 @@ def plan_week(reel_count: int = 3) -> int:
         'toolchain_lock': toolchain_lock,
         'screenplay_schema_version': 2,
         'audio_before_video': True,
-        'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader',
+        'visual_pipeline': 'hybrid_25d_motion_comic_v1',
+        'editorial_shot_count': sum(int((r['concept'].get('editorial_shot_plan') or {}).get('editorial_shot_count', 0)) for r in planned),
+        'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader; depth-parallax via Depth Anything V2 Small (Apache-2.0)',
         'reels': [{
             'reel_id': r['reel_id'], 'title': r['title'], 'pillar': r['pillar'],
-            'visual_bible': r['concept'].get('visual_bible', ''), 'beats': r['beats']
+            'visual_bible': r['concept'].get('visual_bible', ''), 'story_type': r['concept'].get('story_type', 'emotional'), 'visual_pipeline': r['concept'].get('visual_pipeline', 'legacy_wan_video'), 'beats': r['beats']
         } for r in planned],
     }
     write_json(PENDING, {
@@ -782,6 +791,15 @@ def verify_or_lock_toolchain(gpu_manifest: dict, job_id: str | None = None) -> d
         for key in ('unet', 'clip', 'vae'):
             if (existing.get('model_revisions') or {}).get(key) != observed['model_revisions'].get(key):
                 raise RuntimeError(f'Model revision drift detected for {key}; refusing to silently change the proven model weights.')
+        locked_depth = (existing.get('model_revisions') or {}).get('depth')
+        observed_depth = observed['model_revisions'].get('depth')
+        if locked_depth and observed_depth != locked_depth:
+            raise RuntimeError('Depth Anything model revision drift detected; refusing to silently change the proven depth estimator.')
+        if observed_depth and not locked_depth:
+            existing.setdefault('model_revisions', {})['depth'] = observed_depth
+            existing['depth_model_locked_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            write_json(TOOLCHAIN_LOCK, existing)
+            log('Added the first immutable Depth Anything V2 revision to the existing Wan toolchain lock.')
         if existing.get('runtime_packages'):
             if existing.get('runtime_packages') != observed['runtime_packages']:
                 changed = sorted(set(existing['runtime_packages']) | set(observed['runtime_packages']))
@@ -918,10 +936,39 @@ def _poll_and_finalize_impl() -> int:
                     missing.append(i)
                     continue
                 shutil.copy2(candidates[0], ai_dir / f'scene_{i:02d}.mp4')
+                if concept.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1':
+                    depth_candidates = [p for p in existing if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}_25d.mp4']
+                    if not depth_candidates:
+                        depth_candidates = [p for p in existing if p.name == f'scene_{i:02d}_25d.mp4' and reel['reel_id'] in str(p)]
+                    depth_rows = [
+                        item for item in gpu_manifest.get('parallax_scenes', [])
+                        if str(item.get('reel_id')) == str(reel['reel_id']) and int(item.get('scene_index', 0)) == i
+                    ]
+                    if len(depth_candidates) != 1 or len(depth_rows) != 1:
+                        missing.append(f'{i}_25d_missing_or_ambiguous')
+                    else:
+                        depth_source = depth_candidates[0]
+                        depth_meta = depth_rows[0]
+                        expected_bytes = int(depth_meta.get('bytes', -1))
+                        expected_sha = str(depth_meta.get('sha256', '')).lower()
+                        if (
+                            expected_bytes <= 100_000
+                            or not re.fullmatch(r'[0-9a-f]{64}', expected_sha)
+                            or depth_source.stat().st_size != expected_bytes
+                            or _sha256(depth_source) != expected_sha
+                        ):
+                            missing.append(f'{i}_25d_hash_or_size_mismatch')
+                        else:
+                            shutil.copy2(depth_source, ai_dir / f'scene_{i:02d}_25d.mp4')
+                            if _sha256(ai_dir / f'scene_{i:02d}_25d.mp4') != expected_sha:
+                                (ai_dir / f'scene_{i:02d}_25d.mp4').unlink(missing_ok=True)
+                                missing.append(f'{i}_25d_copy_hash_mismatch')
             if missing:
                 all_missing.append(f"{reel['reel_id']}: scenes {missing}")
                 continue
             (reel_dir / 'concept.json').write_text(json.dumps(concept, ensure_ascii=False, indent=2), encoding='utf-8')
+            if isinstance(concept.get('editorial_shot_plan'), dict):
+                write_json(reel_dir / 'editorial_shot_plan.json', concept['editorial_shot_plan'])
             os.environ['REQUIRE_AI_VIDEO'] = '1'
             build = producer.render_reel(concept, reel_dir, set(), set())
             slot = datetime.fromisoformat(reel['planned_publish_at'])
@@ -930,8 +977,16 @@ def _poll_and_finalize_impl() -> int:
             quality['video_generation'] = {
                 'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
                 'scene_count': needed,
+                'source_video_generation_count': needed,
+                'editorial_shot_count': int((concept.get('editorial_shot_plan') or {}).get('editorial_shot_count', needed)),
+                'visual_pipeline': concept.get('visual_pipeline', 'legacy_wan_video'),
+                'depth_model': {
+                    'name': 'depth-anything/Depth-Anything-V2-Small-hf',
+                    'revision': gpu_manifest.get('depth_model_revision'),
+                    'license': 'Apache-2.0',
+                },
                 'paid_generation_api_used': False,
-                'visual_quality_claim': 'AI-generated; photoreal appearance varies by prompt/seed; manual review required; not a guarantee of human indistinguishability.',
+                'visual_quality_claim': 'Illustrated Wan2.2 source clips plus pinned Depth Anything V2 keyframe parallax and deterministic editorial coverage; human review required; no guarantee of aesthetic approval.',
                 'human_review_before_publish': True,
             }
             write_json(reel_dir / 'quality_report.json', quality)
