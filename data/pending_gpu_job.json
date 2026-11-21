@@ -1,50 +1,178 @@
 {
-  "job_id": "20261031_115742",
-  "created_at_ist": "2026-10-31T11:59:19+05:30",
-  "status": "finalize_failed",
+  "job_id": "20261119_074202",
+  "created_at_ist": "2026-11-19T07:44:34+05:30",
+  "status": "delivered",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
-    "job_id": "20261031_115742",
-    "created_at_ist": "2026-10-31T11:59:19+05:30",
+    "job_id": "20261119_074202",
+    "created_at_ist": "2026-11-19T07:44:34+05:30",
     "status": "dispatching",
-    "toolchain_lock": {},
+    "toolchain_lock": {
+      "comfyui_commit": "7c4390a6f70cd8eb41014d6af52969397a752fc4",
+      "comfyui_gguf_commit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
+      "model_revisions": {
+        "unet": "e1701a0fc7a708f6459531776ee6e08111417d49",
+        "clip": "c4f60d30c55a624e35427060fdd217579a6c1d77",
+        "vae": "c4f60d30c55a624e35427060fdd217579a6c1d77"
+      }
+    },
+    "screenplay_schema_version": 2,
+    "audio_before_video": true,
     "model": "Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader",
     "reels": [
       {
-        "reel_id": "reel_01_115742",
-        "title": "सूखी छतरी",
+        "reel_id": "reel_01_074202",
+        "title": "मग का कर्ज",
         "pillar": "micro_story",
-        "visual_bible": "महानगर का साधारण 1BHK फ्लैट, पिस्ता-हरे रंग की फीकी दीवारें, मानसून की नम भूरी रोशनी, मूक घरेलू वस्तुएं और 35mm लेंस की शांत हैंडहेल्ड सिनेमैटोग्राफी।",
+        "visual_bible": "ग्रोसरी स्टोर के छोटे काउंटर पर सुबह की नरम रोशनी, दो मुख्य पात्रों के हाथों में चमकीले धातु के मग, हल्की धुंध वाले सतह के साथ, सादी रंग‑टोन, लगातार कपड़े (नीली शर्ट, हरी कुर्ता) और प्राकृतिक लाइटिंग; हर शॉट में अलग‑अलग एंगल, पर सततता बनी रहती है",
         "beats": [
           {
-            "video_prompt": "Vertical 9:16 medium shot, eye-level, 35mm lens. Inside a modestly furnished rented hallway with pale pistachio distemper walls. A young South Asian man in an ironed blue formal shirt pauses near the entrance. Outside the wire-mesh door, heavy grey monsoon clouds hover in the daylight. His right hand reaches down toward a wooden wall peg, lifting a folded matte black umbrella with a curved wooden handle. The camera gently tracks his hand in a slow handheld motion. Natural, soft overcast light spills from the open transom. Muted cool tones, subtle fabric creasing, domestic clutter in soft background blur. No text, subtitles, logo or watermark.",
-            "visual_direction": "जल्दबाजी में बिना पूछे किसी और की चीज उठा लेने की साधारण क्रिया स्थापित करता है।",
-            "scene_index": 1
+            "video_prompt": "Medium shot from slightly low angle captures the modest grocery‑store counter bathed in soft morning light through a window. अर्जन, mid‑30s man in blue shirt and khaki trousers, holds a polished metal coffee mug, extending his right hand toward सिमा, late‑20s woman in green kurti and simple sandals, who stands opposite. Both eyes meet; अर्जन’s lips form the urgent line, subtle jaw movement, slight furrow. सिमा watches, lips closed, gentle smile, eyes focused on mug.",
+            "visual_direction": "Introduce lending; show अर्जुन handing the mug to सिमा",
+            "scene_index": 1,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.4,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.7083,
+              "target_frames": 113,
+              "segments": [
+                {
+                  "segment_id": "beat_01_line_01",
+                  "speaker_id": "story_e6f43d1f_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 4.48,
+                  "duration_seconds": 4.4
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 113
           },
           {
-            "video_prompt": "Vertical 9:16 close-up shot, 50mm lens. The same man steps into an apartment building stairwell, sliding the black umbrella securely through the side strap of his grey nylon office backpack. His fingers adjust the strap with casual haste. Dim ambient daylight falls through concrete breezeblocks, casting geometric soft shadows on the mottled grey floor. Camera stays steady with subtle breathing movement, focusing on the taut fabric of the bag and the clean, dry wooden crook handle of the umbrella. Restrained colour grade with desaturated tones and natural dust motes in the background. No text, subtitles, logo or watermark.",
-            "visual_direction": "उसकी अपनी सुविधा को प्राथमिकता देने और बात को टालने की आदत दिखाता है।",
-            "scene_index": 2
+            "video_prompt": "Close‑up shot tightly frames सिमा’s face at eye level, soft morning light creating a rim on her long dark hair. She holds the metal mug in her left hand, fingers lightly wrapped. Her lips articulate the grateful line with natural opening and closing, eyes bright, slight upward crinkle at corners. No other movement; background counter blurs. Lighting remains warm, muted tones, maintaining continuity with previous shot, and the mug glints faintly.",
+            "visual_direction": "Show सिमा’s appreciative response",
+            "scene_index": 2,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 3.04,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 3.2083,
+              "target_frames": 77,
+              "segments": [
+                {
+                  "segment_id": "beat_02_line_01",
+                  "speaker_id": "story_e6f43d1f_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.12,
+                  "duration_seconds": 3.04
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 77
           },
           {
-            "video_prompt": "Vertical 9:16 low-angle medium shot, 35mm lens. A wide grey city footpath outside an office complex. The young man walks forward, his dry black leather shoes stepping onto completely dry, pale asphalt. Overhead, dark monsoon clouds drift without releasing rain, diffusing an even, flat silver-grey daylight across the concrete surroundings. He carries the unused, bone-dry black umbrella tucked under one arm. Slow backward dolly keeping him in frame from the chest down. The pavement has no puddles; the atmosphere is dry and heavy with unshed humidity. Desaturated urban palette. No text, subtitles, logo or watermark.",
-            "visual_direction": "छतरी लेने की निरर्थकता और मौसम का अप्रत्याशित सूखापन उजागर करता है।",
-            "scene_index": 3
+            "video_prompt": "Static medium‑wide shot shows अर्जन’s small work desk on the counter later that morning. The polished surface bears a faint condensation imprint where the metal mug once sat, now empty. अर्जन, still in blue shirt and khaki trousers, leans slightly forward, eyes scanning the vacant spot, brow slightly raised. Soft natural light from the window casts gentle patterns across the desk, background shelves remain out‑of‑focus, preserving the warm colour palette.",
+            "visual_direction": "Reveal the empty spot where the mug used to be",
+            "scene_index": 3,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 0,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 2.5417,
+              "target_frames": 61,
+              "segments": [],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 61
           },
           {
-            "video_prompt": "Vertical 9:16 close-up shot tilting down, 50mm lens. The wooden entrance door of the rented flat stands ajar. On the tiled floor sits an old Hindi newspaper, damp and rippled, holding a pair of soaked grey canvas sneakers with dark wet water stains along the fabric. Faint muddy water has seeped around the rubber soles onto the paper. Soft evening light from an interior bulb mixes with the dim dusk falling through the hallway. The camera tilts slowly down from the brass latch to settle firmly on the wet shoes. Realistic paper wrinkles, moist fabric texture, muted domestic evening tones. No text, subtitles, logo or watermark.",
-            "visual_direction": "एक घरेलू वस्तु के जरिए अनचाहे नुकसान का खुलासा करता है।",
-            "scene_index": 4
+            "video_prompt": "Close‑up of अर्जन’s face from a slightly high angle captures his shoulders hunched as he looks at the empty mug spot. Warm morning light highlights a subtle sheen on his forehead. His lips move to speak the line, opening naturally, jaw slightly dropping, eyes lingering on the imprint then dropping to his clenched hands. No exaggerated gestures; a faint frown conveys mild frustration, background blurred, maintaining the same muted colour tone.",
+            "visual_direction": "Show his internal reaction to the loss",
+            "scene_index": 4,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 3.88,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.0417,
+              "target_frames": 97,
+              "segments": [
+                {
+                  "segment_id": "beat_04_line_01",
+                  "speaker_id": "story_e6f43d1f_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.96,
+                  "duration_seconds": 3.88
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 97
           },
           {
-            "video_prompt": "Vertical 9:16 medium shot from behind, 50mm lens. Through an open glass balcony door, another young South Asian man stands against the balcony railing under a wet evening sky. His back is to the camera, wearing an undershirt and rolled-up trousers. His hands firmly wring out a soaked formal white shirt over the balcony edge, water dripping steadily onto the iron railing below. The city skyline in the background is blurred and glistening with recent heavy rain. Warm indoor tungsten light outlines his silhouette while the balcony remains in cool slate-blue dusk. Still, observant camera with subtle handheld realism. No text, subtitles, logo or watermark.",
-            "visual_direction": "दूसरे इंसान पर पड़े चुपचाप असर को बिना किसी नाटकीयता के सामने लाता है।",
-            "scene_index": 5
+            "video_prompt": "Medium shot from the side follows सिमा as she re‑enters the counter, holding the same metal mug, now bearing faint fingerprints. She moves left‑to‑right, glancing briefly at अर्जन, who remains seated. Her lips articulate an apologetic line, mouth opening gently, eyes lowered slightly, shoulders relaxed yet slightly tense. अर्जन watches, lips closed, his expression softening. Soft morning light continues, casting subtle shadows, and the colour grade stays warm, preserving continuity.",
+            "visual_direction": "She returns, offering the mug back, creating a subtle resolution",
+            "scene_index": 5,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.12,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.375,
+              "target_frames": 105,
+              "segments": [
+                {
+                  "segment_id": "beat_05_line_01",
+                  "speaker_id": "story_e6f43d1f_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 4.2,
+                  "duration_seconds": 4.12
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 105
           },
           {
-            "video_prompt": "Vertical 9:16 medium shot, 35mm lens. In the entryway of the apartment, the first man’s hand places the bone-dry black umbrella back onto the wooden wall peg where it originally hung. He lets his hand fall to his side and stands motionless for a second, looking toward the quiet, dimly lit living room where a ceiling fan spins slowly above an empty table. Warm tungsten light casts long, soft shadows against the pale green wall. Camera pulls back very slowly into a wide composition, holding the stillness of the space. Restrained cinematic grade, soft grain, authentic quiet home interior. No text, subtitles, logo or watermark.",
-            "visual_direction": "कहानी को वस्तु की वापसी पर खत्म करता है, लेकिन टूटे हुए सहज तालमेल को रेखांकित करता है।",
-            "scene_index": 6
+            "video_prompt": "Wide shot captures the entire counter as अर्जन reaches toward a shelf, selecting a plain white ceramic mug. His right hand lifts the mug, fingers curling naturally; the camera tracks the motion smoothly, then pulls back to reveal him pouring coffee, steam rising. His lips form a quiet line, slight smile appearing, mouth moving minimally. Ambient store sounds persist, soft morning light bathes the scene, warm palette brightens subtly, maintaining visual continuity.",
+            "visual_direction": "Show his acceptance and subtle shift to a new routine",
+            "scene_index": 6,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 2.84,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 3.0417,
+              "target_frames": 73,
+              "segments": [
+                {
+                  "segment_id": "beat_06_line_01",
+                  "speaker_id": "story_e6f43d1f_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 2.92,
+                  "duration_seconds": 2.84
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 73
           }
         ]
       }
@@ -52,105 +180,319 @@
   },
   "reels": [
     {
-      "reel_id": "reel_01_115742",
-      "title": "सूखी छतरी",
+      "reel_id": "reel_01_074202",
+      "title": "मग का कर्ज",
       "pillar": "micro_story",
-      "theme": "बिना पूछे ली गई एक छोटी सी सहूलियत कैसे दो दोस्तों के बीच अनकही दूरी बना देती है।",
-      "planned_publish_at": "2026-11-01T20:37:00+05:30",
-      "planned_publish_label": "Sun 01 Nov, 08:37 PM IST",
+      "theme": "एक छोटा भरोसा टूटने से रोज़ की साधारण रूटीन बदलती है",
+      "planned_publish_at": "2026-11-19T20:37:00+05:30",
+      "planned_publish_label": "Thu 19 Nov, 08:37 PM IST",
       "concept": {
-        "title": "सूखी छतरी",
+        "title": "मग का कर्ज",
+        "characters": [
+          {
+            "character_id": "story_e6f43d1f_protagonist",
+            "display_name": "अर्जुन",
+            "role": "protagonist",
+            "gender_presentation": "male",
+            "age_band": "adult",
+            "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+            "appearance": "mid‑30s Indian man, short hair, wearing a blue shirt and khaki trousers, holding a coffee mug",
+            "personality": "reserved, courteous, slightly anxious about routine",
+            "voice_profile_id": "hi_male_adult_charon",
+            "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+            "source_character_id": "protagonist",
+            "gemini_voice": "Charon"
+          },
+          {
+            "character_id": "story_e6f43d1f_supporting",
+            "display_name": "सिमा",
+            "role": "supporting",
+            "gender_presentation": "female",
+            "age_band": "adult",
+            "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+            "appearance": "late‑20s Indian woman, long dark hair, wearing a green kurti and simple sandals, carrying a small tote bag",
+            "personality": "friendly, a bit forgetful, appreciative",
+            "voice_profile_id": "hi_female_adult_aoede",
+            "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+            "source_character_id": "supporting",
+            "gemini_voice": "Aoede"
+          }
+        ],
         "pillar": "micro_story",
         "series_name": "एक पल, एक फैसला",
-        "theme": "बिना पूछे ली गई एक छोटी सी सहूलियत कैसे दो दोस्तों के बीच अनकही दूरी बना देती है।",
-        "audience_reason": "शहरी फ्लैट-शेयरिंग और रोजमर्रा की साझेदारी में हर किसी ने बिना पूछे चीजें लेने की यह असहज खामोशी महसूस की है।",
-        "share_reason": "दर्शक इसे अपने रूममेट या करीबी दोस्त को बिना किसी ताने के, एक शांत आत्मनिरीक्षण की तरह भेज सकेंगे।",
-        "narrative_engine": "A small choice has a quiet but visible cost.",
-        "emotional_aftertaste": "एक हल्की सी झिझक और यह अहसास कि माफी न मांगना उस गलती से भी ज्यादा भारी हो जाता है।",
-        "human_detail": "दरवाजे पर गीले अखबार के ऊपर सूखने के लिए रखे हुए कीचड़ सने कैनवस के जूते।",
-        "character_contradiction": "वह खुद को बारिश से बचाना चाहता था, लेकिन लौटने पर एक सीधी बात कहने की हिम्मत नहीं जुटा सका।",
-        "cost_of_choice": "छतरी भले सूखी वापस आ गई, लेकिन कमरे का सहज अपनापन उस शाम के लिए खत्म हो गया।",
-        "hook": "बिना पूछे बस एक चीज़ उठाई थी।",
-        "visual_bible": "महानगर का साधारण 1BHK फ्लैट, पिस्ता-हरे रंग की फीकी दीवारें, मानसून की नम भूरी रोशनी, मूक घरेलू वस्तुएं और 35mm लेंस की शांत हैंडहेल्ड सिनेमैटोग्राफी।",
+        "theme": "एक छोटा भरोसा टूटने से रोज़ की साधारण रूटीन बदलती है",
+        "audience_reason": "वे जो काम और दोस्ती में छोटे समझौते के असर को महसूस करते हैं, उन्हें यह कहानी छू लेगी",
+        "share_reason": "सिर्फ एक कप के इशारे में छुपी अनदेखी कीमत, जो हर किसी को अपनी रोज़मर्रा की चुनौतियों में दिखती है",
+        "narrative_engine": "छोटा कर्ज, बड़ा असर",
+        "emotional_aftertaste": "छोटी अनदेखी चॉइस के बाद भी आगे बढ़ने की हल्की राहत",
+        "human_detail": "डेस्क पर रखी चमकीली धातु की कॉफी मग की सतह पर हल्की धुंध",
+        "character_contradiction": "अर्जुन को अपने साफ़ मग को बचाए रखना है, पर वह सिमा को उधार दे देता है",
+        "cost_of_choice": "अपनी पसंदीदा मग खो देना, जिससे सुबह की रूटीन में छोटी रुकावट आती है",
+        "hook": "एक छोटा कर्ज, बड़ा असर?",
+        "visual_bible": "ग्रोसरी स्टोर के छोटे काउंटर पर सुबह की नरम रोशनी, दो मुख्य पात्रों के हाथों में चमकीले धातु के मग, हल्की धुंध वाले सतह के साथ, सादी रंग‑टोन, लगातार कपड़े (नीली शर्ट, हरी कुर्ता) और प्राकृतिक लाइटिंग; हर शॉट में अलग‑अलग एंगल, पर सततता बनी रहती है",
         "beats": [
           {
-            "voiceover": "बाहर बादल देखकर उसने बिना पूछे सुमित की छतरी उठा ली।",
-            "voice_direction": "सहज और थोड़ा बेपरवाह, जैसे कोई बड़ी बात न हो",
-            "screen_text": "बिना पूछे बस एक चीज़ उठाई थी।",
-            "visual_query": "man picking black umbrella hallway doorway",
-            "visual_direction": "जल्दबाजी में बिना पूछे किसी और की चीज उठा लेने की साधारण क्रिया स्थापित करता है।",
-            "video_prompt": "Vertical 9:16 medium shot, eye-level, 35mm lens. Inside a modestly furnished rented hallway with pale pistachio distemper walls. A young South Asian man in an ironed blue formal shirt pauses near the entrance. Outside the wire-mesh door, heavy grey monsoon clouds hover in the daylight. His right hand reaches down toward a wooden wall peg, lifting a folded matte black umbrella with a curved wooden handle. The camera gently tracks his hand in a slow handheld motion. Natural, soft overcast light spills from the open transom. Muted cool tones, subtle fabric creasing, domestic clutter in soft background blur. No text, subtitles, logo or watermark.",
+            "speech_segments": [
+              {
+                "segment_id": "beat_01_line_01",
+                "speaker_id": "story_e6f43d1f_protagonist",
+                "text": "सिमा, मेरा मग ले ले, जल्दी काम है, भूल मत जाना।",
+                "emotion": "slight urgency",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_male_adult_charon",
+                "gemini_voice": "Charon",
+                "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+                "duration_seconds": 4.4
+              }
+            ],
+            "voiceover": "सिमा, मेरा मग ले ले, जल्दी काम है, भूल मत जाना।",
+            "voice_direction": "calm but hurried",
+            "screen_text": "एक छोटा कर्ज, बड़ा असर?",
+            "visual_query": "grocery store counter morning mug",
+            "visual_direction": "Introduce lending; show अर्जुन handing the mug to सिमा",
+            "video_prompt": "Medium shot from slightly low angle captures the modest grocery‑store counter bathed in soft morning light through a window. अर्जन, mid‑30s man in blue shirt and khaki trousers, holds a polished metal coffee mug, extending his right hand toward सिमा, late‑20s woman in green kurti and simple sandals, who stands opposite. Both eyes meet; अर्जन’s lips form the urgent line, subtle jaw movement, slight furrow. सिमा watches, lips closed, gentle smile, eyes focused on mug.",
             "overlay_type": "note",
-            "overlay_text": "सुबह 08:45",
+            "overlay_text": "उधारी का पहला कदम",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.4,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.7083,
+              "target_frames": 113,
+              "segments": [
+                {
+                  "segment_id": "beat_01_line_01",
+                  "speaker_id": "story_e6f43d1f_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 4.48,
+                  "duration_seconds": 4.4
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 113,
             "scene_index": 1
           },
           {
-            "voiceover": "सोचा था शाम को भीगने से पहले वापस रख देगा।",
-            "voice_direction": "धीमी सफाई, मन में खुद को दिया गया बहाना",
-            "screen_text": "एक आसान बहाना\nजो खुद को दिया",
-            "visual_query": "umbrella strapped into office backpack stairwell",
-            "visual_direction": "उसकी अपनी सुविधा को प्राथमिकता देने और बात को टालने की आदत दिखाता है।",
-            "video_prompt": "Vertical 9:16 close-up shot, 50mm lens. The same man steps into an apartment building stairwell, sliding the black umbrella securely through the side strap of his grey nylon office backpack. His fingers adjust the strap with casual haste. Dim ambient daylight falls through concrete breezeblocks, casting geometric soft shadows on the mottled grey floor. Camera stays steady with subtle breathing movement, focusing on the taut fabric of the bag and the clean, dry wooden crook handle of the umbrella. Restrained colour grade with desaturated tones and natural dust motes in the background. No text, subtitles, logo or watermark.",
+            "speech_segments": [
+              {
+                "segment_id": "beat_02_line_01",
+                "speaker_id": "story_e6f43d1f_supporting",
+                "text": "धन्यवाद, अर्जुन, कल तक वापिस कर दूँगी।",
+                "emotion": "warm gratitude",
+                "source_speaker_id": "supporting",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 3.04
+              }
+            ],
+            "voiceover": "धन्यवाद, अर्जुन, कल तक वापिस कर दूँगी।",
+            "voice_direction": "warm and apologetic",
+            "screen_text": "सिमा ने धन्यवाद कहा",
+            "visual_query": "grocery store counter exchange gratitude",
+            "visual_direction": "Show सिमा’s appreciative response",
+            "video_prompt": "Close‑up shot tightly frames सिमा’s face at eye level, soft morning light creating a rim on her long dark hair. She holds the metal mug in her left hand, fingers lightly wrapped. Her lips articulate the grateful line with natural opening and closing, eyes bright, slight upward crinkle at corners. No other movement; background counter blurs. Lighting remains warm, muted tones, maintaining continuity with previous shot, and the mug glints faintly.",
             "overlay_type": "keyword",
-            "overlay_text": "खुद की सहूलियत",
+            "overlay_text": "धन्यवाद",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 3.04,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 3.2083,
+              "target_frames": 77,
+              "segments": [
+                {
+                  "segment_id": "beat_02_line_01",
+                  "speaker_id": "story_e6f43d1f_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.12,
+                  "duration_seconds": 3.04
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 77,
             "scene_index": 2
           },
           {
-            "voiceover": "दफ़्तर के रास्ते में एक भी बूंद नहीं गिरी।",
-            "voice_direction": "सपाट लहजा, कुदरत की बेमतलब विडंबना",
-            "screen_text": "आसमान भी कभी\nमज़ाक करता है",
-            "visual_query": "dry city pavement walking office entrance",
-            "visual_direction": "छतरी लेने की निरर्थकता और मौसम का अप्रत्याशित सूखापन उजागर करता है।",
-            "video_prompt": "Vertical 9:16 low-angle medium shot, 35mm lens. A wide grey city footpath outside an office complex. The young man walks forward, his dry black leather shoes stepping onto completely dry, pale asphalt. Overhead, dark monsoon clouds drift without releasing rain, diffusing an even, flat silver-grey daylight across the concrete surroundings. He carries the unused, bone-dry black umbrella tucked under one arm. Slow backward dolly keeping him in frame from the chest down. The pavement has no puddles; the atmosphere is dry and heavy with unshed humidity. Desaturated urban palette. No text, subtitles, logo or watermark.",
-            "overlay_type": "contrast",
-            "overlay_text": "बारिश नहीं आई",
+            "speech_segments": [],
+            "voiceover": "",
+            "voice_direction": "",
+            "screen_text": "मग नहीं मिला",
+            "visual_query": "empty desk mug spot",
+            "visual_direction": "Reveal the empty spot where the mug used to be",
+            "video_prompt": "Static medium‑wide shot shows अर्जन’s small work desk on the counter later that morning. The polished surface bears a faint condensation imprint where the metal mug once sat, now empty. अर्जन, still in blue shirt and khaki trousers, leans slightly forward, eyes scanning the vacant spot, brow slightly raised. Soft natural light from the window casts gentle patterns across the desk, background shelves remain out‑of‑focus, preserving the warm colour palette.",
+            "overlay_type": "note",
+            "overlay_text": "खाली जगह",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 0,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 2.5417,
+              "target_frames": 61,
+              "segments": [],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 61,
             "scene_index": 3
           },
           {
-            "voiceover": "शाम को घर लौटा, तो दरवाज़े पर गीले जूते रखे थे।",
-            "voice_direction": "अचानक रुकावट, बात समझ आने का हल्का झटका",
-            "screen_text": "दरवाज़े पर रखा\nएक अनदेखा सच",
-            "visual_query": "wet muddy sneakers drying on newspaper",
-            "visual_direction": "एक घरेलू वस्तु के जरिए अनचाहे नुकसान का खुलासा करता है।",
-            "video_prompt": "Vertical 9:16 close-up shot tilting down, 50mm lens. The wooden entrance door of the rented flat stands ajar. On the tiled floor sits an old Hindi newspaper, damp and rippled, holding a pair of soaked grey canvas sneakers with dark wet water stains along the fabric. Faint muddy water has seeped around the rubber soles onto the paper. Soft evening light from an interior bulb mixes with the dim dusk falling through the hallway. The camera tilts slowly down from the brass latch to settle firmly on the wet shoes. Realistic paper wrinkles, moist fabric texture, muted domestic evening tones. No text, subtitles, logo or watermark.",
-            "overlay_type": "message",
-            "overlay_text": "दोपहर की बौछार",
+            "speech_segments": [
+              {
+                "segment_id": "beat_04_line_01",
+                "speaker_id": "story_e6f43d1f_protagonist",
+                "text": "लगता है आज भी वही पुराना कप नहीं मिलेगा।",
+                "emotion": "mild frustration",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_male_adult_charon",
+                "gemini_voice": "Charon",
+                "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+                "duration_seconds": 3.88
+              }
+            ],
+            "voiceover": "लगता है आज भी वही पुराना कप नहीं मिलेगा।",
+            "voice_direction": "slightly resigned",
+            "screen_text": "अर्जुन ने सोचा",
+            "visual_query": "protagonist looking at empty spot",
+            "visual_direction": "Show his internal reaction to the loss",
+            "video_prompt": "Close‑up of अर्जन’s face from a slightly high angle captures his shoulders hunched as he looks at the empty mug spot. Warm morning light highlights a subtle sheen on his forehead. His lips move to speak the line, opening naturally, jaw slightly dropping, eyes lingering on the imprint then dropping to his clenched hands. No exaggerated gestures; a faint frown conveys mild frustration, background blurred, maintaining the same muted colour tone.",
+            "overlay_type": "contrast",
+            "overlay_text": "पहला नुकसान",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 3.88,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.0417,
+              "target_frames": 97,
+              "segments": [
+                {
+                  "segment_id": "beat_04_line_01",
+                  "speaker_id": "story_e6f43d1f_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.96,
+                  "duration_seconds": 3.88
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 97,
             "scene_index": 4
           },
           {
-            "voiceover": "सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।",
-            "voice_direction": "दबा हुआ संकोच, बिना किसी चीख-पुकार का दृश्य",
-            "screen_text": "कुछ सवाल\nपूछे नहीं जाते",
-            "visual_query": "man wringing wet shirt apartment balcony",
-            "visual_direction": "दूसरे इंसान पर पड़े चुपचाप असर को बिना किसी नाटकीयता के सामने लाता है।",
-            "video_prompt": "Vertical 9:16 medium shot from behind, 50mm lens. Through an open glass balcony door, another young South Asian man stands against the balcony railing under a wet evening sky. His back is to the camera, wearing an undershirt and rolled-up trousers. His hands firmly wring out a soaked formal white shirt over the balcony edge, water dripping steadily onto the iron railing below. The city skyline in the background is blurred and glistening with recent heavy rain. Warm indoor tungsten light outlines his silhouette while the balcony remains in cool slate-blue dusk. Still, observant camera with subtle handheld realism. No text, subtitles, logo or watermark.",
-            "overlay_type": "contrast",
-            "overlay_text": "बिना शिकायत",
+            "speech_segments": [
+              {
+                "segment_id": "beat_05_line_01",
+                "speaker_id": "story_e6f43d1f_supporting",
+                "text": "माफ़ करना, आज सुबह भूल गई, फिर भी ले लो?",
+                "emotion": "apologetic",
+                "source_speaker_id": "supporting",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 4.12
+              }
+            ],
+            "voiceover": "माफ़ करना, आज सुबह भूल गई, फिर भी ले लो?",
+            "voice_direction": "soft, slightly embarrassed",
+            "screen_text": "सिमा ने माफी मांगी",
+            "visual_query": "supporting returns mug apologetically",
+            "visual_direction": "She returns, offering the mug back, creating a subtle resolution",
+            "video_prompt": "Medium shot from the side follows सिमा as she re‑enters the counter, holding the same metal mug, now bearing faint fingerprints. She moves left‑to‑right, glancing briefly at अर्जन, who remains seated. Her lips articulate an apologetic line, mouth opening gently, eyes lowered slightly, shoulders relaxed yet slightly tense. अर्जन watches, lips closed, his expression softening. Soft morning light continues, casting subtle shadows, and the colour grade stays warm, preserving continuity.",
+            "overlay_type": "step",
+            "overlay_text": "वापसी",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.12,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.375,
+              "target_frames": 105,
+              "segments": [
+                {
+                  "segment_id": "beat_05_line_01",
+                  "speaker_id": "story_e6f43d1f_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 4.2,
+                  "duration_seconds": 4.12
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 105,
             "scene_index": 5
           },
           {
-            "voiceover": "उसने छतरी टाँगी, मगर कमरा चुप रहा।",
-            "voice_direction": "शांत, ठहराव भरा अंत, अनकही दूरी का अहसास",
-            "screen_text": "चीज़ वापस मिल गई\nसहजता नहीं",
-            "visual_query": "dry umbrella hanging wooden peg quiet room",
-            "visual_direction": "कहानी को वस्तु की वापसी पर खत्म करता है, लेकिन टूटे हुए सहज तालमेल को रेखांकित करता है।",
-            "video_prompt": "Vertical 9:16 medium shot, 35mm lens. In the entryway of the apartment, the first man’s hand places the bone-dry black umbrella back onto the wooden wall peg where it originally hung. He lets his hand fall to his side and stands motionless for a second, looking toward the quiet, dimly lit living room where a ceiling fan spins slowly above an empty table. Warm tungsten light casts long, soft shadows against the pale green wall. Camera pulls back very slowly into a wide composition, holding the stillness of the space. Restrained cinematic grade, soft grain, authentic quiet home interior. No text, subtitles, logo or watermark.",
-            "overlay_type": "note",
-            "overlay_text": "खाली खामोशी",
+            "speech_segments": [
+              {
+                "segment_id": "beat_06_line_01",
+                "speaker_id": "story_e6f43d1f_protagonist",
+                "text": "अब मैं नई कप से भी खुशी ले लेता हूँ।",
+                "emotion": "quiet acceptance",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_male_adult_charon",
+                "gemini_voice": "Charon",
+                "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+                "duration_seconds": 2.84
+              }
+            ],
+            "voiceover": "अब मैं नई कप से भी खुशी ले लेता हूँ।",
+            "voice_direction": "calm, gentle resolve",
+            "screen_text": "अर्जुन ने नया कप चुना",
+            "visual_query": "protagonist using new mug",
+            "visual_direction": "Show his acceptance and subtle shift to a new routine",
+            "video_prompt": "Wide shot captures the entire counter as अर्जन reaches toward a shelf, selecting a plain white ceramic mug. His right hand lifts the mug, fingers curling naturally; the camera tracks the motion smoothly, then pulls back to reveal him pouring coffee, steam rising. His lips form a quiet line, slight smile appearing, mouth moving minimally. Ambient store sounds persist, soft morning light bathes the scene, warm palette brightens subtly, maintaining visual continuity.",
+            "overlay_type": "keyword",
+            "overlay_text": "नया सवेरा",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 2.84,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 3.0417,
+              "target_frames": 73,
+              "segments": [
+                {
+                  "segment_id": "beat_06_line_01",
+                  "speaker_id": "story_e6f43d1f_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 2.92,
+                  "duration_seconds": 2.84
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 73,
             "scene_index": 6
           }
         ],
-        "caption": "कभी-कभी हम किसी की जरूरत सिर्फ इसलिए नजरअंदाज कर देते हैं क्योंकि पूछने में थोड़ी झिझक होती है। चीज तो अपनी जगह लौट आती है, पर वो बेफिक्र बातचीत नहीं।",
+        "caption": "एक छोटा कर्ज, बड़ी रूटीन। कभी‑कभी छोटी‑छोटी चीज़ें भी बदल देती हैं।",
         "hashtags": [
           "#BinaShorKe",
-          "#EverydayStories",
-          "#HumanChoices",
-          "#MicroStory"
+          "#EverydayChoice",
+          "#HindiMicroStory"
         ],
-        "cover_text": "सूखी छतरी, भीगी शाम",
-        "posting_note": "यह रील टेस्ट करती है कि क्या बिना किसी जोरदार झगड़े के सिर्फ एक भीगे जूते और सूखी छतरी के जरिए दर्शक अनकही गलती की चुभन महसूस कर पाते हैं।",
-        "planned_publish_at": "2026-11-01T20:37:00+05:30",
-        "planned_publish_label": "Sun 01 Nov, 08:37 PM IST",
+        "cover_text": "एक छोटा कर्ज",
+        "posting_note": "टेस्ट कर रहे हैं कि छोटा सामाजिक समझौता भी भावनात्मक बदलाव लाता है या नहीं",
+        "screenplay_schema_version": 2,
+        "planned_publish_at": "2026-11-19T20:37:00+05:30",
+        "planned_publish_label": "Thu 19 Nov, 08:37 PM IST",
         "editorial_review": {
           "scores": {
             "hook_clarity": 4,
@@ -167,18 +509,20 @@
             "motion_feasibility": 5,
             "continuity_coherence": 5,
             "voiceover_rhythm": 4,
-            "caption_quality": 4,
+            "caption_quality": 3,
             "share_value": 4,
             "platform_safety": 5
           },
-          "average_score": 4.35,
+          "average_score": 4.29,
           "approved": true,
           "revision_notes": [
-            "Voice‑over lines are clear but a touch too expository; consider trimming \"सोचा था शाम को भीगने से पहले वापस रख देगा\" to a more internal, felt line.",
-            "Introduce a tiny visual link early – e.g., a faint water‑stain on the umbrella’s handle – that later mirrors the wet shoes, tightening the cause‑effect thread.",
-            "Vary one shot with a slightly wider lens (24mm) for the balcony scene to give spatial context without breaking the handheld aesthetic."
+            "**Dialogue & Emotional Depth**: Line 5 (*‘माफ़ करना, आज सुबह भूल गई, फिर भी ले लो?’*) could be sharper—‘भूल गई’ alone is forgettable; add a *specific* detail (e.g., ‘कॉफी की गंध से भूल गई’) to ground the apology in sensory memory. Line 6 (*‘अब मैं नई कप से भी खुशी ले लेता हूँ’*) is too abstract; replace with a *physical* choice (e.g., ‘अब तो इस सफेद कप से भी पीता हूँ, जैसे नई शुरुआत’) to tie the emotional shift to action.",
+            "**Visual Continuity**: Beat 3’s empty mug shot should *contrast* with Beat 1’s handoff—use a *different* angle (e.g., low-angle shot of the imprint) to avoid mirroring the first frame. Beat 5’s ‘fingerprints’ detail is great, but ensure the mug’s *material* (metal vs. ceramic) is visually distinct in the return shot to avoid confusion.",
+            "**Emotional Earnedness**: The ‘quiet acceptance’ in Beat 6 needs a *subtle* physical tell—e.g., Arjun’s hand *hesitates* before picking the new mug, or his eyes flick to Sima’s for a split second. This would make the emotional payoff feel *earned* rather than stated.",
+            "**Caption Tightening**: Current caption (*‘एक छोटा कर्ज, बड़ी रूटीन’*) is clever but generic. Replace with: *‘कप उधार देने से रोज़मर्रा की छोटी-छोटी चीज़ें भी टूट जाती हैं’*—this ties the *specific* object (मग) to the *universal* truth of small betrayals.",
+            "**Platform Safety**: Ensure the ‘posting_note’ (*‘टेस्ट कर रहे हैं...’*) is removed from final assets to avoid implying experimental intent. The story’s emotional core is strong enough to stand alone."
           ],
-          "main_risk": "If the caption is shared without context, some viewers may read it as a moral lecture; keep the wording observational rather than prescriptive.",
+          "main_risk": "The emotional resonance hinges on the *specificity* of Sima’s apology (Beat 5) and Arjun’s acceptance (Beat 6). If these lines lack *observable* details (e.g., sensory or physical), the story risks feeling like a moral fable rather than a lived experience. The current version passes due to strong visuals and continuity, but the dialogue must avoid ‘explanatory’ phrasing (e.g., ‘बड़ी रूटीन’ in the caption) to retain authenticity.",
           "department_notes": {},
           "passes": 1
         },
@@ -189,42 +533,184 @@
           "source_clip_reuse_check": "active",
           "not_a_Meta_eligibility_guarantee": true
         },
-        "reel_id": "reel_01_115742"
+        "reel_id": "reel_01_074202",
+        "story_instance_id": "reel_01_074202",
+        "voice_first_plan": {
+          "status": "voice_measured_before_video",
+          "audio_model": "gemini-3.8-flash-lite-tts",
+          "cache_key_version": 2,
+          "scene_count": 6,
+          "dialogue_truncated": false,
+          "video_duration_source": "measured_voice_audio"
+        },
+        "voice_aware_storyboard": {
+          "status": "generated_after_voice_lock",
+          "timing_basis": "measured_tts_wav_before_gpu",
+          "shot_count": 6,
+          "dialogue_rewritten": false,
+          "target_frames_changed": false
+        },
+        "final_caption": "एक छोटा कर्ज, बड़ी रूटीन। कभी‑कभी छोटी‑छोटी चीज़ें भी बदल देती हैं।\n\nकहानी काल्पनिक है।\n\n#BinaShorKe #EverydayChoice #HindiMicroStory"
       },
       "beats": [
         {
-          "video_prompt": "Vertical 9:16 medium shot, eye-level, 35mm lens. Inside a modestly furnished rented hallway with pale pistachio distemper walls. A young South Asian man in an ironed blue formal shirt pauses near the entrance. Outside the wire-mesh door, heavy grey monsoon clouds hover in the daylight. His right hand reaches down toward a wooden wall peg, lifting a folded matte black umbrella with a curved wooden handle. The camera gently tracks his hand in a slow handheld motion. Natural, soft overcast light spills from the open transom. Muted cool tones, subtle fabric creasing, domestic clutter in soft background blur. No text, subtitles, logo or watermark.",
-          "visual_direction": "जल्दबाजी में बिना पूछे किसी और की चीज उठा लेने की साधारण क्रिया स्थापित करता है।",
-          "scene_index": 1
+          "video_prompt": "Medium shot from slightly low angle captures the modest grocery‑store counter bathed in soft morning light through a window. अर्जन, mid‑30s man in blue shirt and khaki trousers, holds a polished metal coffee mug, extending his right hand toward सिमा, late‑20s woman in green kurti and simple sandals, who stands opposite. Both eyes meet; अर्जन’s lips form the urgent line, subtle jaw movement, slight furrow. सिमा watches, lips closed, gentle smile, eyes focused on mug.",
+          "visual_direction": "Introduce lending; show अर्जुन handing the mug to सिमा",
+          "scene_index": 1,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 4.4,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 4.7083,
+            "target_frames": 113,
+            "segments": [
+              {
+                "segment_id": "beat_01_line_01",
+                "speaker_id": "story_e6f43d1f_protagonist",
+                "start_seconds": 0.08,
+                "end_seconds": 4.48,
+                "duration_seconds": 4.4
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 113
         },
         {
-          "video_prompt": "Vertical 9:16 close-up shot, 50mm lens. The same man steps into an apartment building stairwell, sliding the black umbrella securely through the side strap of his grey nylon office backpack. His fingers adjust the strap with casual haste. Dim ambient daylight falls through concrete breezeblocks, casting geometric soft shadows on the mottled grey floor. Camera stays steady with subtle breathing movement, focusing on the taut fabric of the bag and the clean, dry wooden crook handle of the umbrella. Restrained colour grade with desaturated tones and natural dust motes in the background. No text, subtitles, logo or watermark.",
-          "visual_direction": "उसकी अपनी सुविधा को प्राथमिकता देने और बात को टालने की आदत दिखाता है।",
-          "scene_index": 2
+          "video_prompt": "Close‑up shot tightly frames सिमा’s face at eye level, soft morning light creating a rim on her long dark hair. She holds the metal mug in her left hand, fingers lightly wrapped. Her lips articulate the grateful line with natural opening and closing, eyes bright, slight upward crinkle at corners. No other movement; background counter blurs. Lighting remains warm, muted tones, maintaining continuity with previous shot, and the mug glints faintly.",
+          "visual_direction": "Show सिमा’s appreciative response",
+          "scene_index": 2,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 3.04,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 3.2083,
+            "target_frames": 77,
+            "segments": [
+              {
+                "segment_id": "beat_02_line_01",
+                "speaker_id": "story_e6f43d1f_supporting",
+                "start_seconds": 0.08,
+                "end_seconds": 3.12,
+                "duration_seconds": 3.04
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 77
         },
         {
-          "video_prompt": "Vertical 9:16 low-angle medium shot, 35mm lens. A wide grey city footpath outside an office complex. The young man walks forward, his dry black leather shoes stepping onto completely dry, pale asphalt. Overhead, dark monsoon clouds drift without releasing rain, diffusing an even, flat silver-grey daylight across the concrete surroundings. He carries the unused, bone-dry black umbrella tucked under one arm. Slow backward dolly keeping him in frame from the chest down. The pavement has no puddles; the atmosphere is dry and heavy with unshed humidity. Desaturated urban palette. No text, subtitles, logo or watermark.",
-          "visual_direction": "छतरी लेने की निरर्थकता और मौसम का अप्रत्याशित सूखापन उजागर करता है।",
-          "scene_index": 3
+          "video_prompt": "Static medium‑wide shot shows अर्जन’s small work desk on the counter later that morning. The polished surface bears a faint condensation imprint where the metal mug once sat, now empty. अर्जन, still in blue shirt and khaki trousers, leans slightly forward, eyes scanning the vacant spot, brow slightly raised. Soft natural light from the window casts gentle patterns across the desk, background shelves remain out‑of‑focus, preserving the warm colour palette.",
+          "visual_direction": "Reveal the empty spot where the mug used to be",
+          "scene_index": 3,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 0,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 2.5417,
+            "target_frames": 61,
+            "segments": [],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 61
         },
         {
-          "video_prompt": "Vertical 9:16 close-up shot tilting down, 50mm lens. The wooden entrance door of the rented flat stands ajar. On the tiled floor sits an old Hindi newspaper, damp and rippled, holding a pair of soaked grey canvas sneakers with dark wet water stains along the fabric. Faint muddy water has seeped around the rubber soles onto the paper. Soft evening light from an interior bulb mixes with the dim dusk falling through the hallway. The camera tilts slowly down from the brass latch to settle firmly on the wet shoes. Realistic paper wrinkles, moist fabric texture, muted domestic evening tones. No text, subtitles, logo or watermark.",
-          "visual_direction": "एक घरेलू वस्तु के जरिए अनचाहे नुकसान का खुलासा करता है।",
-          "scene_index": 4
+          "video_prompt": "Close‑up of अर्जन’s face from a slightly high angle captures his shoulders hunched as he looks at the empty mug spot. Warm morning light highlights a subtle sheen on his forehead. His lips move to speak the line, opening naturally, jaw slightly dropping, eyes lingering on the imprint then dropping to his clenched hands. No exaggerated gestures; a faint frown conveys mild frustration, background blurred, maintaining the same muted colour tone.",
+          "visual_direction": "Show his internal reaction to the loss",
+          "scene_index": 4,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 3.88,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 4.0417,
+            "target_frames": 97,
+            "segments": [
+              {
+                "segment_id": "beat_04_line_01",
+                "speaker_id": "story_e6f43d1f_protagonist",
+                "start_seconds": 0.08,
+                "end_seconds": 3.96,
+                "duration_seconds": 3.88
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 97
         },
         {
-          "video_prompt": "Vertical 9:16 medium shot from behind, 50mm lens. Through an open glass balcony door, another young South Asian man stands against the balcony railing under a wet evening sky. His back is to the camera, wearing an undershirt and rolled-up trousers. His hands firmly wring out a soaked formal white shirt over the balcony edge, water dripping steadily onto the iron railing below. The city skyline in the background is blurred and glistening with recent heavy rain. Warm indoor tungsten light outlines his silhouette while the balcony remains in cool slate-blue dusk. Still, observant camera with subtle handheld realism. No text, subtitles, logo or watermark.",
-          "visual_direction": "दूसरे इंसान पर पड़े चुपचाप असर को बिना किसी नाटकीयता के सामने लाता है।",
-          "scene_index": 5
+          "video_prompt": "Medium shot from the side follows सिमा as she re‑enters the counter, holding the same metal mug, now bearing faint fingerprints. She moves left‑to‑right, glancing briefly at अर्जन, who remains seated. Her lips articulate an apologetic line, mouth opening gently, eyes lowered slightly, shoulders relaxed yet slightly tense. अर्जन watches, lips closed, his expression softening. Soft morning light continues, casting subtle shadows, and the colour grade stays warm, preserving continuity.",
+          "visual_direction": "She returns, offering the mug back, creating a subtle resolution",
+          "scene_index": 5,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 4.12,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 4.375,
+            "target_frames": 105,
+            "segments": [
+              {
+                "segment_id": "beat_05_line_01",
+                "speaker_id": "story_e6f43d1f_supporting",
+                "start_seconds": 0.08,
+                "end_seconds": 4.2,
+                "duration_seconds": 4.12
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 105
         },
         {
-          "video_prompt": "Vertical 9:16 medium shot, 35mm lens. In the entryway of the apartment, the first man’s hand places the bone-dry black umbrella back onto the wooden wall peg where it originally hung. He lets his hand fall to his side and stands motionless for a second, looking toward the quiet, dimly lit living room where a ceiling fan spins slowly above an empty table. Warm tungsten light casts long, soft shadows against the pale green wall. Camera pulls back very slowly into a wide composition, holding the stillness of the space. Restrained cinematic grade, soft grain, authentic quiet home interior. No text, subtitles, logo or watermark.",
-          "visual_direction": "कहानी को वस्तु की वापसी पर खत्म करता है, लेकिन टूटे हुए सहज तालमेल को रेखांकित करता है।",
-          "scene_index": 6
+          "video_prompt": "Wide shot captures the entire counter as अर्जन reaches toward a shelf, selecting a plain white ceramic mug. His right hand lifts the mug, fingers curling naturally; the camera tracks the motion smoothly, then pulls back to reveal him pouring coffee, steam rising. His lips form a quiet line, slight smile appearing, mouth moving minimally. Ambient store sounds persist, soft morning light bathes the scene, warm palette brightens subtly, maintaining visual continuity.",
+          "visual_direction": "Show his acceptance and subtle shift to a new routine",
+          "scene_index": 6,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 2.84,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 3.0417,
+            "target_frames": 73,
+            "segments": [
+              {
+                "segment_id": "beat_06_line_01",
+                "speaker_id": "story_e6f43d1f_protagonist",
+                "start_seconds": 0.08,
+                "end_seconds": 2.92,
+                "duration_seconds": 2.84
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 73
         }
       ],
-      "delivery_status": "planned",
-      "output_directory": "output/20261031_1826_1_reel-1"
+      "delivery_status": "delivered",
+      "output_directory": "output/20261120_0026_1_reel-1",
+      "delivery_steps": {
+        "video": true,
+        "cover": true,
+        "message": true,
+        "publish_kit": true
+      },
+      "delivery_completed_at_ist": "2026-11-20T23:40:39+05:30"
     }
   ],
   "policy": {
@@ -232,73 +718,17 @@
     "auto_facebook_publish": false,
     "max_reels": 1
   },
-  "dispatched_at_ist": "2026-10-31T14:07:11+05:30",
-  "dispatch_output": "Kernel version 2 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
-  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"RuntimeError\",\n  \"error\": \"ComfyUI node KSampler schema changed; unsupported inputs=['control_after_generate']; missing required inputs=[]; supported=['cfg', 'denoise', 'latent_image', 'model', 'negative', 'positive', 'sampler_name', 'scheduler', 'seed', 'steps']\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261031_115742\"\n}",
-  "gpu_retry_attempts": 1,
-  "gpu_retry_dispatched_at_ist": "2026-10-31T14:07:11+05:30",
-  "gpu_retry_reason": "ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.",
-  "active_finalizing_reel_id": "reel_01_115742",
-  "rhythm_repair_attempts": 1,
-  "rhythm_repair": {
-    "status": "partial_failed_at_scene_5",
-    "scene_index": 1,
-    "reported_original_ratio": 1.39,
-    "max_audio_tempo": 1.03,
-    "max_video_speed_ratio": 1.38,
-    "method": "pitch-preserving FFmpeg atempo on narration only; reuse completed Kaggle scene MP4s",
-    "requested_at_ist": "2026-11-01T17:08:08+05:30",
-    "new_kaggle_gpu_dispatch": false,
-    "followup_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.67x); it is outside the bounded voice-timing repair window."
-  },
-  "scene_voiceover_repair_attempts": 1,
-  "scene_voiceover_repair": {
-    "status": "completed_with_followup_scene6_repair",
-    "scene_index": 5,
-    "reported_original_ratio": 1.67,
-    "original_voiceover": "सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।",
-    "replacement_voiceover": "सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।",
-    "replacement_word_count": 8,
-    "method": "regenerate Scene 5 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA",
-    "requested_at_ist": "2026-11-01T17:45:51+05:30",
-    "new_kaggle_gpu_dispatch": false
-  },
-  "scene6_voiceover_repair_attempts": 1,
-  "scene6_voiceover_repair": {
-    "status": "completed_with_followup_rewrite",
-    "scene_index": 6,
-    "reported_original_ratio": 1.62,
-    "original_voiceover": "उसने सूखी छतरी टांग दी, मगर कमरा चुप ही रहा।",
-    "replacement_voiceover": "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।",
-    "replacement_word_count": 8,
-    "method": "regenerate Scene 6 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA",
-    "requested_at_ist": "2026-11-01T17:57:28+05:30",
-    "new_kaggle_gpu_dispatch": false
-  },
-  "scene6_voiceover_followup_attempts": 1,
-  "scene6_voiceover_followup": {
-    "status": "qa_rejected_again",
-    "scene_index": 6,
-    "reported_original_ratio": 1.54,
-    "original_voiceover": "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।",
-    "replacement_voiceover": "उसने छतरी टाँगी, मगर कमरा चुप रहा।",
-    "replacement_word_count": 7,
-    "method": "regenerate Scene 6 Hindi TTS only; reuse all six completed Kaggle MP4s; rerun full final QA; no GPU dispatch",
-    "requested_at_ist": "2026-11-01T18:28:51+05:30",
-    "new_kaggle_gpu_dispatch": false,
-    "final_qa_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.52x); it is outside the bounded voice-timing repair window."
-  },
-  "timing_rebuild_attempts": 1,
-  "timing_rebuild": {
-    "status": "finalize_failed",
-    "reel_id": "reel_01_115742",
-    "original_qa_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.52x); it is outside the bounded voice-timing repair window.",
-    "requested_at_ist": "2026-11-18T08:39:11+05:30",
-    "new_kaggle_gpu_dispatch": false,
-    "method": "reuse the completed six-scene Kaggle output; apply bounded video timing and audio padding in finalization",
-    "finished_at_ist": "2026-11-18T08:40:24+05:30",
-    "final_qa_rejection_reason": ""
-  },
-  "finalize_error": "RuntimeError: AI scene needs a 1.34s end hold, above the 1.20s quality limit; regenerate a longer scene or shorten the narration.",
-  "finalize_failed_at_ist": "2026-11-18T08:40:23+05:30"
+  "dispatched_at_ist": "2026-11-19T21:48:40+05:30",
+  "dispatch_output": "Kernel version 5 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
+  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"TimeoutError\",\n  \"error\": \"ComfyUI scene generation timed out after 2700s. Last status=None\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261119_074202\"\n}",
+  "gpu_retry_attempts": 2,
+  "gpu_retry_dispatched_at_ist": "2026-11-19T21:48:40+05:30",
+  "gpu_retry_reason": "Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained.",
+  "active_finalizing_reel_id": "reel_01_074202",
+  "finalize_failed_at_ist": "2026-11-20T00:26:16+05:30",
+  "last_seen_gpu_status": "COMPLETE",
+  "last_seen_gpu_status_at_ist": "2026-11-20T00:26:07+05:30",
+  "retry_finalization_count": 1,
+  "retry_requested_at_ist": "2026-11-20T23:39:35+05:30",
+  "completed_at_ist": "2026-11-20T23:40:42+05:30"
 }

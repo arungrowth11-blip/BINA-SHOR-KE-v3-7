@@ -13,8 +13,8 @@
   "comfyui_gguf_commit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
   "model_revisions": {
     "unet": "e1701a0fc7a708f6459531776ee6e08111417d49",
-    "clip": "text_encoders",
-    "vae": "vae"
+    "clip": "c4f60d30c55a624e35427060fdd217579a6c1d77",
+    "vae": "c4f60d30c55a624e35427060fdd217579a6c1d77"
   },
   "runtime_packages": {
     "torch": "2.11.0+cu128",

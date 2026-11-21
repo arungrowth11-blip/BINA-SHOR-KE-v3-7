@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "characters": [
+    {
+      "character_id": "story_e6f43d1f_protagonist",
+      "display_name": "अर्जुन",
+      "role": "protagonist",
+      "gender_presentation": "male",
+      "age_band": "adult",
+      "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+      "appearance": "mid‑30s Indian man, short hair, wearing a blue shirt and khaki trousers, holding a coffee mug",
+      "personality": "reserved, courteous, slightly anxious about routine",
+      "voice_profile_id": "hi_male_adult_charon",
+      "gemini_voice": "Charon",
+      "voice_status": "age_aligned_profile",
+      "asset_folder": "characters/story_e6f43d1f_protagonist",
+      "asset_status": "metadata_only_pending_3d_pilot",
+      "licence_review": {
+        "source": null,
+        "licence": null,
+        "commercial_use_verified": false
+      }
+    },
+    {
+      "character_id": "story_e6f43d1f_supporting",
+      "display_name": "सिमा",
+      "role": "supporting",
+      "gender_presentation": "female",
+      "age_band": "adult",
+      "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+      "appearance": "late‑20s Indian woman, long dark hair, wearing a green kurti and simple sandals, carrying a small tote bag",
+      "personality": "friendly, a bit forgetful, appreciative",
+      "voice_profile_id": "hi_female_adult_aoede",
+      "gemini_voice": "Aoede",
+      "voice_status": "age_aligned_profile",
+      "asset_folder": "characters/story_e6f43d1f_supporting",
+      "asset_status": "metadata_only_pending_3d_pilot",
+      "licence_review": {
+        "source": null,
+        "licence": null,
+        "commercial_use_verified": false
+      }
+    }
+  ]
+}

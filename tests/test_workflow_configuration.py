@@ -26,7 +26,7 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('Repair borderline narration rhythm using the same AI scenes', body)
         self.assertIn("[ \"$POLL_ACTION\" = 'repair-rhythm' ]", body)
         self.assertIn('repair-rhythm-finalize', body)
-        self.assertIn('Retry the same Reel after the KSampler schema fix', body)
+        self.assertIn('Retry the same Reel after a narrowly classified worker fix', body)
         self.assertIn('refusing to silently skip GPU work', body)
         pipeline = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
         self.assertIn('def retry_failed_gpu()', pipeline)
@@ -61,6 +61,10 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertEqual(body.count(expected), 2)
         self.assertIn('Quick remote Kaggle status check (minimal CLI only)', body)
         self.assertIn('Install dependencies and configure private Kaggle CLI', body)
+        director = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
+        self.assertIn('python -m pip install --disable-pip-version-check --upgrade --no-cache-dir "six>=1.16.0,<2" kaggle', director)
+        self.assertIn('Kaggle CLI import preflight passed', director)
+        self.assertIn('from kaggle.cli import main', director)
 
     def test_scene6_voiceover_repair_is_strictly_guarded_and_reuses_existing_scenes(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
@@ -91,6 +95,37 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('उसने छतरी टाँगी, मगर कमरा चुप रहा।', pipeline)
         self.assertIn("'new_kaggle_gpu_dispatch': False", pipeline)
 
+    def test_finalizer_skips_redundant_apt_installs_and_uses_only_required_fonts(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        setup = body[body.index('Install only missing FFmpeg and Devanagari prerequisites'):]
+        setup = setup[:setup.index('Restore local Hindi narration ASR model cache')]
+        self.assertIn('if ! command -v ffmpeg', setup)
+        self.assertIn('ffmpeg -filters 2>/dev/null | grep -q subtitles', setup)
+        self.assertIn('NotoSansDevanagari-Regular.ttf', setup)
+        self.assertIn('NotoSansDevanagari-Bold.ttf', setup)
+        self.assertIn('NotoSans-Regular.ttf', setup)
+        self.assertIn('NotoSans-Bold.ttf', setup)
+        self.assertIn('fonts-noto-core', setup)
+        self.assertIn('tesseract-ocr', setup)
+        self.assertIn('tesseract-ocr-hin', setup)
+        self.assertIn('tesseract --list-langs', setup)
+        self.assertNotIn('fonts-noto-extra', setup)
+        self.assertIn('--no-install-recommends', setup)
+        self.assertIn('skipping apt update/install', setup)
+        self.assertIn('cache: pip', body)
+        self.assertIn('cache-dependency-path: |', body)
+
+    def test_offline_quality_gate_installs_hindi_tesseract_for_ocr_checks(self):
+        body = (ROOT / '.github' / 'workflows' / 'quality-gates.yml').read_text(encoding='utf-8')
+        self.assertIn('ffmpeg tesseract-ocr tesseract-ocr-hin', body)
+        self.assertIn('tesseract --list-langs | grep -qx hin', body)
+
+    def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+        self.assertIn('active = state.get("status") in allowed', body)
+        self.assertNotIn('"delivered"', body[body.index('retry_states ='):body.index('qa_reason =')])
+
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
         self.assertIn('cron: "17 */6 * * *"', body)
@@ -99,6 +134,12 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('scripts/telegram_feedback_sync.py', body)
         self.assertIn('data/telegram_state.json data/history.json data/performance_log.csv', body)
         self.assertIn('group: bina-shor-ke-studio', body)
+
+    def test_kaggle_status_timestamp_is_expanded_by_shell(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        self.assertIn('echo "status_checked_at_utc=${status_checked_at_utc}" >> "$GITHUB_OUTPUT"', body)
+        self.assertIn('echo "KAGGLE_STATUS_CHECKED_AT_UTC=${status_checked_at_utc}"', body)
+        self.assertNotIn(r'\${status_checked_at_utc}', body)
 
     def test_gpu_poller_is_bounded_and_has_zero_paid_fallback(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
@@ -122,6 +163,20 @@ class WorkflowConfigTests(unittest.TestCase):
         runner = (ROOT / 'scripts' / 'studio_pipeline.py').read_text(encoding='utf-8')
         self.assertIn("'paid_fallback': False", runner)
         self.assertIn("'auto_facebook_publish': False", runner)
+
+    def test_queued_feature_dispatch_refreshes_latest_state_before_pending_guard(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        refresh_name = '      - name: Refresh queued feature-branch dispatch to latest state'
+        pending_name = '      - name: Check whether a GPU batch actually needs polling (stdlib only)'
+        self.assertIn(refresh_name, body)
+        self.assertLess(body.index(refresh_name), body.index(pending_name))
+        refresh = body[body.index(refresh_name):body.index(pending_name)]
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/voice-first-3d-foundation'", refresh)
+        self.assertIn('git fetch --no-tags origin "$GITHUB_REF"', refresh)
+        self.assertIn('git reset --hard FETCH_HEAD', refresh)
+        self.assertIn('group: bina-shor-ke-studio', body)
+        self.assertIn('cancel-in-progress: false', body)
+        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

@@ -54,6 +54,9 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "reel_id": "reel_01_123456",
                 "job_id": "job-123",
                 "qa_passed": True,
+                "visual_qa_status": "reviewed",
+                "motion_diagnostics_status": "passed",
+                "metadata_ocr_status": "passed",
                 "telegram_delivered": True,
             }]
         }
@@ -82,7 +85,9 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "title": "दरवाज़े पर रखा खाना",
                 "status": "ready_for_manual_publish_not_confirmed_published",
                 "reel_id": "reel_01_pilot", "job_id": "pilot-job",
-                "qa_passed": True, "telegram_delivered": True,
+                "qa_passed": True, "visual_qa_status": "reviewed",
+                "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
+                "telegram_delivered": True,
             }]}), encoding="utf-8")
             lock_path = base / "toolchain_lock.json"
             lock_path.write_text(json.dumps({"gpu_benchmark": {
@@ -172,13 +177,36 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
             self.assertEqual(saved["job_id"], "saved-checkpoint-job")
 
     def test_reel_qa_and_telegram_delivery_guards_fail_closed(self):
-        studio_pipeline.ensure_reel_qa_passed({"technical": {"technical_checks_passed": True}})
+        valid_visual = {
+            "status": "reviewed",
+            "critical_issue": False,
+            "missing_required_scores": [],
+            "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+            "metadata_ocr_qa": {"status": "passed"},
+        }
+        studio_pipeline.ensure_reel_qa_passed({"technical": {
+            "technical_checks_passed": True,
+            "rendered_frame_visual_qa": valid_visual,
+        }})
         with self.assertRaisesRegex(RuntimeError, "technical QA"):
             studio_pipeline.ensure_reel_qa_passed({"technical": {"technical_checks_passed": False}})
         with self.assertRaisesRegex(RuntimeError, "visual QA"):
             studio_pipeline.ensure_reel_qa_passed({"technical": {
                 "technical_checks_passed": True,
                 "rendered_frame_visual_qa": {"status": "warning"},
+            }})
+        with self.assertRaisesRegex(RuntimeError, "Full-video motion diagnostics"):
+            studio_pipeline.ensure_reel_qa_passed({"technical": {
+                "technical_checks_passed": True,
+                "rendered_frame_visual_qa": {
+                    **valid_visual,
+                    "full_video_motion_diagnostics": {"status": "review_required", "full_video_scanned": True},
+                },
+            }})
+        with self.assertRaisesRegex(RuntimeError, "metadata OCR"):
+            studio_pipeline.ensure_reel_qa_passed({"technical": {
+                "technical_checks_passed": True,
+                "rendered_frame_visual_qa": {**valid_visual, "metadata_ocr_qa": {"status": "not_completed"}},
             }})
         studio_pipeline.ensure_complete_telegram_delivery({
             "video": True, "cover": True, "message": True, "publish_kit": True

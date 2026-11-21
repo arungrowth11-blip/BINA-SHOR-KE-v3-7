@@ -1,15 +1,22 @@
 # BINA SHOR KE — AI Cinematic Story Factory v3.7 P0 Reliability
 
-A private GitHub Actions + Kaggle free-GPU pipeline for original Hindi faceless Reels. The target cadence is three Reels/week, but the workflow requires a successful one-Reel GPU qualification before a weekly batch. It automates editorial planning, multi-provider text generation and critique, Wan2.2 video scene generation through ComfyUI, Hindi TTS, branded post-production, local Hindi ASR, full-video black/freeze diagnostics, beat-stratified visual QA, scene checkpoint recovery and Telegram delivery. **Facebook publishing stays manual.**
+A private GitHub Actions + Kaggle free-GPU pipeline for original Hindi faceless Reels. The workflow supports a voice-first screenplay path: lock the cast and complete dialogue, generate and measure each speaker's Hindi WAV, write the final shot prompts from that audio timeline, then dispatch duration-aware video generation. The current production renderer remains Wan2.2 through ComfyUI; a separate Blender 3D pilot is experimental. It also automates editorial critique, branded post-production, ASR/visual QA, scene checkpoint recovery and private Telegram delivery. **Facebook publishing stays manual.**
 
 ## Architecture
 
 - **Primary writer:** Gemini 3.8 Flash Free Tier.
 - **Optional text failover / independent editor:** Groq `openai/gpt-oss-120b` Free, Mistral `ministral-8b-latest` in Studio Free mode, and Cloudflare Workers AI `@cf/meta/llama-3.1-8b-instruct` only with explicit Free-plan opt-in. Requests fail over sequentially; there is no paid route or parallel prompt fan-out.
-- **Narration:** Gemini 3.8 Flash-Lite TTS remains the only qualified production Hindi voice. Local Whisper ASR checks transcript alignment; it is not a TTS fallback.
-- **Video:** Wan2.2 TI2V-5B Q4_K_M GGUF on Kaggle free GPU through ComfyUI. Model output 704×1280 / 24fps; final render is upscaled to 1080×1920.
+- **Narration:** Gemini 3.8 Flash-Lite TTS generates separate character dialogue turns with speaker-specific voice IDs. Each WAV is validated and measured before the final shot prompts and Wan video dispatch. Voice mappings are candidates requiring Hindi listening review; they are not guarantees of a character's exact age or acting quality.
+- **Video:** Wan2.2 TI2V-5B Q4_K_M GGUF on Kaggle free GPU through ComfyUI. The voice-first path selects per-beat frame counts from actual audio at 24 FPS; the existing 704×1280 model output is upscaled to 1080×1920.
 - **Post:** FFmpeg/Pillow, custom typography, subtitles, overlays, cover and locally synthesized ambience.
 - **Delivery/learning:** private Telegram; `/approve` or `/reject` records the final owner decision; manual publishing; `/published` and `/insights` feed measured history.
+
+## Voice-first dialogue and 3D pilot
+
+- Script/cast and dialogue turns are locked first. Each speaker turn gets its own TTS request and a cache key that includes exact text, acting direction and voice ID.
+- Final video prompts are generated only after WAV durations and speaker timestamps are measured. Wan shot frames follow the actual timeline; dialogue is never shortened to fit a fixed 3.375-second clip.
+- The persistent character registry stores metadata and explicit reuse IDs. Binary Blender assets remain outside Git; each new Reel gets its own cast identity unless reuse is deliberately selected.
+- Blender is an isolated stylised two-character pilot only. Its current mouth movement is amplitude-driven, not phoneme-accurate Hindi lip-sync. Wan2.2 remains the active production backend until the Blender pilot passes the GPU/render/quality and three-shadow-run gates in [the design note](docs/VOICE_FIRST_3D_PILOT.md).
 
 ## Storytelling quality system
 
