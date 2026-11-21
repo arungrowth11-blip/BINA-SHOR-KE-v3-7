@@ -581,51 +581,86 @@ def _sha256(path: Path) -> str:
 
 
 def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
-    """Find valid scene files from a possibly failed Kaggle output bundle."""
+    """Inventory verified MP4 clips or first-class 2.5D PNG stills from a failed Kaggle run."""
     checkpoint_path = root / 'gpu_checkpoint_manifest.json'
     saved = load_json(checkpoint_path, {}) if checkpoint_path.exists() else {}
     saved_items = {
         (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
         for x in saved.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
     }
-    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) if (root / 'gpu_output_manifest.json').exists() else {}
+    worker_path = root / 'gpu_output_manifest.json'
+    worker_manifest = load_json(worker_path, {}) if worker_path.exists() else {}
     worker_items = {
         (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
         for x in worker_manifest.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
     }
-    collected = []
+    primary_image_first = (
+        worker_manifest.get('generation_mode') == 'still_image_first'
+        or any(
+            str(reel.get('concept', {}).get('visual_pipeline', '')) == producer.story_engine.PRIMARY_25D_PIPELINE
+            for reel in pending.get('reels', [])
+        )
+    )
+    collected: list[dict] = []
     for reel in pending.get('reels', []):
         reel_id = str(reel.get('reel_id', ''))
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', reel_id):
             continue
         for index in range(1, len(reel.get('beats', [])) + 1):
-            candidates = [root / reel_id / f'scene_{index:02d}.mp4']
-            candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.mp4'))
-            candidates.extend(x for x in root.rglob(f'scene_{index:02d}.mp4') if reel_id in str(x))
-            source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
-            if source is None:
-                continue
-            try:
-                duration = producer.probe_duration(source)
-            except Exception:
-                continue
-            if not 2.5 <= duration <= 8.0:
-                continue
             key = (reel_id, index)
             old = saved_items.get(key, worker_items.get(key, {}))
-            collected.append({
-                'reel_id': reel_id, 'scene_index': index, 'file': f'{reel_id}__scene_{index:02d}.mp4',
-                'source_path': str(source), 'bytes': source.stat().st_size, 'sha256': _sha256(source),
-                'duration_seconds': round(duration, 3),
-                'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
-                'prompt_id': old.get('prompt_id'),
-            })
-    # One scene may appear in the direct location and a flattened CLI output; retain one row per key.
-    deduped = {}
+            if primary_image_first:
+                candidates = [root / reel_id / f'scene_{index:02d}.png']
+                candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.png'))
+                candidates.extend(x for x in root.rglob(f'scene_{index:02d}.png') if reel_id in str(x))
+                source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
+                if source is None:
+                    continue
+                try:
+                    with Image.open(source) as image:
+                        image.verify()
+                    with Image.open(source) as image:
+                        width, height = image.size
+                except Exception:
+                    continue
+                if (width, height) != (704, 1280):
+                    continue
+                collected.append({
+                    'reel_id': reel_id, 'scene_index': index,
+                    'file': f'{reel_id}__scene_{index:02d}.png',
+                    'source_path': str(source), 'bytes': source.stat().st_size,
+                    'sha256': _sha256(source), 'media_type': 'image/png',
+                    'width': width, 'height': height,
+                    'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
+                    'prompt_id': old.get('prompt_id'),
+                })
+            else:
+                candidates = [root / reel_id / f'scene_{index:02d}.mp4']
+                candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.mp4'))
+                candidates.extend(x for x in root.rglob(f'scene_{index:02d}.mp4') if reel_id in str(x))
+                source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
+                if source is None:
+                    continue
+                try:
+                    duration = producer.probe_duration(source)
+                except Exception:
+                    continue
+                if not 2.5 <= duration <= 8.0:
+                    continue
+                collected.append({
+                    'reel_id': reel_id, 'scene_index': index,
+                    'file': f'{reel_id}__scene_{index:02d}.mp4',
+                    'source_path': str(source), 'bytes': source.stat().st_size,
+                    'sha256': _sha256(source), 'media_type': 'video/mp4',
+                    'duration_seconds': round(duration, 3),
+                    'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
+                    'prompt_id': old.get('prompt_id'),
+                })
+    # One asset may exist both in the worker inventory and a flattened CLI output; retain one per scene.
+    deduped: dict[tuple[str, int], dict] = {}
     for item in collected:
         deduped[(item['reel_id'], item['scene_index'])] = item
     return list(deduped.values())
-
 
 def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
     expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
@@ -647,7 +682,7 @@ def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
 
 
 def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
-    """Upload only verified MP4 scene checkpoints to a private Kaggle dataset."""
+    """Upload hash-verified scene checkpoints (FLUX stills or legacy MP4) privately to Kaggle."""
     scenes = collect_checkpoint_clips(root, pending)
     if not scenes:
         return None
