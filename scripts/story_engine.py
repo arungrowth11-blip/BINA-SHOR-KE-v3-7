@@ -334,7 +334,7 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
         "primary_2_5d_share_target": 1.0 - HERO_VIDEO_SHARE,
         "hero_video_share_target": HERO_VIDEO_SHARE,
         "visual_generation_mode": "image_first_flux_stills",
-        "image_generation_count": source_beat_count,
+        "image_generation_count": len(beat_durations),
         "story_type": policy["story_type"],
         "measured_duration_seconds": measured["measured_seconds"],
         "source_beat_count": len(beat_durations),
