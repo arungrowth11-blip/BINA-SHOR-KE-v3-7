@@ -1083,6 +1083,64 @@ class StudioPipelineTests(unittest.TestCase):
         self.assertEqual(studio_pipeline.self_test(), 0)
 
 
+    def test_image_toolchain_lock_qualifies_only_from_complete_measured_render(self):
+        revisions = {
+            "unet": "c" * 40,
+            "clip_l": "d" * 40,
+            "t5xxl": "e" * 40,
+            "vae": "f" * 40,
+            "depth": "1" * 40,
+        }
+        manifest = {
+            "generation_mode": "still_image_first",
+            "status": "complete",
+            "comfyui_commit": "a" * 40,
+            "comfyui_gguf_commit": "b" * 40,
+            "model_revisions": revisions,
+            "runtime_packages": {"torch": "2.10.0+cu128"},
+            "total_elapsed_seconds": 3600.0,
+            "scenes": [{"generation_elapsed_seconds": 100.0} for _ in range(6)],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            image_lock_path = Path(folder) / "image_toolchain_lock.json"
+            legacy_lock_path = Path(folder) / "toolchain_lock.json"
+            legacy_lock_path.write_text(json.dumps({"status": "locked", "model_revisions": {"unet": "legacy"}}))
+            with patch.object(studio_pipeline, "IMAGE_TOOLCHAIN_LOCK", image_lock_path), patch.object(
+                studio_pipeline, "TOOLCHAIN_LOCK", legacy_lock_path
+            ):
+                lock = studio_pipeline.verify_or_lock_image_toolchain(manifest, "image_job_01")
+                self.assertEqual(lock["generation_mode"], "still_image_first")
+                self.assertEqual(lock["gpu_benchmark"]["sample_scene_count"], 6)
+                self.assertEqual(lock["gpu_benchmark"]["estimated_3_reel_hours"], 4.5)
+                self.assertTrue(lock["gpu_benchmark"]["qualified"])
+                legacy_after = json.loads(legacy_lock_path.read_text(encoding="utf-8"))
+                self.assertEqual(legacy_after["model_revisions"]["unet"], "legacy")
+
+                drifted = json.loads(json.dumps(manifest))
+                drifted["model_revisions"]["unet"] = "9" * 40
+                with self.assertRaisesRegex(RuntimeError, "Image model revision drift"):
+                    studio_pipeline.verify_or_lock_image_toolchain(drifted, "image_job_02")
+
+    def test_image_toolchain_does_not_qualify_incomplete_or_unmeasured_output(self):
+        incomplete = {
+            "generation_mode": "still_image_first",
+            "status": "running",
+            "comfyui_commit": "a" * 40,
+            "comfyui_gguf_commit": "b" * 40,
+            "model_revisions": {
+                "unet": "c" * 40, "clip_l": "d" * 40, "t5xxl": "e" * 40,
+                "vae": "f" * 40, "depth": "1" * 40,
+            },
+            "runtime_packages": {},
+            "total_elapsed_seconds": 3600.0,
+            "scenes": [{"generation_elapsed_seconds": 100.0} for _ in range(6)],
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            lock_path = Path(folder) / "image_toolchain_lock.json"
+            with patch.object(studio_pipeline, "IMAGE_TOOLCHAIN_LOCK", lock_path):
+                lock = studio_pipeline.verify_or_lock_image_toolchain(incomplete, "image_job_running")
+        self.assertNotIn("gpu_benchmark", lock)
+
     def test_image_first_checkpoint_collector_keeps_hash_verified_png_stills(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as folder:
