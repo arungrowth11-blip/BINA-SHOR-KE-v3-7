@@ -268,8 +268,7 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
             'deliver the video/cover/review message/publish kit to Telegram, and send '
             '/approve title=Exact Reel Title. Then run Telegram Feedback Sync and retry plan-week.'
         )
-    image_lock = load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {}
-    benchmark = image_lock.get('gpu_benchmark') if isinstance(image_lock, dict) else None
+    benchmark = saved_lock.get('gpu_benchmark') if isinstance(saved_lock, dict) else None
     if not isinstance(benchmark, dict) or benchmark.get('qualified') is not True:
         raise RuntimeError(
             'Weekly 3-Reel production is locked until the image-first FLUX + depth-parallax '
@@ -380,7 +379,8 @@ def plan_week(reel_count: int = 3) -> int:
         log(f'Feedback sync skipped; planning still uses saved history: {exc}')
 
     if reel_count == 3:
-        require_weekly_qualification(history, saved_lock)
+        image_lock = load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {}
+        require_weekly_qualification(history, image_lock)
 
     rotation = int(history.get('generated_count', 0)) // 3
     slots = producer.next_post_slots(reel_count, rotation=rotation, history=history)
