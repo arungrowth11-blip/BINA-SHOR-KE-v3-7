@@ -29,39 +29,43 @@ def build_editorial_filter_graph(
     if not math.isfinite(video_hold_duration) or video_hold_duration < 0:
         raise ValueError("Video hold duration must be finite and non-negative.")
 
-    hero_count = sum(1 for shot in shots if shot.get("source") == "hero_video")
-    parallax_count = sum(1 for shot in shots if shot.get("source") == "depth_parallax")
-    if hero_count + parallax_count != len(shots):
-        raise ValueError("Editorial shot source must be hero_video or depth_parallax.")
+    counts = {
+        "hero_video": sum(1 for shot in shots if shot.get("source") == "hero_video"),
+        "depth_parallax": sum(1 for shot in shots if shot.get("source") == "depth_parallax"),
+    }
+    if sum(counts.values()) != len(shots) or not any(counts.values()):
+        raise ValueError("Editorial shots must use hero_video and/or depth_parallax sources.")
+
+    input_indexes: dict[str, int] = {}
+    next_input = 0
+    for source in ("hero_video", "depth_parallax"):
+        if counts[source] > 0:
+            input_indexes[source] = next_input
+            next_input += 1
 
     parts: list[str] = []
-    labels: list[str] = []
-    for input_index, count, prefix in ((0, hero_count, "h"), (1, parallax_count, "p")):
+    for source in ("hero_video", "depth_parallax"):
+        count = counts[source]
         if count == 0:
             continue
-        filters = [f"[{input_index}:v]setpts=PTS*{video_speed_ratio:.7f}"]
+        prefix = "h" if source == "hero_video" else "p"
+        filters = [f"[{input_indexes[source]}:v]setpts=PTS*{video_speed_ratio:.7f}"]
         if video_hold_duration > 0.001:
             filters.append(f"tpad=stop_mode=clone:stop_duration={video_hold_duration:.4f}")
         if count > 1:
             outputs = "".join(f"[{prefix}{index}]" for index in range(count))
             filters.append(f"split={count}{outputs}")
         else:
-            # Output labels belong to the preceding filter; inserting them as
-            # a comma-separated item creates an invalid empty FFmpeg filter.
             filters[-1] += f"[{prefix}0]"
         parts.append(",".join(filters))
-    source_indexes = {"hero_video": 0, "depth_parallax": 0}
-    hero_position = 0
-    parallax_position = 0
 
+    positions = {"hero_video": 0, "depth_parallax": 0}
+    labels: list[str] = []
     for index, shot in enumerate(shots):
         source = str(shot.get("source") or "")
         prefix = "h" if source == "hero_video" else "p"
-        local_index = hero_position if prefix == "h" else parallax_position
-        if prefix == "h":
-            hero_position += 1
-        else:
-            parallax_position += 1
+        local_index = positions[source]
+        positions[source] += 1
         start = float(shot.get("start_seconds", 0.0))
         end = float(shot.get("end_seconds", 0.0))
         duration = end - start
@@ -89,8 +93,8 @@ def build_editorial_filter_graph(
 
 
 def render_editorial_montage(
-    hero_video: Path,
-    depth_parallax_video: Path,
+    hero_video: Path | None,
+    depth_parallax_video: Path | None,
     destination: Path,
     shots: list[dict[str, Any]],
     *,
@@ -99,8 +103,18 @@ def render_editorial_montage(
     video_hold_duration: float = 0.0,
     fps: int = 30,
 ) -> Path:
-    if not hero_video.is_file() or not depth_parallax_video.is_file():
-        raise FileNotFoundError("Both source hero video and depth-parallax video are required.")
+    sources = {str(shot.get("source") or "") for shot in shots}
+    if not sources or not sources.issubset({"hero_video", "depth_parallax"}):
+        raise ValueError("Editorial montage contains an unsupported or missing source type.")
+    input_paths: list[Path] = []
+    if "hero_video" in sources:
+        if hero_video is None or not hero_video.is_file():
+            raise FileNotFoundError("Editorial shots require a valid hero-video source.")
+        input_paths.append(hero_video)
+    if "depth_parallax" in sources:
+        if depth_parallax_video is None or not depth_parallax_video.is_file():
+            raise FileNotFoundError("Editorial shots require a valid depth-parallax source.")
+        input_paths.append(depth_parallax_video)
     if not math.isfinite(float(target_duration)) or target_duration <= 0:
         raise ValueError("Montage target duration must be finite and positive.")
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -110,14 +124,15 @@ def render_editorial_montage(
         shots, fps=fps, video_speed_ratio=video_speed_ratio,
         video_hold_duration=video_hold_duration,
     )
-    command = [
-        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
-        "-i", str(hero_video), "-i", str(depth_parallax_video),
+    command = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y"]
+    for input_path in input_paths:
+        command.extend(["-i", str(input_path)])
+    command.extend([
         "-filter_complex", graph, "-map", "[outv]", "-an",
         "-t", f"{target_duration:.4f}", "-r", str(fps),
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "19",
         "-pix_fmt", "yuv420p", "-movflags", "+faststart", str(temporary),
-    ]
+    ])
     result = subprocess.run(command, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=900)
     if result.returncode:
         temporary.unlink(missing_ok=True)
