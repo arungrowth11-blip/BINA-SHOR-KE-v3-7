@@ -277,7 +277,7 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
     total_shots = sum(counts)
     # 2.5D is the default visual language. Reserve a small number of high-value
     # hook/turn/payoff cuts for the Wan source motion; do not let video dominate.
-    hero_count = max(1, int(round(total_shots * HERO_VIDEO_SHARE)))
+    hero_count = max(1, int(total_shots * HERO_VIDEO_SHARE))
     if hero_count == 1:
         hero_indices = {total_shots - 1}
     else:
