@@ -37,6 +37,76 @@ STORY_TYPE_ALIASES = {
 }
 
 
+PRIMARY_25D_PIPELINE = "primary_25d_motion_comic_v2"
+LEGACY_25D_PIPELINE = "hybrid_25d_motion_comic_v1"
+HERO_VIDEO_SHARE = 0.20
+
+# Distinct art-direction profiles prevent every story from using the same flat visual grammar.
+VISUAL_STYLE_PROFILES: dict[str, dict[str, str]] = {
+    "emotional": {
+        "profile_id": "warm_indian_melodrama",
+        "palette": "warm tungsten amber, muted earth, monsoon teal shadows, restrained skin tones",
+        "lighting": "motivated window light and warm practical lamps, soft falloff, lived-in interiors",
+        "camera_grammar": "gentle push-ins, intimate reaction close-ups, slow lateral drifts, held emotional payoff",
+        "surface_language": "semi-painterly Indian graphic-novel illustration, tactile brush grain, restrained ink contours",
+    },
+    "suspense": {
+        "profile_id": "monsoon_nocturne",
+        "palette": "indigo night, cold blue-green reflections, small warm practical highlights",
+        "lighting": "directional low-key pools, controlled negative space, motivated practical sources",
+        "camera_grammar": "measured lateral tracking, asymmetric framing, clue inserts, reveal push-in",
+        "surface_language": "semi-painterly Indian noir graphic novel, textured shadows, crisp focal hierarchy",
+    },
+    "twist": {
+        "profile_id": "reveal_contrast",
+        "palette": "neutral warm setup shifting to a restrained cool reveal palette",
+        "lighting": "clear subject separation, motivated contrast changes, readable object highlights",
+        "camera_grammar": "fast clue inserts, reaction reframes, controlled reveal push-in, short payoff hold",
+        "surface_language": "clean illustrated cinema, tactile linework, controlled contrast, no photoreal skin",
+    },
+    "comedy": {
+        "profile_id": "bright_everyday_comedy",
+        "palette": "warm daylight, lively but restrained Indian market and café colours",
+        "lighting": "clear soft daylight, readable faces and props, crisp contact shadows",
+        "camera_grammar": "quick motivated reframes, medium two-shots, prop inserts, punchline reaction close-up",
+        "surface_language": "expressive Indian editorial illustration, readable silhouettes, subtly exaggerated expressions",
+    },
+    "poetry": {
+        "profile_id": "ink_blue_poetry",
+        "palette": "deep ink blue, charcoal, muted silver, small amber practical glows",
+        "lighting": "soft edge light, rain reflections, atmospheric haze, high negative space",
+        "camera_grammar": "slow floating push, restrained drift, metaphor detail inserts, deliberate final hold",
+        "surface_language": "moody painterly graphic novel, delicate texture, clean negative space for Devanagari captions",
+    },
+    "insight": {
+        "profile_id": "natural_observation",
+        "palette": "natural warm neutrals, muted greens, balanced daylight",
+        "lighting": "soft motivated daylight, realistic household practicals, gentle contrast",
+        "camera_grammar": "observational medium shots, small lateral moves, purposeful detail inserts",
+        "surface_language": "grounded Indian editorial illustration, natural proportions, understated texture",
+    },
+}
+
+CAMERA_GRAMMAR: dict[str, tuple[tuple[str, float, float, float], ...]] = {
+    "hook": (("punch_in", 1.16, 0.50, 0.50), ("reveal_left", 1.10, 0.38, 0.50)),
+    "context": (("wide_drift_right", 1.04, 0.62, 0.50), ("gentle_push", 1.08, 0.50, 0.50)),
+    "conflict": (("reaction_close", 1.18, 0.52, 0.48), ("slow_push", 1.12, 0.50, 0.52)),
+    "escalation": (("track_left", 1.08, 0.38, 0.50), ("track_right", 1.08, 0.62, 0.50), ("detail_insert", 1.20, 0.56, 0.62)),
+    "turn": (("reveal_push", 1.20, 0.50, 0.50), ("clue_insert", 1.18, 0.58, 0.58)),
+    "payoff": (("emotional_hold", 1.12, 0.50, 0.48), ("slow_pull_frame", 1.04, 0.50, 0.52)),
+}
+
+
+def is_25d_pipeline(value: Any) -> bool:
+    """Recognize current and legacy 2.5D manifests without breaking recoveries."""
+    return str(value or "") in {PRIMARY_25D_PIPELINE, LEGACY_25D_PIPELINE}
+
+
+def visual_style_for(story_type: str) -> dict[str, str]:
+    normalized = normalise_story_type(story_type)
+    return dict(VISUAL_STYLE_PROFILES[normalized])
+
+
 def normalise_story_type(value: Any) -> str:
     raw = str(value or "emotional").strip().lower().replace("-", "_").replace(" ", "_")
     raw = STORY_TYPE_ALIASES.get(raw, raw)
@@ -205,7 +275,9 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
 
     beat_roles = ("hook", "context", "conflict", "escalation", "turn", "payoff")
     total_shots = sum(counts)
-    hero_count = max(1, int(round(total_shots * 0.25)))
+    # 2.5D is the default visual language. Reserve a small number of high-value
+    # hook/turn/payoff cuts for the Wan source motion; do not let video dominate.
+    hero_count = max(1, int(round(total_shots * HERO_VIDEO_SHARE)))
     if hero_count == 1:
         hero_indices = {total_shots - 1}
     else:
@@ -213,6 +285,7 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
             int(round(index * (total_shots - 1) / (hero_count - 1)))
             for index in range(hero_count)
         }
+    style_profile = visual_style_for(policy["story_type"])
     shots: list[dict[str, Any]] = []
     reel_cursor = 0.0
     shot_number = 0
@@ -226,7 +299,8 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
                 subrole = ("establishing", "reaction", "detail")[min(cut_index, 2)]
             else:
                 subrole = "continuous"
-            zoom = 1.0 if cut_index == 0 else (1.10 if cut_index == 1 else 1.14)
+            camera_options = CAMERA_GRAMMAR[role]
+            camera_move, zoom, crop_x, crop_y = camera_options[(cut_index + beat_index - 1) % len(camera_options)]
             source = "hero_video" if shot_number - 1 in hero_indices else "depth_parallax"
             start = local_cursor
             end = duration if cut_index == count - 1 else (cut_index + 1) * cut_duration
@@ -237,12 +311,14 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
                 "story_role": role,
                 "coverage": subrole,
                 "source": source,
+                "camera_move": camera_move,
                 "start_seconds": round(start, 4),
                 "end_seconds": round(end, 4),
                 "duration_seconds": round(end - start, 4),
                 "zoom": zoom,
-                "crop_x": 0.5,
-                "crop_y": 0.5,
+                "crop_x": crop_x,
+                "crop_y": crop_y,
+                "style_profile_id": style_profile["profile_id"],
             })
             local_cursor = end
         reel_cursor += duration
@@ -251,12 +327,17 @@ def build_editorial_shot_plan(beat_durations: list[float], story_type: str) -> d
         raise RuntimeError("Editorial shot plan does not preserve the complete measured audio duration.")
     return {
         "schema_version": 1,
-        "visual_pipeline": "hybrid_25d_motion_comic_v1",
+        "visual_pipeline": PRIMARY_25D_PIPELINE,
+        "visual_style_profile": style_profile,
+        "primary_2_5d_share_target": 1.0 - HERO_VIDEO_SHARE,
+        "hero_video_share_target": HERO_VIDEO_SHARE,
         "story_type": policy["story_type"],
         "measured_duration_seconds": measured["measured_seconds"],
         "source_beat_count": len(beat_durations),
         "editorial_shot_count": len(shots),
         "hero_video_shot_count": sum(1 for shot in shots if shot["source"] == "hero_video"),
+        "hero_video_share_actual": round(sum(1 for shot in shots if shot["source"] == "hero_video") / len(shots), 4),
+        "depth_parallax_share_actual": round(sum(1 for shot in shots if shot["source"] == "depth_parallax") / len(shots), 4),
         "depth_parallax_shot_count": sum(1 for shot in shots if shot["source"] == "depth_parallax"),
         "gpu_generation_count": len(beat_durations),
         "gpu_generation_saving_claim": False,
