@@ -111,6 +111,7 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
 
             with patch.object(studio_pipeline, "PENDING", pending_path), \
                  patch.object(studio_pipeline, "TOOLCHAIN_LOCK", lock_path), \
+                 patch.object(studio_pipeline, "IMAGE_TOOLCHAIN_LOCK", image_lock_path), \
                  patch.object(studio_pipeline.producer, "HISTORY_PATH", history_path), \
                  patch.object(studio_pipeline.producer, "require_env"), \
                  patch.object(studio_pipeline, "configure_kaggle_cli"), \
