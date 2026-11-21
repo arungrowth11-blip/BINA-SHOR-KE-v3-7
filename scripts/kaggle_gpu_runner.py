@@ -36,6 +36,24 @@ def is_25d_pipeline(value) -> bool:
     return str(value or "") in {PRIMARY_25D_PIPELINE, LEGACY_25D_PIPELINE}
 
 
+def uses_primary_image_first(manifest: dict) -> bool:
+    """Resolve GPU batch mode once; mixed image-first and legacy manifests are forbidden."""
+    reels = manifest.get("reels")
+    if not isinstance(reels, list) or not reels:
+        return False
+    pipelines = [
+        str(reel.get("visual_pipeline") or "")
+        for reel in reels if isinstance(reel, dict)
+    ]
+    primary = [pipeline == PRIMARY_25D_PIPELINE for pipeline in pipelines]
+    if any(primary) and not all(primary):
+        raise RuntimeError(
+            "GPU batch mixes primary image-first and legacy/other visual pipelines; "
+            "split the batch so model weights and asset types cannot be mixed."
+        )
+    return bool(pipelines) and all(primary)
+
+
 def run(cmd, cwd=None, timeout=1800):
     p = subprocess.run(cmd, cwd=cwd, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=timeout)
     if p.returncode:
@@ -315,18 +333,8 @@ def install_comfyui():
     import torch
     from huggingface_hub import hf_hub_download, model_info
 
-    primary_image_first = bool(MANIFEST.get('reels')) and all(
-        str(reel.get('visual_pipeline') or '') == PRIMARY_25D_PIPELINE
-        for reel in MANIFEST.get('reels', [])
-    )
-    if any(
-        is_25d_pipeline(reel.get('visual_pipeline'))
-        and str(reel.get('visual_pipeline') or '') != PRIMARY_25D_PIPELINE
-        for reel in MANIFEST.get('reels', [])
-    ):
-        # Legacy hybrid manifests are Wan video-first and must keep their original
-        # ComfyUI graph/model family. They are not aliases for image-first production.
-        primary_image_first = False
+    # Legacy hybrid Wan manifests are not aliases for the primary FLUX image route.
+    primary_image_first = uses_primary_image_first(MANIFEST)
     if not torch.cuda.is_available():
         raise RuntimeError('Kaggle did not provide a CUDA GPU. No CPU fallback was attempted because it would be too slow and low quality.')
     gpu_name = torch.cuda.get_device_name(0)
@@ -1143,13 +1151,7 @@ def create_25d_parallax_clip(
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    primary_image_first = bool(MANIFEST.get('reels')) and all(
-        str(reel.get('visual_pipeline') or '') == PRIMARY_25D_PIPELINE
-        for reel in MANIFEST.get('reels', [])
-    )
-    if not primary_image_first:
-        if any(is_25d_pipeline(reel.get('visual_pipeline')) for reel in MANIFEST.get('reels', [])):
-            raise RuntimeError('A single GPU batch cannot mix image-first primary 2.5D and legacy Wan pipelines.')
+    primary_image_first = uses_primary_image_first(MANIFEST)
     result_manifest = {
         'job_id': MANIFEST.get('job_id'),
         'status': 'running',
