@@ -106,7 +106,7 @@ class CharacterReferenceTests(unittest.TestCase):
                 Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
                 Image.new("RGB", (704, 1280), (30, 50, 70)).save(command[-1])
                 return ""
-            with patch.object(runner, "run", side_effect=fake_run):
+            with patch.dict(runner, {"run": fake_run}):
                 result = runner["create_character_reference_image"](source, destination, 4.0)
             self.assertEqual(result["filename"], "reel_identity_anchor.png")
             self.assertEqual((result["width"], result["height"]), (704, 1280))

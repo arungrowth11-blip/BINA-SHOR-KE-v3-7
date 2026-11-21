@@ -193,7 +193,6 @@ class StudioPipelineTests(unittest.TestCase):
 
     def test_hybrid_later_scene_fails_closed_when_reference_anchor_is_missing(self):
         runner = load_runner_module()
-        runner['node_prompt'] = lambda _objects, node_type, inputs: {'class_type': node_type, 'inputs': inputs}
         story = {'reel_id': 'reel_anchor_test', 'visual_pipeline': 'hybrid_25d_motion_comic_v1', 'beats': [{}] * 6}
         beat = {'video_prompt': 'A clear illustrated action.', 'target_frames': 109, 'voice_timing': {'fps': 24},
                 'narrative_role': 'context', 'state_change': 'The character notices a new detail', 'causal_link': 'The hook creates this discovery'}
