@@ -992,6 +992,7 @@ Return JSON only."""
     concept["duration_lock"] = duration_lock
     concept["editorial_shot_plan"] = shot_plan
     concept["visual_pipeline"] = shot_plan["visual_pipeline"]
+    concept["visual_style_profile"] = shot_plan["visual_style_profile"]
     for beat_index, beat in enumerate(concept["beats"], start=1):
         beat["editorial_shots"] = story_engine.shots_for_beat(shot_plan, beat_index)
     log(f"Locked {duration_lock['measured_seconds']:.2f}s {duration_lock['story_type']} story; {shot_plan['editorial_shot_count']} editorial shots from {shot_plan['source_beat_count']} source-video generations.")
@@ -2064,15 +2065,19 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     stock_scenes = 0
 
     require_ai_video = os.getenv("REQUIRE_AI_VIDEO", "0").strip() == "1"
-    # Preserve Wan's native 24 fps cadence to avoid fake duplicated frames; local-only smoke renders use 30 fps.
-    target_fps = 24 if require_ai_video else 30
+    # Wan source clips remain at their qualified 24 FPS cadence. The default
+    # 2.5D editorial master is a separate 30 FPS output timeline.
+    target_fps = (
+        30 if story_engine.is_25d_pipeline(concept.get("visual_pipeline"))
+        else (24 if require_ai_video else 30)
+    )
     if require_ai_video:
         # Fail before any TTS quota is consumed if GPU generation did not produce a full scene set.
         missing_ai = [f"scene_{i+1:02d}.mp4" for i in range(len(concept["beats"]))
                       if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()]
         if missing_ai:
             raise RuntimeError("AI-video mode is missing required clips before TTS starts: " + ", ".join(missing_ai))
-        if concept.get("visual_pipeline") == "hybrid_25d_motion_comic_v1":
+        if story_engine.is_25d_pipeline(concept.get("visual_pipeline")):
             if not isinstance(editorial_plan, dict):
                 raise RuntimeError("Hybrid motion-comic mode requires a voice-locked editorial_shot_plan; refusing legacy fallback.")
             if int(editorial_plan.get("source_beat_count", 0)) != len(concept["beats"]):
@@ -2191,7 +2196,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                     f"Timed AI scene {i+1}: video ratio={ratio:.4f}x, "
                     f"end hold={video_hold_duration:.3f}s, audio pad={audio_pad_duration:.3f}s."
                 )
-            if concept.get("visual_pipeline") == "hybrid_25d_motion_comic_v1":
+            if story_engine.is_25d_pipeline(concept.get("visual_pipeline")):
                 parallax_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
                 editorial_clip = clips_dir / f"scene_{i+1:02d}_editorial.mp4"
                 beat_shots = story_engine.retime_beat_shots(beat.get("editorial_shots", []), target_duration)
@@ -2342,7 +2347,10 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     enforce_visual_qa(frame_review)
     technical = {
         "duration_seconds": round(final_duration, 2),
-        "resolution": "1080x1920", "aspect_ratio": "9:16", "frame_rate_target": f"{target_fps} fps" + (" (native Wan cadence)" if require_ai_video else ""),
+        "resolution": "1080x1920", "aspect_ratio": "9:16",
+        "frame_rate_target": f"{target_fps} fps" + (" (primary 2.5D editorial master; Wan source 24 fps)" if story_engine.is_25d_pipeline(concept.get("visual_pipeline")) else (" (native Wan cadence)" if require_ai_video else "")),
+        "visual_style_profile": concept.get("visual_style_profile", {}),
+        "primary_visual_pipeline": story_engine.PRIMARY_25D_PIPELINE,
         "ffprobe_media_info": media_info, "file_size_mb": round(video_path.stat().st_size / 1024 / 1024, 2),
         "voice_segments": len(concept["beats"]), "editorial_shots": int((concept.get("editorial_shot_plan") or {}).get("editorial_shot_count", len(concept["beats"]))), "stock_video_segments": stock_scenes,
         "original_custom_graphic_scenes": original_graphic_scenes,
