@@ -1141,6 +1141,22 @@ class StudioPipelineTests(unittest.TestCase):
                 lock = studio_pipeline.verify_or_lock_image_toolchain(incomplete, "image_job_running")
         self.assertNotIn("gpu_benchmark", lock)
 
+    def test_image_first_resume_requires_measured_parallax_samples(self):
+        pending = {
+            "reels": [{
+                "beats": [{} for _ in range(6)],
+                "concept": {"visual_pipeline": producer.story_engine.PRIMARY_25D_PIPELINE},
+            }]
+        }
+        self.assertEqual(studio_pipeline.estimate_resume_hours(pending, []), 999.0)
+        sampled = [
+            {"reel_id": "reel_01", "scene_index": index, "parallax_elapsed_seconds": 300.0}
+            for index in range(1, 6)
+        ]
+        # Resume rebuilds all six parallax clips from restored PNG stills,
+        # with a 2x per-scene safety factor and a 60-minute model/runtime allowance.
+        self.assertEqual(studio_pipeline.estimate_resume_hours(pending, sampled), 2.0)
+
     def test_image_first_checkpoint_collector_keeps_hash_verified_png_stills(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as folder:
