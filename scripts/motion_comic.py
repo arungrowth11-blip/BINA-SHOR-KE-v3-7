@@ -97,7 +97,7 @@ def render_editorial_montage(
     target_duration: float,
     video_speed_ratio: float = 1.0,
     video_hold_duration: float = 0.0,
-    fps: int = 24,
+    fps: int = 30,
 ) -> Path:
     if not hero_video.is_file() or not depth_parallax_video.is_file():
         raise FileNotFoundError("Both source hero video and depth-parallax video are required.")
