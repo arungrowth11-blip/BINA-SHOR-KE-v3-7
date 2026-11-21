@@ -79,12 +79,14 @@ class StoryEngineTests(unittest.TestCase):
         plan = story_engine.build_editorial_shot_plan([5.8, 5.7, 5.9, 5.8, 5.9, 5.9], "emotional")
         self.assertEqual(plan["editorial_shot_count"], 14)
         self.assertEqual(plan["source_beat_count"], 6)
-        self.assertEqual(plan["hero_video_shot_count"], 2)
-        self.assertEqual(plan["depth_parallax_shot_count"], 12)
+        self.assertEqual(plan["hero_video_shot_count"], 0)
+        self.assertEqual(plan["depth_parallax_shot_count"], 14)
+        self.assertEqual(plan["visual_generation_mode"], "image_first_flux_stills")
+        self.assertEqual(plan["image_generation_count"], 6)
         self.assertEqual(plan["gpu_generation_count"], 6)
         self.assertEqual(plan["visual_pipeline"], story_engine.PRIMARY_25D_PIPELINE)
-        self.assertGreaterEqual(plan["depth_parallax_share_actual"], 0.80)
-        self.assertLessEqual(plan["hero_video_share_actual"], 0.20)
+        self.assertEqual(plan["depth_parallax_share_actual"], 1.0)
+        self.assertEqual(plan["hero_video_share_actual"], 0.0)
         self.assertEqual(plan["visual_style_profile"]["profile_id"], "warm_indian_melodrama")
         self.assertTrue(all(item.get("camera_move") for item in plan["shots"]))
         self.assertTrue(all(item.get("style_profile_id") == "warm_indian_melodrama" for item in plan["shots"]))
@@ -95,8 +97,9 @@ class StoryEngineTests(unittest.TestCase):
         plan = story_engine.build_editorial_shot_plan([4.1, 4.0, 4.1, 4.0, 4.1, 4.1], "comedy")
         self.assertGreaterEqual(plan["editorial_shot_count"], 7)
         self.assertLessEqual(plan["editorial_shot_count"], 10)
-        self.assertEqual(plan["hero_video_shot_count"], max(1, int(plan["editorial_shot_count"] * 0.20)))
-        self.assertGreaterEqual(plan["depth_parallax_share_actual"], 0.80)
+        self.assertEqual(plan["hero_video_shot_count"], 0)
+        self.assertEqual(plan["depth_parallax_share_actual"], 1.0)
+        self.assertEqual(plan["visual_generation_mode"], "image_first_flux_stills")
         self.assertEqual(plan["visual_style_profile"]["profile_id"], "bright_everyday_comedy")
 
     def test_story_categories_receive_distinct_visual_style_profiles(self):
@@ -143,6 +146,38 @@ class MotionComicTests(unittest.TestCase):
         self.assertIn("[0:v]setpts=PTS*1.0000000", graph)
         self.assertNotIn("[1:v]", graph)
         self.assertIn("concat=n=1:v=1:a=0[outv]", graph)
+
+    def test_primary_25d_filter_graph_uses_one_parallax_input_without_dummy_hero(self):
+        shot = dict(self.shots[1], start_seconds=0.0, end_seconds=2.5)
+        graph = motion_comic.build_editorial_filter_graph([shot])
+        self.assertIn("[0:v]setpts=PTS*1.0000000", graph)
+        self.assertIn("trim=start=0.0000:end=2.5000", graph)
+        self.assertNotIn("[1:v]", graph)
+        self.assertIn("concat=n=1:v=1:a=0[outv]", graph)
+
+    def test_primary_25d_render_does_not_require_hero_video_file(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            depth = root / "depth.mp4"
+            output = root / "output.mp4"
+            depth.write_bytes(b"depth placeholder")
+            shots = [dict(self.shots[1], start_seconds=0.0, end_seconds=2.5)]
+            with patch.object(motion_comic.subprocess, "run") as run_cmd:
+                encoded = root / "output.partial.mp4"
+                encoded.write_bytes(b"x" * 100_001)
+                probe = SimpleNamespace(returncode=0, stdout="2.500", stderr="")
+                run_cmd.side_effect = [
+                    SimpleNamespace(returncode=0, stdout="", stderr=""),
+                    probe,
+                ]
+                result = motion_comic.render_editorial_montage(
+                    None, depth, output, shots, target_duration=2.5, fps=30
+                )
+            self.assertEqual(result, output)
+            self.assertTrue(output.is_file())
+            command = run_cmd.call_args_list[0].args[0]
+            self.assertEqual(command.count("-i"), 1)
+            self.assertNotIn("None", command)
 
     def test_filter_graph_rejects_an_unknown_editorial_source(self):
         invalid = [dict(self.shots[0], source="still_image"), dict(self.shots[1])]
