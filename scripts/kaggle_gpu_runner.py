@@ -1103,11 +1103,27 @@ def create_25d_parallax_clip(
 
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
+    primary_image_first = bool(MANIFEST.get('reels')) and all(
+        str(reel.get('visual_pipeline') or '') == PRIMARY_25D_PIPELINE
+        for reel in MANIFEST.get('reels', [])
+    )
+    if not primary_image_first:
+        if any(is_25d_pipeline(reel.get('visual_pipeline')) for reel in MANIFEST.get('reels', [])):
+            raise RuntimeError('A single GPU batch cannot mix image-first primary 2.5D and legacy Wan pipelines.')
     result_manifest = {
-        'job_id': MANIFEST.get('job_id'), 'status': 'running', 'model': 'Wan2.2 TI2V 5B Q4_K_M GGUF',
-        'license_note': 'Wan2.2 upstream is Apache-2.0; this quantized derivative has its own attribution/notice. Review licenses before commercial use.',
-        'scenes': [], 'parallax_scenes': [], 'character_references': [], 'visual_pipeline': MANIFEST.get('visual_pipeline', PRIMARY_25D_PIPELINE),
-        'depth_model': 'depth-anything/Depth-Anything-V2-Small-hf', 'depth_model_license': 'Apache-2.0',
+        'job_id': MANIFEST.get('job_id'),
+        'status': 'running',
+        'model': 'FLUX.1-schnell Q4_K_S GGUF (image-first)' if primary_image_first else 'Wan2.2 TI2V 5B Q4_K_M GGUF (legacy video)',
+        'license_note': (
+            'FLUX.1 Schnell quantized GGUF is Apache-2.0; verify upstream and quantization notices before commercial use.'
+            if primary_image_first else
+            'Wan2.2 upstream is Apache-2.0; this quantized derivative has its own attribution/notice. Review licenses before commercial use.'
+        ),
+        'scenes': [], 'parallax_scenes': [], 'character_references': [],
+        'visual_pipeline': PRIMARY_25D_PIPELINE if primary_image_first else LEGACY_25D_PIPELINE,
+        'generation_mode': 'still_image_first' if primary_image_first else 'wan_video_first_legacy',
+        'depth_model': 'depth-anything/Depth-Anything-V2-Small-hf',
+        'depth_model_license': 'Apache-2.0',
         'started_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
     server = None
@@ -1130,57 +1146,123 @@ def main():
         server = subprocess.Popen([
             sys.executable, 'main.py', '--listen', '127.0.0.1', '--port', '8188', '--disable-auto-launch'
         ], cwd=COMFY, env=env, stdout=log_handle, stderr=subprocess.STDOUT)
-        objects = wait_for_comfy()
+        objects = wait_for_comfy(primary_image_first=primary_image_first)
         result_manifest['comfy_nodes_checked'] = True
+
         for reel in MANIFEST.get('reels', []):
             reel_id = reel['reel_id']
-            for i, beat in enumerate(reel['beats'], start=1):
-                final_out = OUT / reel_id / f'scene_{i:02d}.mp4'
-                if final_out.exists() and final_out.stat().st_size > 100_000:
-                    if i == 1 and is_25d_pipeline(reel.get('visual_pipeline')):
-                        persist_character_reference(reel, reel_id, final_out, result_manifest)
-                    continue
-                prefix = f"bsk/{reel_id}/scene_{i:02d}"
-                before = time.time()
+            for scene_index, beat in enumerate(reel['beats'], start=1):
+                extension = '.png' if primary_image_first else '.mp4'
+                final_out = OUT / reel_id / f'scene_{scene_index:02d}{extension}'
                 scene_started = time.monotonic()
-                graph = build_api_workflow(objects, beat, reel, i, prefix)
-                prompt_id = post_prompt(graph)
-                result_manifest['current_scene'] = {
-                    'reel_id': reel_id, 'scene_index': i, 'target_frames': int(beat.get('target_frames', 81)),
-                    'prompt_id': prompt_id, 'queued_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
-                }
-                write_json(OUT / 'gpu_output_manifest.json', result_manifest)
-                print(f"Queued {reel_id} scene {i}/{len(reel['beats'])}: {prompt_id}", flush=True)
-                history = wait_prompt(prompt_id)
-                result_manifest.pop('current_scene', None)
-                source = latest_video(output_dir, before, prefix)
-                transcode_scene(source, final_out)
-                if i == 1 and is_25d_pipeline(reel.get('visual_pipeline')):
-                    persist_character_reference(reel, reel_id, final_out, result_manifest)
-                result_manifest['scenes'].append({
-                    'reel_id': reel_id, 'scene_index': i, 'path': str(final_out.relative_to(WORK)),
-                    'bytes': final_out.stat().st_size, 'duration_seconds_target': float(beat.get('target_frames', 81)) / 24.0,
-                    'generation_elapsed_seconds': round(time.monotonic() - scene_started, 2),
-                    'prompt_id': prompt_id, 'comfy_history_status': history.get('status', {}),
-                })
-                # Persist an atomic, hash-verified checkpoint after EVERY completed scene.
-                write_checkpoint_manifest(result_manifest, 'running')
-                # Delete ComfyUI's own large intermediate source after the compressed clip is verified.
-                try:
-                    source.unlink()
-                except OSError:
-                    pass
+                if primary_image_first:
+                    if final_out.exists() and final_out.stat().st_size > 100_000:
+                        image_meta = prepare_scene_still(final_out, final_out)
+                        elapsed = 0.0
+                        prompt_id = None
+                        history = {'status': {'checkpoint': 'reused'}}
+                    else:
+                        prefix = f"bsk/{reel_id}/scene_{scene_index:02d}"
+                        before = time.time()
+                        graph = build_flux_image_workflow(objects, beat, reel, scene_index, prefix)
+                        prompt_id = post_prompt(graph)
+                        result_manifest['current_scene'] = {
+                            'reel_id': reel_id, 'scene_index': scene_index, 'asset_type': 'still_image',
+                            'prompt_id': prompt_id, 'queued_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                        }
+                        write_json(OUT / 'gpu_output_manifest.json', result_manifest)
+                        print(f"Queued image-first still {reel_id} scene {scene_index}/{len(reel['beats'])}: {prompt_id}", flush=True)
+                        history = wait_prompt(prompt_id)
+                        result_manifest.pop('current_scene', None)
+                        source = latest_image(output_dir, before, prefix)
+                        image_meta = prepare_scene_still(source, final_out)
+                        try:
+                            source.unlink()
+                        except OSError:
+                            pass
+                        elapsed = round(time.monotonic() - scene_started, 2)
+                    result_manifest['scenes'] = [
+                        row for row in result_manifest['scenes']
+                        if not (row.get('reel_id') == reel_id and int(row.get('scene_index', 0)) == scene_index)
+                    ]
+                    result_manifest['scenes'].append({
+                        'reel_id': reel_id, 'scene_index': scene_index,
+                        'path': str(final_out.relative_to(WORK)),
+                        'media_type': 'image/png',
+                        **image_meta,
+                        'generation_elapsed_seconds': elapsed,
+                        'prompt_id': prompt_id,
+                        'comfy_history_status': history.get('status', {}),
+                    })
+                    write_checkpoint_manifest(result_manifest, 'running')
+                    write_json(OUT / 'gpu_output_manifest.json', result_manifest)
+                    print(f"Verified FLUX still {reel_id} {scene_index}: {image_meta['width']}x{image_meta['height']} ({image_meta['bytes']} bytes)", flush=True)
+                else:
+                    if final_out.exists() and final_out.stat().st_size > 100_000:
+                        if scene_index == 1 and is_25d_pipeline(reel.get('visual_pipeline')):
+                            persist_character_reference(reel, reel_id, final_out, result_manifest)
+                        continue
+                    prefix = f"bsk/{reel_id}/scene_{scene_index:02d}"
+                    before = time.time()
+                    graph = build_api_workflow(objects, beat, reel, scene_index, prefix)
+                    prompt_id = post_prompt(graph)
+                    result_manifest['current_scene'] = {
+                        'reel_id': reel_id, 'scene_index': scene_index,
+                        'target_frames': int(beat.get('target_frames', 81)),
+                        'prompt_id': prompt_id, 'queued_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+                    }
+                    write_json(OUT / 'gpu_output_manifest.json', result_manifest)
+                    print(f"Queued legacy Wan scene {reel_id} scene {scene_index}/{len(reel['beats'])}: {prompt_id}", flush=True)
+                    history = wait_prompt(prompt_id)
+                    result_manifest.pop('current_scene', None)
+                    source = latest_video(output_dir, before, prefix)
+                    transcode_scene(source, final_out)
+                    if scene_index == 1 and is_25d_pipeline(reel.get('visual_pipeline')):
+                        persist_character_reference(reel, reel_id, final_out, result_manifest)
+                    result_manifest['scenes'].append({
+                        'reel_id': reel_id, 'scene_index': scene_index, 'path': str(final_out.relative_to(WORK)),
+                        'bytes': final_out.stat().st_size, 'duration_seconds_target': float(beat.get('target_frames', 81)) / 24.0,
+                        'generation_elapsed_seconds': round(time.monotonic() - scene_started, 2),
+                        'prompt_id': prompt_id, 'comfy_history_status': history.get('status', {}),
+                    })
+                    write_checkpoint_manifest(result_manifest, 'running')
+                    try:
+                        source.unlink()
+                    except OSError:
+                        pass
+
         depth_estimator = None
         for reel in MANIFEST.get('reels', []):
             reel_id = reel['reel_id']
-            for scene_index in range(1, len(reel.get('beats', [])) + 1):
-                source = OUT / reel_id / f'scene_{scene_index:02d}.mp4'
+            for scene_index, beat in enumerate(reel.get('beats', []), start=1):
+                source = OUT / reel_id / (f'scene_{scene_index:02d}.png' if primary_image_first else f'scene_{scene_index:02d}.mp4')
                 parallax = OUT / reel_id / f'scene_{scene_index:02d}_25d.mp4'
-                valid_source, scene_duration = valid_scene_file(source)
-                if not valid_source:
-                    raise RuntimeError(f'Missing Wan source scene for 2.5D derivation: {source}')
-                valid_parallax, existing_duration = valid_scene_file(parallax)
+                if primary_image_first:
+                    from PIL import Image
+                    try:
+                        with Image.open(source) as image:
+                            image.verify()
+                        with Image.open(source) as image:
+                            if image.size != (704, 1280):
+                                raise RuntimeError(f'Image-first still dimensions must be 704x1280; got {image.size}.')
+                    except Exception as exc:
+                        raise RuntimeError(f'Missing or invalid FLUX still for {reel_id} scene {scene_index}: {exc}') from exc
+                    voice_timing = beat.get('voice_timing') if isinstance(beat.get('voice_timing'), dict) else {}
+                    scene_duration = float(voice_timing.get('target_duration_seconds') or (int(beat.get('target_frames', 81)) / 24.0))
+                    if not 2.5 <= scene_duration <= 8.0:
+                        raise RuntimeError(f'Voice-locked parallax duration {scene_duration:.3f}s is outside the 2.5–8.0s encoder contract.')
+                    valid_parallax, existing_duration = valid_scene_file(parallax)
+                else:
+                    valid_source, scene_duration = valid_scene_file(source)
+                    if not valid_source:
+                        raise RuntimeError(f'Missing Wan source scene for legacy parallax derivation: {source}')
+                    valid_parallax, existing_duration = valid_scene_file(parallax)
+
                 if valid_parallax:
+                    result_manifest['parallax_scenes'] = [
+                        row for row in result_manifest['parallax_scenes']
+                        if not (row.get('reel_id') == reel_id and int(row.get('scene_index', 0)) == scene_index)
+                    ]
                     result_manifest['parallax_scenes'].append({
                         'reel_id': reel_id, 'scene_index': scene_index,
                         'depth_model_revision': toolchain_info['depth_model_revision'],
@@ -1194,9 +1276,9 @@ def main():
                     })
                     write_json(OUT / 'gpu_output_manifest.json', result_manifest)
                     continue
+
                 if depth_estimator is None:
                     depth_estimator = load_depth_estimator(toolchain_info['depth_model_revision'])
-                beat = reel.get('beats', [])[scene_index - 1]
                 editorial_shots = beat.get('editorial_shots', []) if isinstance(beat, dict) else []
                 depth_shots = [
                     shot for shot in editorial_shots
@@ -1210,19 +1292,42 @@ def main():
                     source, parallax, scene_duration, depth_estimator,
                     camera_move=camera_move,
                 )
+                result_manifest['parallax_scenes'] = [
+                    row for row in result_manifest['parallax_scenes']
+                    if not (row.get('reel_id') == reel_id and int(row.get('scene_index', 0)) == scene_index)
+                ]
                 result_manifest['parallax_scenes'].append({
                     'reel_id': reel_id, 'scene_index': scene_index,
                     'depth_model_revision': toolchain_info['depth_model_revision'],
-                    'path': str(parallax.relative_to(WORK)), **metadata,
+                    'path': str(parallax.relative_to(WORK)),
+                    'source_asset_type': 'still_image' if primary_image_first else 'wan_video_keyframe',
+                    **metadata,
                 })
                 write_json(OUT / 'gpu_output_manifest.json', result_manifest)
                 print(f"Created depth-parallax scene {reel_id} {scene_index}: {metadata['duration_seconds']:.2f}s", flush=True)
+
         expected = sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', []))
-        found = sum(1 for r in MANIFEST.get('reels', []) for i in range(1, len(r.get('beats', [])) + 1) if (OUT / r['reel_id'] / f'scene_{i:02d}.mp4').exists())
-        if found != expected:
-            raise RuntimeError(f'Only {found}/{expected} AI scene clips passed generation; refusing to deliver partial batch.')
+        extension = '.png' if primary_image_first else '.mp4'
+        found = sum(
+            1 for reel in MANIFEST.get('reels', [])
+            for scene_index in range(1, len(reel.get('beats', [])) + 1)
+            if (OUT / reel['reel_id'] / f'scene_{scene_index:02d}{extension}').is_file()
+        )
+        parallax_found = len({
+            (str(row.get('reel_id')), int(row.get('scene_index', 0)))
+            for row in result_manifest['parallax_scenes']
+        })
+        if found != expected or parallax_found != expected:
+            raise RuntimeError(
+                f'Incomplete visual assets: {found}/{expected} source assets and '
+                f'{parallax_found}/{expected} depth-parallax videos; refusing partial output.'
+            )
         result_manifest.update({
             'status': 'complete', 'expected_scenes': expected,
+            'source_asset_count': found,
+            'source_video_generation_count': 0 if primary_image_first else expected,
+            'still_image_generation_count': expected if primary_image_first else 0,
+            'parallax_video_count': parallax_found,
             'total_elapsed_seconds': round(time.monotonic() - worker_started, 2),
             'completed_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         })
@@ -1233,7 +1338,6 @@ def main():
         result_manifest.update({'status': 'failed', 'error': str(exc)[:5000], 'completed_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())})
         write_json(OUT / 'gpu_output_manifest.json', result_manifest)
         print('STUDIO_GPU_FAILURE: ' + str(exc), flush=True)
-        # Keep exit 1 so Kaggle status exposes the failed run; output JSON remains for diagnosis.
         raise
     finally:
         if server and server.poll() is None:
@@ -1242,7 +1346,6 @@ def main():
                 server.wait(timeout=30)
             except subprocess.TimeoutExpired:
                 server.kill()
-        # Do not include the large ComfyUI repository, model symlinks or HF cache in kernel outputs.
         if COMFY.exists():
             shutil.rmtree(COMFY, ignore_errors=True)
 
