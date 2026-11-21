@@ -1025,17 +1025,27 @@ def _poll_and_finalize_impl() -> int:
             return 0 if resumed else 1
 
         expected = sum(len(r['beats']) for r in pending.get('reels', []))
-        existing = list(root.rglob('scene_*.mp4'))
-        if len(existing) < expected:
-            resumed = handle_gpu_failure(root, pending, f'Expected {expected} AI scene clips, received {len(existing)}.')
-            return 0 if resumed else 1
-        if gpu_manifest.get('generation_mode') == 'still_image_first':
+        primary_image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
+        existing_videos = list(root.rglob('scene_*.mp4'))
+        existing_images = list(root.rglob('scene_*.png'))
+        if primary_image_first:
+            parallax_videos = [p for p in existing_videos if re.fullmatch(r'scene_\d{2}_25d\.mp4', p.name)]
+            if len(existing_images) < expected or len(parallax_videos) < expected:
+                resumed = handle_gpu_failure(
+                    root, pending,
+                    f'Image-first job expected {expected} FLUX PNG stills and {expected} depth-parallax videos; '
+                    f'received {len(existing_images)} stills and {len(parallax_videos)} parallax videos.'
+                )
+                return 0 if resumed else 1
             verify_or_lock_image_toolchain(gpu_manifest, pending.get('job_id'))
         else:
+            if len(existing_videos) < expected:
+                resumed = handle_gpu_failure(root, pending, f'Expected {expected} AI scene clips, received {len(existing_videos)}.')
+                return 0 if resumed else 1
             verify_or_lock_toolchain(gpu_manifest, pending.get('job_id'))
+
         pending['status'] = 'finalizing'
         write_json(PENDING, pending)
-        clips_by_path = {str(p.relative_to(root)): p for p in existing}
         all_missing = []
         stamp_prefix = datetime.now(TZ).strftime('%Y%m%d_%H%M')
         for ordinal, reel in enumerate(pending['reels'], start=1):
@@ -1056,21 +1066,71 @@ def _poll_and_finalize_impl() -> int:
             needed = len(concept['beats'])
             missing = []
             for i in range(1, needed + 1):
-                candidates = [p for p in existing if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}.mp4']
+                extension = 'png' if primary_image_first else 'mp4'
+                source_name = f'scene_{i:02d}.{extension}'
+                candidates = [
+                    p for p in (existing_images if primary_image_first else existing_videos)
+                    if reel['reel_id'] in p.parts and p.name == source_name
+                ]
                 if not candidates:
-                    # Kaggle can flatten output folders in some CLI versions; identify scenes by parent manifest name plus scene number.
-                    candidates = [p for p in existing if p.name == f'scene_{i:02d}.mp4' and reel['reel_id'] in str(p)]
-                if not candidates:
-                    missing.append(i)
+                    candidates = [
+                        p for p in (existing_images if primary_image_first else existing_videos)
+                        if p.name == source_name and reel['reel_id'] in str(p)
+                    ]
+                if len(candidates) != 1:
+                    missing.append(f'{i}_source_missing_or_ambiguous')
                     continue
-                shutil.copy2(candidates[0], ai_dir / f'scene_{i:02d}.mp4')
+                source = candidates[0]
+                if primary_image_first:
+                    image_rows = [
+                        item for item in gpu_manifest.get('scenes', [])
+                        if str(item.get('reel_id')) == str(reel['reel_id'])
+                        and int(item.get('scene_index', 0)) == i
+                        and item.get('media_type') == 'image/png'
+                    ]
+                    if len(image_rows) != 1:
+                        missing.append(f'{i}_still_manifest_missing_or_ambiguous')
+                        continue
+                    row = image_rows[0]
+                    expected_bytes = int(row.get('bytes', -1))
+                    expected_sha = str(row.get('sha256', '')).lower()
+                    if (
+                        expected_bytes <= 100_000
+                        or not re.fullmatch(r'[0-9a-f]{64}', expected_sha)
+                        or source.stat().st_size != expected_bytes
+                        or _sha256(source) != expected_sha
+                    ):
+                        missing.append(f'{i}_still_hash_or_size_mismatch')
+                        continue
+                    with Image.open(source) as image:
+                        image.verify()
+                    with Image.open(source) as image:
+                        if image.size != (704, 1280):
+                            missing.append(f'{i}_still_dimensions_invalid')
+                            continue
+                    still_dest = ai_dir / f'scene_{i:02d}.png'
+                    shutil.copy2(source, still_dest)
+                    if _sha256(still_dest) != expected_sha:
+                        still_dest.unlink(missing_ok=True)
+                        missing.append(f'{i}_still_copy_hash_mismatch')
+                        continue
+                else:
+                    shutil.copy2(source, ai_dir / f'scene_{i:02d}.mp4')
+
                 if producer.story_engine.is_25d_pipeline(concept.get('visual_pipeline')):
-                    depth_candidates = [p for p in existing if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}_25d.mp4']
+                    depth_candidates = [
+                        p for p in existing_videos
+                        if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}_25d.mp4'
+                    ]
                     if not depth_candidates:
-                        depth_candidates = [p for p in existing if p.name == f'scene_{i:02d}_25d.mp4' and reel['reel_id'] in str(p)]
+                        depth_candidates = [
+                            p for p in existing_videos
+                            if p.name == f'scene_{i:02d}_25d.mp4' and reel['reel_id'] in str(p)
+                        ]
                     depth_rows = [
                         item for item in gpu_manifest.get('parallax_scenes', [])
-                        if str(item.get('reel_id')) == str(reel['reel_id']) and int(item.get('scene_index', 0)) == i
+                        if str(item.get('reel_id')) == str(reel['reel_id'])
+                        and int(item.get('scene_index', 0)) == i
                     ]
                     if len(depth_candidates) != 1 or len(depth_rows) != 1:
                         missing.append(f'{i}_25d_missing_or_ambiguous')
@@ -1087,9 +1147,10 @@ def _poll_and_finalize_impl() -> int:
                         ):
                             missing.append(f'{i}_25d_hash_or_size_mismatch')
                         else:
-                            shutil.copy2(depth_source, ai_dir / f'scene_{i:02d}_25d.mp4')
-                            if _sha256(ai_dir / f'scene_{i:02d}_25d.mp4') != expected_sha:
-                                (ai_dir / f'scene_{i:02d}_25d.mp4').unlink(missing_ok=True)
+                            depth_dest = ai_dir / f'scene_{i:02d}_25d.mp4'
+                            shutil.copy2(depth_source, depth_dest)
+                            if _sha256(depth_dest) != expected_sha:
+                                depth_dest.unlink(missing_ok=True)
                                 missing.append(f'{i}_25d_copy_hash_mismatch')
             if missing:
                 all_missing.append(f"{reel['reel_id']}: scenes {missing}")
