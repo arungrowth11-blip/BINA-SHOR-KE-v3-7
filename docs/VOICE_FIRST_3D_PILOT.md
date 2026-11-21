@@ -1,27 +1,26 @@
-# BINA SHOR KE — Voice-first production and isolated 3D pilot
+# BINA SHOR KE — Primary 2.5D production and isolated 3D pilot
 
 ## Status
 
-This branch introduces the voice-first screenplay/timing path while preserving the current Wan2.2 production renderer. It does **not** promote Blender to production and does not claim a live Kaggle GPU render has passed.
+The selected default is **image-first, primarily 2.5D illustrated motion-comic cinema**. Each narrative beat becomes one FLUX.1 Schnell still, then Depth Anything V2 estimates depth and the worker creates a real 30 FPS parallax video. The editorial plan uses depth-parallax for 100% of default shots; the primary path does not generate Wan source videos. Wan2.2 remains a backward-compatible legacy route for previously created jobs. This image-first branch has offline code/tests but **has not yet passed a live Kaggle GPU qualification**.
 
-The character registry stores metadata only. Binary Blender rigs, meshes, textures and licensed asset packs are not committed to Git. The Blender pilot is an isolated technical/visual experiment.
+The character registry stores metadata only. Image prompts receive the same cast descriptions, wardrobe and visual bible, but true image-conditioned character-sheet locking across all new FLUX stills and across episodes is still outstanding. Binary Blender rigs, meshes, textures and licensed asset packs are not committed to Git. The Blender pilot is a separate technical/visual experiment, not the primary renderer.
 
 ## Production order
 
 1. **Screenplay and cast:** generate the complete Hindi story, all speaking characters, immutable character descriptions, and ordered speech segments. Each segment has one speaker ID, one complete line, an emotion cue and a stable segment ID. A beat may contain multiple turns or no speech.
 2. **Speaker audio:** generate each dialogue turn with its assigned Gemini voice profile. Validate 24 kHz, mono, 16-bit PCM WAV and measure actual duration. Store transcript + performance direction + voice ID in the cache identity; two voices must never share a cache entry merely because their dialogue text is the same.
-3. **Timeline:** place each actual WAV on the beat timeline with a short head handle and natural dialogue gaps. Calculate a 24 FPS shot length by rounding up to Wan's 4n+1 temporal frame shape. The screenplay is not shortened to fit a clip.
-4. **Final storyboard:** only after all WAVs are measured, produce the final six video prompts using the cast bible, exact dialogue turns, audio start/end times, emotion and measured target duration. The storyboard is not allowed to rewrite the script or change the frame count.
-5. **Video:** render the first source beat, then extract a verified 704×1280 identity-anchor frame from that scene. For hybrid 2.5D Reels, later Wan2.2 clips load that anchor through ComfyUI `LoadImage` and feed it to `Wan22ImageToVideoLatent.start_image`, alongside the beat's narrative role, state change and causal link. The first beat is never conditioned on its own output. Missing/corrupt anchors or unsupported ComfyUI inputs fail closed rather than silently reverting to text-only character continuity. The worker also passes voice-derived frame counts and rejects invalid frame shapes/unsupported scene lengths before dispatching each scene.
-6. **Finish:** reuse the exact cached speaker WAVs, assemble them in dialogue order with the measured lead-in, then run the existing subtitle, ASR, audio and visual QA gates.
+3. **Timeline:** place each actual WAV on the beat timeline with a short head handle and natural dialogue gaps. The six source beats retain their measured duration; the final 30 FPS shot plan is calculated only after audio timing is locked. No Wan 4n+1 frame-count constraint applies to the primary still-image path.
+4. **Final storyboard:** only after all WAVs are measured, produce the final editorial shot JSON with story role, causal link, state change, camera move, crop anchor, palette and lighting profile. The plan uses 100% depth-parallax shots in the default primary mode.
+5. **Primary visual generation:** render one 704×1280 FLUX.1 Schnell Q4_K_S still for each of the six narrative beats. The worker validates image format, dimensions, size and SHA-256; derives a Depth Anything V2 map from the still itself; and creates a real parallax MP4 at the exact voice-beat duration. The primary path generates no Wan video and does not extract a keyframe from a video. Missing stills, depth maps, hash mismatches or unsupported ComfyUI nodes fail closed.
+6. **Finish:** assemble the beat-level parallax videos into the timed 12–16 shot 1080×1920, 30 FPS editorial master; reuse the exact cached speaker WAVs; then run subtitle, ASR, audio, VLM, full-video motion and OCR QA gates.
 
 ### Timing bounds
 
-- 24 FPS.
-- Wan temporal shape: 4n + 1 frames.
-- Minimum planned shot: 61 frames (about 2.54 seconds).
-- Maximum planned shot: 193 frames (about 8.04 seconds).
-- If a beat exceeds that duration after real audio is measured, planning fails before the video GPU job. It does not crop the dialogue, accelerate speech or freeze a frame to hide the mismatch. The story/shot plan must be split or re-authored without losing words. Automatic sub-shot splitting is a later capability, not claimed here.
+- Primary editorial output: 30 FPS, 1080×1920, 9:16.
+- GPU source stills: 704×1280 PNG, one per narrative beat; source stills are not delivered as a static slideshow.
+- Depth parallax: every primary source beat becomes a separately encoded moving MP4 with eased camera translation/zoom and estimated foreground/midground/background displacement.
+- The voice timeline is authoritative. If a beat exceeds the supported parallax encoder duration after real audio is measured, planning fails before the GPU job; the system does not crop dialogue or silently accelerate speech. The story/shot plan must be split or re-authored without losing words.
 
 ## Speaker voice profiles
 
@@ -52,9 +51,10 @@ Voice gender/character direction and actual Hindi acting quality require a human
 - data/characters/registry.json is the versioned metadata registry.
 - Each newly cast character receives an identity scoped to its Reel. A reused asset must be selected explicitly using reuse_character_id; names such as protagonist are not global identities.
 - The registry tracks appearance, personality, age/gender presentation, voice profile and rights-review state.
-- Each hybrid Reel derives a per-Reel identity-anchor frame from its first rendered source beat and conditions later Wan clips with that real image input. The anchor is SHA-256 recorded in the GPU manifest; it is a first-scene frame, not a curated multi-angle portrait sheet or cross-episode character asset.
+- Primary image-first FLUX prompts repeat the same per-Reel visual bible, character appearance, clothing, age band and distinctive features for every narrative beat. The generated stills are sampled together by VLM QA for face/clothing continuity; human review remains mandatory.
+- **Not yet implemented/qualified:** the image-first FLUX graph does not currently feed a generated multi-angle character sheet into a true image-conditioning node (Redux/IPAdapter/reference conditioning). Prompt repetition is not equivalent to identity-locked image conditioning and does not guarantee identical faces/clothing across every still or future episodes.
 - Character rig binaries and textures belong under the ignored assets/characters/ directory or a private versioned asset store, not in the source repository.
-- Current branch can preserve and look up character metadata and use a verified first-scene visual anchor within one Reel. It does not yet generate a reusable multi-angle character portrait sheet, guarantee identity across episodes, or generate/upload/restore a production Blender rig automatically. Later scenes still require automated and human continuity review.
+- Current branch preserves character metadata and can review continuity across shots within one Reel. It does not guarantee cross-episode identity or automatically generate/upload/restore a production Blender rig.
 
 ## Blender pilot
 
@@ -93,7 +93,7 @@ The weekly planning workflow and the later GPU finalizer are separate GitHub Act
 
 ## Rollback and current limitations
 
-Wan2.2 remains the active video backend. Older pending manifests without speaker segments keep their legacy single-narrator TTS path. The new voice-first path is guarded by offline tests, and its live free-tier Hindi TTS plus owner listening gates passed on 2026-11-18. Production qualification still requires a successful one-Reel Kaggle Wan duration-variable render, final human visual review, verified Telegram delivery, and a separate Blender Kaggle pilot before Blender can even be considered for a future promotion.
+Image-first FLUX stills + Depth Anything V2 parallax is the selected primary visual path in this feature branch; Wan2.2 remains available only for older manifests and explicit legacy recovery. Older pending manifests without speaker segments keep their legacy single-narrator TTS path. The voice-first TTS path's live free-tier Hindi TTS plus owner listening gates passed on 2026-11-18. The new image-first renderer still requires a successful one-Reel Kaggle run, immutable image-toolchain lock, measured GPU benchmark, complete final VLM/OCR/motion QA, human visual review and verified Telegram delivery. A separate Blender pilot is not a prerequisite for promoting 2.5D because Blender is no longer the selected production renderer.
 
 ## Live Hindi TTS qualification
 
