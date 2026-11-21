@@ -5,6 +5,7 @@ import unittest
 import shutil
 import subprocess
 import tempfile
+from types import SimpleNamespace
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
