@@ -132,8 +132,17 @@ def checkpoint_entries_from_output(result_manifest: dict) -> list[dict]:
 
 
 def write_checkpoint_manifest(result_manifest: dict, status: str):
-    """Atomically inventory hash-verified MP4 scenes or first-class still images."""
-    if any(is_25d_pipeline(reel.get('visual_pipeline')) for reel in MANIFEST.get('reels', [])):
+    """Atomically inventory hash-verified primary PNG stills or legacy MP4 scenes."""
+    primary_image_first = uses_primary_image_first(MANIFEST)
+    toolchain = {
+        'generation_mode': result_manifest.get('generation_mode'),
+        'comfyui_commit': result_manifest.get('comfyui_commit'),
+        'comfyui_gguf_commit': result_manifest.get('comfyui_gguf_commit'),
+        'model_revisions': result_manifest.get('model_revisions', {}),
+        'runtime_packages': result_manifest.get('runtime_packages', {}),
+        'model_family': result_manifest.get('model_family'),
+    }
+    if primary_image_first:
         entries = []
         from PIL import Image
         for reel in MANIFEST.get('reels', []):
@@ -149,6 +158,8 @@ def write_checkpoint_manifest(result_manifest: dict, status: str):
                         width, height = image.size
                 except Exception:
                     continue
+                if (width, height) != (704, 1280):
+                    continue
                 entries.append({
                     'reel_id': reel_id, 'scene_index': scene_index,
                     'file': f'{reel_id}__scene_{scene_index:02d}.png',
@@ -157,8 +168,10 @@ def write_checkpoint_manifest(result_manifest: dict, status: str):
                     'media_type': 'image/png', 'width': width, 'height': height,
                 })
         checkpoint = {
-            'schema_version': 2, 'job_id': MANIFEST.get('job_id'), 'status': status,
+            'schema_version': 3, 'job_id': MANIFEST.get('job_id'), 'status': status,
+            'generation_mode': 'still_image_first',
             'model': 'FLUX.1-schnell Q4_K_S GGUF + Depth Anything V2',
+            'toolchain': toolchain,
             'expected_scenes': sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', [])),
             'completed_scenes': len(entries), 'scenes': entries,
             'updated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -166,8 +179,10 @@ def write_checkpoint_manifest(result_manifest: dict, status: str):
     else:
         entries = checkpoint_entries_from_output(result_manifest)
         checkpoint = {
-            'schema_version': 1, 'job_id': MANIFEST.get('job_id'), 'status': status,
+            'schema_version': 3, 'job_id': MANIFEST.get('job_id'), 'status': status,
+            'generation_mode': 'wan_video_first_legacy',
             'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF',
+            'toolchain': toolchain,
             'expected_scenes': sum(len(r.get('beats', [])) for r in MANIFEST.get('reels', [])),
             'completed_scenes': len(entries), 'scenes': entries,
             'updated_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -190,6 +205,30 @@ def restore_checkpoint_dataset(result_manifest: dict):
     checkpoint = json.loads(index_path.read_text(encoding='utf-8'))
     if checkpoint.get('job_id') != MANIFEST.get('job_id'):
         raise RuntimeError('Resume checkpoint belongs to a different production job; refusing to mix scene files.')
+    current_mode = 'still_image_first' if uses_primary_image_first(MANIFEST) else 'wan_video_first_legacy'
+    if checkpoint.get('generation_mode') and checkpoint.get('generation_mode') != current_mode:
+        raise RuntimeError('Resume checkpoint renderer differs from this job; refusing to mix FLUX stills and legacy Wan scenes.')
+    saved_toolchain = checkpoint.get('toolchain')
+    current_toolchain = {
+        'generation_mode': result_manifest.get('generation_mode'),
+        'comfyui_commit': result_manifest.get('comfyui_commit'),
+        'comfyui_gguf_commit': result_manifest.get('comfyui_gguf_commit'),
+        'model_revisions': result_manifest.get('model_revisions', {}),
+        'runtime_packages': result_manifest.get('runtime_packages', {}),
+        'model_family': result_manifest.get('model_family'),
+    }
+    if current_mode == 'still_image_first':
+        if not isinstance(saved_toolchain, dict):
+            raise RuntimeError('Image-first checkpoint has no immutable toolchain metadata; refusing to mix generated stills from an unverified model build.')
+        for key in ('comfyui_commit', 'comfyui_gguf_commit', 'model_revisions', 'runtime_packages'):
+            if saved_toolchain.get(key) != current_toolchain.get(key):
+                raise RuntimeError(f'Image-first resume toolchain mismatch for {key}; refusing to mix assets from different model/runtime builds.')
+    elif isinstance(saved_toolchain, dict):
+        for key in ('comfyui_commit', 'comfyui_gguf_commit', 'model_revisions'):
+            saved_value = saved_toolchain.get(key)
+            current_value = current_toolchain.get(key)
+            if saved_value and current_value and saved_value != current_value:
+                raise RuntimeError(f'Legacy Wan resume toolchain mismatch for {key}; refusing to mix scene outputs.')
     allowed = {str(r['reel_id']): len(r.get('beats', [])) for r in MANIFEST.get('reels', [])}
     restored = []
     from PIL import Image
