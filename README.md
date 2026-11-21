@@ -1,22 +1,24 @@
 # BINA SHOR KE — AI Cinematic Story Factory v3.7 P0 Reliability
 
-A private GitHub Actions + Kaggle free-GPU pipeline for original Hindi faceless Reels. The workflow supports a voice-first screenplay path: lock the cast and complete dialogue, generate and measure each speaker's Hindi WAV, write the final shot prompts from that audio timeline, then dispatch duration-aware video generation. The current production renderer remains Wan2.2 through ComfyUI; a separate Blender 3D pilot is experimental. It also automates editorial critique, branded post-production, ASR/visual QA, scene checkpoint recovery and private Telegram delivery. **Facebook publishing stays manual.**
+A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels. The selected primary architecture is **image-first 2.5D motion-comic cinema**: write and approve the story, generate and measure Hindi speaker WAVs, produce one illustrated FLUX still per narrative beat, derive Depth Anything V2 maps, create deterministic 2.5D parallax clips, then assemble a 30 FPS Reel. Wan2.2 remains as a backward-compatible legacy path for older manifests only. The new image-first path is implemented in this feature branch but is **not yet live GPU-qualified**. Automated editorial, post-production, OCR/visual/audio QA, checkpoint recovery and private Telegram delivery remain in scope. **Facebook publishing stays manual.**
 
 ## Architecture
 
 - **Primary writer:** Gemini 3.8 Flash Free Tier.
 - **Optional text failover / independent editor:** Groq `openai/gpt-oss-120b` Free, Mistral `ministral-8b-latest` in Studio Free mode, and Cloudflare Workers AI `@cf/meta/llama-3.1-8b-instruct` only with explicit Free-plan opt-in. Requests fail over sequentially; there is no paid route or parallel prompt fan-out.
 - **Narration:** Gemini 3.8 Flash-Lite TTS generates separate character dialogue turns with speaker-specific voice IDs. Each WAV is validated and measured before the final shot prompts and Wan video dispatch. Voice mappings are candidates requiring Hindi listening review; they are not guarantees of a character's exact age or acting quality.
-- **Video:** Wan2.2 TI2V-5B Q4_K_M GGUF on Kaggle free GPU through ComfyUI. The voice-first path selects per-beat frame counts from actual audio at 24 FPS; the existing 704×1280 model output is upscaled to 1080×1920.
+- **Primary visual generation:** FLUX.1 Schnell Q4_K_S GGUF through ComfyUI, 4-step still-image graphs, one vertical 704×1280 still per narrative beat. Pinned Depth Anything V2 Small estimates depth; OpenCV/FFmpeg generates camera-driven parallax motion. Editorial master is 1080×1920 at 30 FPS. The default story plan routes 100% of editorial shots through depth-parallax and dispatches no Wan video calls.
+- **Legacy renderer:** Wan2.2 TI2V-5B Q4_K_M GGUF remains available for already-created legacy jobs and older manifests; it is not the default generation route.
+- **Qualification status:** image-first workflow has offline code/tests but still requires a real Kaggle one-Reel render, model/runtime lock, measured GPU benchmark, output inspection and human visual approval before weekly batch qualification.
 - **Post:** FFmpeg/Pillow, custom typography, subtitles, overlays, cover and locally synthesized ambience.
 - **Delivery/learning:** private Telegram; `/approve` or `/reject` records the final owner decision; manual publishing; `/published` and `/insights` feed measured history.
 
 ## Voice-first dialogue and 3D pilot
 
 - Script/cast and dialogue turns are locked first. Each speaker turn gets its own TTS request and a cache key that includes exact text, acting direction and voice ID.
-- Final video prompts are generated only after WAV durations and speaker timestamps are measured. Wan shot frames follow the actual timeline; dialogue is never shortened to fit a fixed 3.375-second clip.
-- The persistent character registry stores metadata and explicit reuse IDs. Binary Blender assets remain outside Git; each new Reel gets its own cast identity unless reuse is deliberately selected.
-- Blender is an isolated stylised two-character pilot only. Its current mouth movement is amplitude-driven, not phoneme-accurate Hindi lip-sync. Wan2.2 remains the active production backend until the Blender pilot passes the GPU/render/quality and three-shadow-run gates in [the design note](docs/VOICE_FIRST_3D_PILOT.md).
+- Final visual beats and editorial shot timing are generated only after WAV durations and speaker timestamps are measured. FLUX stills are narrative keyframes; depth-parallax clips are encoded against the exact voice-beat duration. Dialogue is never shortened to fit a fixed clip.
+- The persistent character registry stores metadata and explicit reuse IDs. FLUX prompts receive the same per-Reel visual bible and character appearance/wardrobe descriptions. **True image-conditioned character-sheet locking across all generated stills and across episodes is not yet qualified**; it remains a visual QA and asset-library gap. Binary Blender assets remain outside Git.
+- Blender is an isolated stylised two-character pilot only. Its current mouth movement is amplitude-driven, not phoneme-accurate Hindi lip-sync. It is not part of the primary 2.5D renderer.
 
 ## Storytelling quality system
 
@@ -37,7 +39,7 @@ Run: `preflight` → `plan-one` → confirm the Reel is QA-passed and delivered 
 
 ## Important limitations
 
-No guarantee of artifact-free video, audience distribution, 10,000 views, monetization or Meta recommendation eligibility. Sampled-frame QA and technical motion checks supplement (but do not replace) one full human playback. If Kaggle exposes output after a failed run, verified scenes may be saved to a private Kaggle dataset and resumed; hard infrastructure loss may still prevent recovery. Gemini Free Tier prompts/responses may be used to improve Google products; only invented, public-safe stories belong in this workflow. Review the Wan2.2 upstream and quantization model license/NOTICE before commercial use.
+No guarantee of artifact-free video, audience distribution, 10,000 views, monetization or Meta recommendation eligibility. VLM frame review, 1 FPS OCR sampling and full-video black/freeze diagnostics supplement (but do not replace) one full human playback. Image-first PNG stills and legacy MP4 scene checkpoints are hash-verified for private Kaggle recovery; hard infrastructure loss may still prevent recovery. Gemini Free Tier prompts/responses may be used to improve Google products; only invented, public-safe stories belong in this workflow. Review FLUX Schnell/quantization, encoder, VAE, ComfyUI-GGUF and Depth Anything licences/notices before commercial use.
 
 ## References
 
