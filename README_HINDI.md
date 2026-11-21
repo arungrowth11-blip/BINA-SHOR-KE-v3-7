@@ -211,7 +211,9 @@ HunyuanVideo-1.5 is worth a future isolated comparison because its repository de
 - Kaggle free GPU usage: https://www.kaggle.com/docs/efficient-gpu-usage
 - ComfyUI: https://github.com/Comfy-Org/ComfyUI
 - ComfyUI GGUF node: https://github.com/city96/ComfyUI-GGUF
-- Wan2.2 TI2V 5B GGUF + NOTICE: https://huggingface.co/timfromhcs/Wan2.2-TI2V-5B-GGUF
+- FLUX.1 Schnell Q4_K_S GGUF: https://huggingface.co/city96/FLUX.1-schnell-gguf
+- Public FLUX AE VAE byte mirror (SHA-256 verified in worker): https://huggingface.co/nick911/flux1-schnell-normal
+- Wan2.2 TI2V 5B GGUF + NOTICE (legacy only): https://huggingface.co/timfromhcs/Wan2.2-TI2V-5B-GGUF
 - GitHub Actions billing: https://docs.github.com/en/billing/concepts/product-billing/github-actions
 - GitHub secrets: https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets
 - Telegram Bot API: https://core.telegram.org/bots/api
