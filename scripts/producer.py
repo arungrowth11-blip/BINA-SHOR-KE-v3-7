@@ -2884,6 +2884,9 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     if (
         approved
         and topic.get("qa_passed") is True
+        and topic.get("visual_qa_status") == "reviewed"
+        and topic.get("motion_diagnostics_status") == "passed"
+        and topic.get("metadata_ocr_status") == "passed"
         and topic.get("telegram_delivered") is True
         and topic.get("reel_id")
     ):
@@ -2894,6 +2897,9 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             "job_id": str(topic.get("job_id") or ""),
             "title": str(topic.get("title", title)),
             "qa_passed": True,
+            "visual_qa_status": "reviewed",
+            "motion_diagnostics_status": "passed",
+            "metadata_ocr_status": "passed",
             "telegram_delivered": True,
             "owner_approved": True,
             "approved_at_ist": topic.get("reviewed_at_ist") or datetime.now(TZ).isoformat(timespec="seconds"),
