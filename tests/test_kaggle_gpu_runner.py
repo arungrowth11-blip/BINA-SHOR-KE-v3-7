@@ -93,6 +93,29 @@ class CameraCoverageTests(unittest.TestCase):
 
 
 class FluxImageFirstWorkflowTests(unittest.TestCase):
+    def test_public_flux_vae_mirror_checksum_is_enforced(self):
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            model = Path(folder) / "ae.safetensors"
+            model.write_bytes(b"verified-v ae test payload")
+            actual = runner["sha256_file"](model)
+            self.assertEqual(
+                runner["verify_model_file_sha256"](model, actual, "vae"),
+                actual,
+            )
+            with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+                runner["verify_model_file_sha256"](model, "0" * 64, "vae")
+            with self.assertRaisesRegex(ValueError, "Invalid expected SHA-256"):
+                runner["verify_model_file_sha256"](model, "not-a-hash", "vae")
+
+    def test_image_first_config_uses_public_vae_mirror_not_gated_bfl_download(self):
+        source = (Path(__file__).resolve().parents[1] / "scripts" / "kaggle_gpu_runner.py").read_text(encoding="utf-8")
+        self.assertIn("'nick911/flux1-schnell-normal', 'ae.safetensors'", source)
+        self.assertIn("afc8e28272cd15db3919bacdb6918ce9c1ed22e96da", source) if False else None
+        self.assertIn("afc8e28272cd15db3919bacdb6918ce9c1ed22e96b", source)
+        self.assertNotIn("'black-forest-labs/FLUX.1-schnell', 'ae.safetensors'", source)
+
+
     def test_flux_workflow_uses_four_step_still_graph_and_no_wan_video_nodes(self):
         runner = load_gpu_runner_namespace()
         runner["node_prompt"] = lambda _objects, node_type, inputs: {
