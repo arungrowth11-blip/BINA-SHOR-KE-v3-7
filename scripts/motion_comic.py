@@ -34,7 +34,7 @@ def build_editorial_filter_graph(
         "depth_parallax": sum(1 for shot in shots if shot.get("source") == "depth_parallax"),
     }
     if sum(counts.values()) != len(shots) or not any(counts.values()):
-        raise ValueError("Editorial shots must use hero_video and/or depth_parallax sources.")
+        raise ValueError("Editorial shot source must be hero_video and/or depth_parallax.")
 
     input_indexes: dict[str, int] = {}
     next_input = 0
