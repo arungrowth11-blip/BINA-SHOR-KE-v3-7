@@ -1514,7 +1514,7 @@ def motion_diagnostics(video_path: Path) -> dict[str, Any]:
     """Full-duration FFmpeg scan for black intervals and unusually long frozen sections."""
     command = [
         "ffmpeg", "-hide_banner", "-i", str(video_path),
-        "-vf", "freezedetect=n=-50dB:d=1.35,blackdetect=d=0.30:pix_th=0.10",
+        "-vf", "freezedetect=n=-50dB:d=1.0,blackdetect=d=0.20:pix_th=0.10",
         "-an", "-f", "null", "-",
     ]
     try:
@@ -1524,8 +1524,8 @@ def motion_diagnostics(video_path: Path) -> dict[str, Any]:
         black_events = [float(x) for x in re.findall(r"black_duration:([0-9.]+)", log_text)]
         if result.returncode:
             return {"status": "not_completed", "reason": log_text[-500:], "human_review_required": True}
-        severe_black = [x for x in black_events if x >= 0.30]
-        long_freezes = [x for x in freeze_events if x >= 1.8]
+        severe_black = [x for x in black_events if x >= 0.20]
+        long_freezes = [x for x in freeze_events if x >= 1.0]
         if severe_black:
             status = "warning"
         elif long_freezes:
@@ -1540,6 +1540,71 @@ def motion_diagnostics(video_path: Path) -> dict[str, Any]:
         }
     except Exception as exc:
         return {"status": "not_completed", "reason": str(exc)[:500], "human_review_required": True}
+
+
+def metadata_ocr_qa(video_path: Path, reel_dir: Path, duration: float) -> dict[str, Any]:
+    """OCR a full-timeline sample and hard-reject leaked production labels."""
+    tesseract = shutil.which("tesseract")
+    if not tesseract:
+        return {
+            "status": "not_completed",
+            "reason": "Tesseract OCR is not installed; internal-label QA cannot be skipped.",
+            "frames_scanned": 0,
+            "human_review_required": True,
+        }
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(float(duration)) or duration <= 0:
+        return {"status": "not_completed", "reason": "OCR duration is invalid.", "frames_scanned": 0, "human_review_required": True}
+
+    frames_dir = reel_dir / "metadata_ocr_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    pattern = frames_dir / "ocr_%04d.jpg"
+    try:
+        run_cmd([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(video_path), "-vf", "fps=1,scale=720:-2",
+            "-q:v", "4", str(pattern),
+        ], timeout=240)
+        frames = sorted(frames_dir.glob("ocr_*.jpg"))
+        if not frames:
+            raise RuntimeError("FFmpeg did not produce OCR sample frames.")
+        forbidden = re.compile(r"\b(?:KEYWORD|STEP|CONTRAST|SCENE|HOOK|PROMPT|CLOSING)\b")
+        detections: list[dict[str, str]] = []
+        for frame in frames:
+            result = subprocess.run(
+                [tesseract, str(frame), "stdout", "-l", "eng+hin", "--psm", "11"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+            )
+            if result.returncode:
+                raise RuntimeError(f"Tesseract failed for {frame.name}: {(result.stderr or '')[-400:]}")
+            text_value = result.stdout or ""
+            for match in forbidden.finditer(text_value):
+                detections.append({
+                    "frame": frame.name,
+                    "term": match.group(0),
+                    "context": text_value[max(0, match.start()-70):min(len(text_value), match.end()+70)].strip(),
+                })
+            if re.search(r"[\[{]\s*['\"]?(?:role|prompt|scene|keyword|step)\b", text_value, flags=re.IGNORECASE):
+                detections.append({"frame": frame.name, "term": "raw_json_fragment", "context": text_value[:140].strip()})
+        report = {
+            "status": "warning" if detections else "passed",
+            "frames_scanned": len(frames),
+            "sample_rate_fps": 1,
+            "forbidden_terms_detected": detections,
+            "full_timeline_sampled": True,
+            "human_review_required": True,
+            "note": "OCR supplements VLM review; it cannot prove the absence of every visual text artifact.",
+        }
+    except Exception as exc:
+        report = {
+            "status": "not_completed",
+            "reason": str(exc)[:700],
+            "frames_scanned": 0,
+            "human_review_required": True,
+        }
+    (reel_dir / "metadata_ocr_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return report
 
 
 def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_durations: list[float] | None = None) -> dict[str, Any]:
@@ -1600,18 +1665,38 @@ def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_duratio
         else:
             result["status"] = "reviewed"
         result["human_review_required"] = True
-        return result
     except Exception as exc:
         log(f"Visual QA did not complete; continuing with human review required: {exc}")
-        return {"status": "not_completed", "reason": str(exc)[:500], "human_review_required": True}
+        result = {"status": "not_completed", "reason": str(exc)[:500], "human_review_required": True}
+
+    ocr_report = metadata_ocr_qa(video_path, reel_dir, duration)
+    result["metadata_ocr_qa"] = ocr_report
+    if ocr_report.get("status") == "warning":
+        result["critical_issue"] = True
+        result["status"] = "warning"
+    elif ocr_report.get("status") != "passed" and result.get("status") != "warning":
+        result["status"] = "not_completed"
+    return result
+
 
 def enforce_visual_qa(review: dict[str, Any]) -> None:
-    """Reject obvious visual defects; QA outage remains flagged for manual review."""
-    if review.get("status") == "warning":
+    """Require complete VLM, OCR and full-video motion diagnostics before delivery."""
+    if review.get("status") == "warning" or review.get("critical_issue") is True:
         raise RuntimeError(
             "Rendered-frame QA detected a potentially critical visual defect; "
             "the Reel was not added to the publish kit. Check QA frames and rerun."
         )
+    if review.get("status") != "reviewed":
+        raise RuntimeError(
+            "Rendered-frame QA did not complete successfully; the Reel was not added to the publish kit. "
+            "Review the QA outage/scorecard and rerun."
+        )
+    ocr = review.get("metadata_ocr_qa")
+    if not isinstance(ocr, dict) or ocr.get("status") != "passed" or ocr.get("forbidden_terms_detected"):
+        raise RuntimeError("Metadata OCR did not pass; refusing to deliver a Reel with unknown or leaked production labels.")
+    motion = review.get("full_video_motion_diagnostics")
+    if not isinstance(motion, dict) or motion.get("status") != "passed" or motion.get("full_video_scanned") is not True:
+        raise RuntimeError("Full-video black/freeze diagnostics did not pass; refusing to deliver a Reel with incomplete motion QA.")
 
 
 
