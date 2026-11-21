@@ -601,8 +601,57 @@ class FactoryLogicTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "critical visual defect"):
             producer.enforce_visual_qa({"status": "warning", "critical_issue": True})
 
-    def test_visual_qa_outage_keeps_manual_review_path_open(self):
-        producer.enforce_visual_qa({"status": "not_completed", "human_review_required": True})
+    def test_visual_qa_outage_blocks_delivery_until_review_completes(self):
+        with self.assertRaisesRegex(RuntimeError, "did not complete successfully"):
+            producer.enforce_visual_qa({"status": "not_completed", "human_review_required": True})
+
+    def test_visual_qa_requires_ocr_and_full_video_motion_to_pass(self):
+        base = {
+            "status": "reviewed",
+            "critical_issue": False,
+            "metadata_ocr_qa": {"status": "passed", "forbidden_terms_detected": []},
+        }
+        with self.assertRaisesRegex(RuntimeError, "Full-video black/freeze diagnostics"):
+            producer.enforce_visual_qa(base)
+        with self.assertRaisesRegex(RuntimeError, "Metadata OCR"):
+            producer.enforce_visual_qa({
+                **base,
+                "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+                "metadata_ocr_qa": {"status": "not_completed"},
+            })
+        producer.enforce_visual_qa({
+            **base,
+            "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+        })
+
+    def test_metadata_ocr_rejects_internal_prompt_labels(self):
+        from subprocess import CompletedProcess
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            video = root / "reel.mp4"
+            video.write_bytes(b"video")
+            def fake_extract(command, timeout=240):
+                Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+                (Path(command[-1]).parent / "ocr_0001.jpg").write_bytes(b"frame-a")
+                (Path(command[-1]).parent / "ocr_0002.jpg").write_bytes(b"frame-b")
+            outputs = [
+                CompletedProcess([], 0, stdout="normal subtitle text", stderr=""),
+                CompletedProcess([], 0, stdout="KEYWORD STEP appeared on screen", stderr=""),
+            ]
+            with patch.object(producer.shutil, "which", return_value="/usr/bin/tesseract"), \
+                 patch.object(producer, "run_cmd", side_effect=fake_extract), \
+                 patch.object(producer.subprocess, "run", side_effect=outputs):
+                report = producer.metadata_ocr_qa(video, root, 2.0)
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["frames_scanned"], 2)
+            self.assertEqual({x["term"] for x in report["forbidden_terms_detected"]}, {"KEYWORD", "STEP"})
+
+    def test_metadata_ocr_fails_closed_when_tesseract_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch.object(producer.shutil, "which", return_value=None):
+                report = producer.metadata_ocr_qa(root / "reel.mp4", root, 2.0)
+        self.assertEqual(report["status"], "not_completed")
 
     def test_visual_qa_requires_character_continuity_and_metadata_dimensions(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -621,7 +670,9 @@ class FactoryLogicTests(unittest.TestCase):
             }
             with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
                 producer, "gemini_json_with_images", return_value=response
-            ) as audit:
+            ) as audit, patch.object(
+                producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
+            ):
                 result = producer.visual_qa(
                     reel_dir / "reel.mp4", reel_dir, 35.0,
                     segment_durations=[5.8] * 6,
@@ -644,6 +695,8 @@ class FactoryLogicTests(unittest.TestCase):
             }
             with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
                 producer, "gemini_json_with_images", return_value=incomplete
+            ), patch.object(
+                producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
             ):
                 result = producer.visual_qa(
                     reel_dir / "reel.mp4", reel_dir, 35.0,
@@ -675,7 +728,9 @@ class FactoryLogicTests(unittest.TestCase):
                 response["scores"]["character_continuity"] = bad_value
                 with self.subTest(bad_value=repr(bad_value)), patch.object(
                     producer, "run_cmd", side_effect=fake_extract
-                ), patch.object(producer, "gemini_json_with_images", return_value=response):
+                ), patch.object(producer, "gemini_json_with_images", return_value=response), patch.object(
+                    producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
+                ):
                     result = producer.visual_qa(
                         reel_dir / "reel.mp4", reel_dir, 35.0,
                         segment_durations=[5.8] * 6,
@@ -703,6 +758,8 @@ class FactoryLogicTests(unittest.TestCase):
 
             with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
                 producer, "gemini_json_with_images", return_value=response
+            ), patch.object(
+                producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
             ):
                 result = producer.visual_qa(
                     reel_dir / "reel.mp4", reel_dir, 35.0,
