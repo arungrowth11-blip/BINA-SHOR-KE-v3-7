@@ -1570,12 +1570,34 @@ def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_duratio
             frame_paths,
         )
         scores = result.get("scores", {}) if isinstance(result, dict) else {}
-        numeric = [float(v) for v in scores.values() if isinstance(v, (int, float))]
+        required_scores = (
+            "text_legibility", "devanagari_rendering", "anatomy_integrity",
+            "story_visual_match", "safe_composition", "visual_quality",
+            "character_continuity", "metadata_text_cleanliness",
+        )
+
+        def valid_visual_score(value: Any) -> bool:
+            # bool is a subclass of int in Python; explicitly reject it. A model
+            # response outside the documented 1–5 scale must never count as QA.
+            return (
+                isinstance(value, (int, float))
+                and not isinstance(value, bool)
+                and math.isfinite(float(value))
+                and 1.0 <= float(value) <= 5.0
+            )
+
+        missing_scores = [key for key in required_scores if not valid_visual_score(scores.get(key))]
+        numeric = [float(scores[key]) for key in required_scores if valid_visual_score(scores.get(key))]
+        critical_issue_valid = isinstance(result.get("critical_issue"), bool)
         result["average_score"] = round(sum(numeric) / len(numeric), 2) if numeric else None
-        required_scores = ("text_legibility", "devanagari_rendering", "anatomy_integrity", "story_visual_match", "safe_composition", "visual_quality", "character_continuity", "metadata_text_cleanliness")
-        missing_scores = [key for key in required_scores if not isinstance(scores.get(key), (int, float))]
         result["missing_required_scores"] = missing_scores
-        result["status"] = "not_completed" if missing_scores else ("warning" if result.get("critical_issue") or (numeric and min(numeric) <= 2) else "reviewed")
+        result["missing_required_fields"] = [] if critical_issue_valid else ["critical_issue"]
+        if missing_scores or not critical_issue_valid:
+            result["status"] = "not_completed"
+        elif result["critical_issue"] is True or min(numeric) <= 2:
+            result["status"] = "warning"
+        else:
+            result["status"] = "reviewed"
         result["human_review_required"] = True
         return result
     except Exception as exc:
