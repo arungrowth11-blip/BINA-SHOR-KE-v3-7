@@ -1370,10 +1370,12 @@ def main():
                     depth_shots[0].get('camera_move') if depth_shots
                     else (beat.get('narrative_role', 'gentle_push') if isinstance(beat, dict) else 'gentle_push')
                 )
+                parallax_started = time.monotonic()
                 metadata = create_25d_parallax_clip(
                     source, parallax, scene_duration, depth_estimator,
                     camera_move=camera_move,
                 )
+                metadata['generation_elapsed_seconds'] = round(time.monotonic() - parallax_started, 2)
                 result_manifest['parallax_scenes'] = [
                     row for row in result_manifest['parallax_scenes']
                     if not (row.get('reel_id') == reel_id and int(row.get('scene_index', 0)) == scene_index)
