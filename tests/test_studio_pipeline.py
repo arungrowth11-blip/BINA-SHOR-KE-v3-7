@@ -1088,14 +1088,18 @@ class StudioPipelineTests(unittest.TestCase):
         producer_source = (ROOT / "scripts" / "producer.py").read_text(encoding="utf-8")
         pipeline_source = (ROOT / "scripts" / "studio_pipeline.py").read_text(encoding="utf-8")
         self.assertIn("model_info('depth-anything/Depth-Anything-V2-Small-hf'", runner_source)
-        self.assertIn("model_revisions['depth'] = resolved_depth_revision", runner_source)
-        self.assertIn("revision=revision", runner_source)
+        self.assertIn("model_revisions['depth'] = depth_revision", runner_source)
+        self.assertIn("build_flux_image_workflow", runner_source)
+        self.assertIn("flux1-schnell-Q4_K_S.gguf", runner_source)
+        self.assertIn("generation_mode", runner_source)
         self.assertIn("scene_{scene_index:02d}_25d.mp4", runner_source)
         self.assertIn("'sha256': sha256_file(parallax)", runner_source)
         self.assertIn("motion_comic.render_editorial_montage", producer_source)
+        self.assertIn("primary_image_first", producer_source)
         self.assertIn("depth_rows", pipeline_source)
         self.assertIn("_sha256(depth_source)", pipeline_source)
-        self.assertIn("depth_model_locked_at_ist", pipeline_source)
+        self.assertIn("verify_or_lock_image_toolchain", pipeline_source)
+        self.assertIn("IMAGE_TOOLCHAIN_LOCK", pipeline_source)
 
 
 if __name__ == "__main__":
