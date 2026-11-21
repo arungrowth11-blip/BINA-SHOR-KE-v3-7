@@ -41,12 +41,12 @@ class StoryEngineTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "allowed range is 20–30s"):
             story_engine.validate_measured_duration(34, "comedy")
 
-    def test_35_second_emotional_story_gets_twelve_meaningful_shots(self):
+    def test_35_second_emotional_story_gets_fourteen_meaningful_shots(self):
         plan = story_engine.build_editorial_shot_plan([5.8, 5.7, 5.9, 5.8, 5.9, 5.9], "emotional")
-        self.assertEqual(plan["editorial_shot_count"], 12)
+        self.assertEqual(plan["editorial_shot_count"], 14)
         self.assertEqual(plan["source_beat_count"], 6)
-        self.assertEqual(plan["hero_video_shot_count"], 3)
-        self.assertEqual(plan["depth_parallax_shot_count"], 9)
+        self.assertEqual(plan["hero_video_shot_count"], 4)
+        self.assertEqual(plan["depth_parallax_shot_count"], 10)
         self.assertEqual(plan["gpu_generation_count"], 6)
         self.assertFalse(plan["gpu_generation_saving_claim"])
         self.assertAlmostEqual(sum(s["duration_seconds"] for s in plan["shots"]), plan["measured_duration_seconds"], places=2)
