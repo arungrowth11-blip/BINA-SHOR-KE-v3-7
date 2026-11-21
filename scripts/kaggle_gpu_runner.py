@@ -470,6 +470,8 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
         "Keep the same character appearance, clothing, environment and restrained visual treatment across scenes. "
         "No readable text, subtitles, logos or watermarks."
     )
+    if reference_image and scene_index > 1:
+        full_prompt += "\\nVISUAL IDENTITY ANCHOR: the supplied first-scene image is a continuity reference for recurring character face, age, hair, clothing and palette. Animate the requested new action; do not copy the previous pose or freeze the reference composition."
     seed = int(hashlib.sha256(f"{MANIFEST.get('job_id')}|{story['reel_id']}|{scene_index}|{prompt_text}".encode()).hexdigest()[:15], 16) % (2**63 - 1)
 
     g = {}
@@ -481,9 +483,24 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     g['48'] = node_prompt(objects, 'ModelSamplingSD3', {'model': ['37', 0], 'shift': 8})
     g['6'] = node_prompt(objects, 'CLIPTextEncode', {'text': full_prompt, 'clip': ['38', 0]})
     g['7'] = node_prompt(objects, 'CLIPTextEncode', {'text': NEGATIVE, 'clip': ['38', 0]})
-    g['55'] = node_prompt(objects, 'Wan22ImageToVideoLatent', {
+    latent_inputs = {
         'width': 704, 'height': 1280, 'length': target_frames, 'batch_size': 1, 'vae': ['39', 0]
-    })
+    }
+    reference_image = str(story.get('character_reference_image') or '').strip()
+    uses_hybrid_reference = (
+        scene_index > 1 and story.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1'
+    )
+    if uses_hybrid_reference:
+        if not reference_image or Path(reference_image).name != reference_image:
+            raise RuntimeError(
+                f"Scene {scene_index} is missing its safe first-scene character anchor; "
+                "refusing to generate a text-only continuity fallback."
+            )
+        g['59'] = node_prompt(objects, 'LoadImage', {'image': reference_image})
+        latent_inputs['start_image'] = ['59', 0]
+    elif reference_image and Path(reference_image).name != reference_image:
+        raise ValueError("character_reference_image must be a safe ComfyUI input filename.")
+    g['55'] = node_prompt(objects, 'Wan22ImageToVideoLatent', latent_inputs)
     # The ComfyUI API KSampler schema exposes `seed` but not the UI-only
     # `control_after_generate` widget value. Determinism is already guaranteed by
     # the explicit per-scene seed computed above.
@@ -595,6 +612,81 @@ def latest_video(output_dir: Path, before: float, prefix: str) -> Path:
     if not files:
         raise RuntimeError(f'ComfyUI completed but no matching video output found after prompt prefix {prefix}.')
     return max(files, key=lambda p: p.stat().st_mtime)
+
+
+def create_character_reference_image(source: Path, destination: Path, duration: float) -> dict:
+    """Extract and verify a first-scene identity anchor for reference-conditioned later Wan scenes."""
+    import math
+    from PIL import Image
+
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(float(duration)) or duration <= 0.5:
+        raise ValueError("Character reference extraction requires a finite source scene longer than 0.5 seconds.")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    temporary = destination.with_name(destination.stem + ".partial.png")
+    temporary.unlink(missing_ok=True)
+    timestamp = min(max(0.1, float(duration) * 0.45), float(duration) - 0.05)
+    run([
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+        "-ss", f"{timestamp:.3f}", "-i", str(source),
+        "-frames:v", "1", "-vf", "scale=704:1280:flags=lanczos,format=rgb24",
+        str(temporary),
+    ], timeout=180)
+    if not temporary.is_file() or temporary.stat().st_size < 10_000:
+        temporary.unlink(missing_ok=True)
+        raise RuntimeError("First-scene identity anchor was not extracted as a non-empty PNG.")
+    try:
+        with Image.open(temporary) as frame:
+            frame.verify()
+        with Image.open(temporary) as frame:
+            if frame.size != (704, 1280):
+                raise RuntimeError(f"Character reference has unexpected dimensions {frame.size}; expected 704x1280.")
+            frame.load()
+    except Exception:
+        temporary.unlink(missing_ok=True)
+        raise
+    temporary.replace(destination)
+    return {
+        "filename": destination.name,
+        "width": 704,
+        "height": 1280,
+        "timestamp_seconds": round(timestamp, 3),
+        "bytes": destination.stat().st_size,
+        "sha256": sha256_file(destination),
+        "conditioning": "ComfyUI LoadImage -> Wan22ImageToVideoLatent.start_image for later scenes",
+    }
+
+
+def persist_character_reference(reel: dict, reel_id: str, scene_path: Path, result_manifest: dict) -> dict:
+    """Save a per-Reel first-scene visual anchor; this is not a permanent cast portrait."""
+    valid, duration = valid_scene_file(scene_path)
+    if not valid:
+        raise RuntimeError(f"Cannot derive a character identity anchor from invalid Scene 1: {scene_path}")
+    safe_reel_id = re.sub(r"[^A-Za-z0-9_-]+", "_", reel_id)
+    reference_path = COMFY / "input" / f"{safe_reel_id}_identity_anchor.png"
+    metadata = create_character_reference_image(scene_path, reference_path, duration)
+    reel["character_reference_image"] = metadata["filename"]
+    record = {
+        "reel_id": reel_id,
+        "source_scene_index": 1,
+        "path": str(reference_path.relative_to(COMFY)),
+        "sha256": metadata["sha256"],
+        "bytes": metadata["bytes"],
+        "width": metadata["width"],
+        "height": metadata["height"],
+        "timestamp_seconds": metadata["timestamp_seconds"],
+        "used_for_scenes": list(range(2, len(reel.get("beats", [])) + 1)),
+        "conditioning": metadata["conditioning"],
+    }
+    references = result_manifest.setdefault("character_references", [])
+    references[:] = [item for item in references if item.get("reel_id") != reel_id]
+    references.append(record)
+    write_json(OUT / "gpu_output_manifest.json", result_manifest)
+    print(
+        f"Saved {reel_id} first-scene identity anchor ({metadata['width']}x{metadata['height']}, "
+        f"SHA-256 {metadata['sha256'][:12]}) for later Wan scenes.",
+        flush=True,
+    )
+    return record
 
 
 def transcode_scene(source: Path, destination: Path):
@@ -732,7 +824,7 @@ def main():
     result_manifest = {
         'job_id': MANIFEST.get('job_id'), 'status': 'running', 'model': 'Wan2.2 TI2V 5B Q4_K_M GGUF',
         'license_note': 'Wan2.2 upstream is Apache-2.0; this quantized derivative has its own attribution/notice. Review licenses before commercial use.',
-        'scenes': [], 'parallax_scenes': [], 'visual_pipeline': 'hybrid_25d_motion_comic_v1',
+        'scenes': [], 'parallax_scenes': [], 'character_references': [], 'visual_pipeline': 'hybrid_25d_motion_comic_v1',
         'depth_model': 'depth-anything/Depth-Anything-V2-Small-hf', 'depth_model_license': 'Apache-2.0',
         'started_at_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
     }
@@ -763,6 +855,8 @@ def main():
             for i, beat in enumerate(reel['beats'], start=1):
                 final_out = OUT / reel_id / f'scene_{i:02d}.mp4'
                 if final_out.exists() and final_out.stat().st_size > 100_000:
+                    if i == 1 and reel.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1':
+                        persist_character_reference(reel, reel_id, final_out, result_manifest)
                     continue
                 prefix = f"bsk/{reel_id}/scene_{i:02d}"
                 before = time.time()
@@ -779,6 +873,8 @@ def main():
                 result_manifest.pop('current_scene', None)
                 source = latest_video(output_dir, before, prefix)
                 transcode_scene(source, final_out)
+                if i == 1 and reel.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1':
+                    persist_character_reference(reel, reel_id, final_out, result_manifest)
                 result_manifest['scenes'].append({
                     'reel_id': reel_id, 'scene_index': i, 'path': str(final_out.relative_to(WORK)),
                     'bytes': final_out.stat().st_size, 'duration_seconds_target': float(beat.get('target_frames', 81)) / 24.0,

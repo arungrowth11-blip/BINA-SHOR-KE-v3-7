@@ -142,6 +142,7 @@ class StudioPipelineTests(unittest.TestCase):
             'ModelSamplingSD3': ['model', 'shift'],
             'CLIPTextEncode': ['text', 'clip'],
             'Wan22ImageToVideoLatent': ['width', 'height', 'length', 'batch_size', 'vae', 'start_image'],
+            'LoadImage': ['image'],
             'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
             'VAEDecode': ['samples', 'vae'],
             'CreateVideo': ['images', 'fps'],
@@ -161,6 +162,43 @@ class StudioPipelineTests(unittest.TestCase):
         graph = runner.build_api_workflow(objects, beat, story, 1, 'bsk/reel_voice_test/scene_01')
         self.assertEqual(graph['55']['inputs']['length'], 109)
         self.assertEqual(graph['57']['inputs']['fps'], 24)
+
+    def test_later_wan_scenes_are_conditioned_on_the_verified_first_scene_anchor(self):
+        runner = load_runner_module()
+        schema = {
+            'UnetLoaderGGUF': ['unet_name'], 'CLIPLoader': ['clip_name', 'type', 'device'],
+            'VAELoader': ['vae_name'], 'ModelSamplingSD3': ['model', 'shift'],
+            'CLIPTextEncode': ['text', 'clip'], 'LoadImage': ['image'],
+            'Wan22ImageToVideoLatent': ['width', 'height', 'length', 'batch_size', 'vae', 'start_image'],
+            'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+            'VAEDecode': ['samples', 'vae'], 'CreateVideo': ['images', 'fps'],
+            'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
+        }
+        objects = {
+            node: {'input': {'required': {key: [] for key in keys if not (node == 'Wan22ImageToVideoLatent' and key == 'start_image')},
+                             'optional': {'start_image': []} if node == 'Wan22ImageToVideoLatent' else {}}}
+            for node, keys in schema.items()
+        }
+        beat = {'video_prompt': 'Illustrated character takes one new action in the same room.', 'target_frames': 109,
+                'voice_timing': {'target_frames': 109, 'fps': 24}, 'narrative_role': 'context',
+                'state_change': 'The protagonist discovers a new consequence', 'causal_link': 'The hook creates this next discovery'}
+        story = {'reel_id': 'reel_anchor_test', 'visual_bible': 'Same two characters, consistent wardrobe.',
+                 'visual_pipeline': 'hybrid_25d_motion_comic_v1', 'character_reference_image': 'reel_anchor_test_identity_anchor.png',
+                 'beats': [beat] * 6}
+        graph = runner.build_api_workflow(objects, beat, story, 2, 'bsk/reel_anchor_test/scene_02')
+        self.assertEqual(graph['59']['class_type'], 'LoadImage')
+        self.assertEqual(graph['59']['inputs']['image'], 'reel_anchor_test_identity_anchor.png')
+        self.assertEqual(graph['55']['inputs']['start_image'], ['59', 0])
+        self.assertIn('VISUAL IDENTITY ANCHOR', graph['6']['inputs']['text'])
+
+    def test_hybrid_later_scene_fails_closed_when_reference_anchor_is_missing(self):
+        runner = load_runner_module()
+        runner['node_prompt'] = lambda _objects, node_type, inputs: {'class_type': node_type, 'inputs': inputs}
+        story = {'reel_id': 'reel_anchor_test', 'visual_pipeline': 'hybrid_25d_motion_comic_v1', 'beats': [{}] * 6}
+        beat = {'video_prompt': 'A clear illustrated action.', 'target_frames': 109, 'voice_timing': {'fps': 24},
+                'narrative_role': 'context', 'state_change': 'The character notices a new detail', 'causal_link': 'The hook creates this discovery'}
+        with self.assertRaisesRegex(RuntimeError, 'missing its safe first-scene character anchor'):
+            runner.build_api_workflow({}, beat, story, 2, 'bsk/test/scene_02')
 
     def test_wan_graph_rejects_invalid_frame_shape_and_unsupported_duration(self):
         runner = load_runner_module()

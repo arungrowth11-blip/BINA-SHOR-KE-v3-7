@@ -12,7 +12,7 @@ The character registry stores metadata only. Binary Blender rigs, meshes, textur
 2. **Speaker audio:** generate each dialogue turn with its assigned Gemini voice profile. Validate 24 kHz, mono, 16-bit PCM WAV and measure actual duration. Store transcript + performance direction + voice ID in the cache identity; two voices must never share a cache entry merely because their dialogue text is the same.
 3. **Timeline:** place each actual WAV on the beat timeline with a short head handle and natural dialogue gaps. Calculate a 24 FPS shot length by rounding up to Wan's 4n+1 temporal frame shape. The screenplay is not shortened to fit a clip.
 4. **Final storyboard:** only after all WAVs are measured, produce the final six video prompts using the cast bible, exact dialogue turns, audio start/end times, emotion and measured target duration. The storyboard is not allowed to rewrite the script or change the frame count.
-5. **Video:** pass the voice-derived frame count into the Wan2.2 ComfyUI graph. The worker rejects invalid frame shapes and unsupported scene lengths before dispatching that scene.
+5. **Video:** render the first source beat, then extract a verified 704×1280 identity-anchor frame from that scene. For hybrid 2.5D Reels, later Wan2.2 clips load that anchor through ComfyUI `LoadImage` and feed it to `Wan22ImageToVideoLatent.start_image`, alongside the beat's narrative role, state change and causal link. The first beat is never conditioned on its own output. Missing/corrupt anchors or unsupported ComfyUI inputs fail closed rather than silently reverting to text-only character continuity. The worker also passes voice-derived frame counts and rejects invalid frame shapes/unsupported scene lengths before dispatching each scene.
 6. **Finish:** reuse the exact cached speaker WAVs, assemble them in dialogue order with the measured lead-in, then run the existing subtitle, ASR, audio and visual QA gates.
 
 ### Timing bounds
@@ -52,8 +52,9 @@ Voice gender/character direction and actual Hindi acting quality require a human
 - data/characters/registry.json is the versioned metadata registry.
 - Each newly cast character receives an identity scoped to its Reel. A reused asset must be selected explicitly using reuse_character_id; names such as protagonist are not global identities.
 - The registry tracks appearance, personality, age/gender presentation, voice profile and rights-review state.
+- Each hybrid Reel derives a per-Reel identity-anchor frame from its first rendered source beat and conditions later Wan clips with that real image input. The anchor is SHA-256 recorded in the GPU manifest; it is a first-scene frame, not a curated multi-angle portrait sheet or cross-episode character asset.
 - Character rig binaries and textures belong under the ignored assets/characters/ directory or a private versioned asset store, not in the source repository.
-- Current branch can preserve and look up character metadata; it does not yet generate, upload or restore a production Blender rig automatically.
+- Current branch can preserve and look up character metadata and use a verified first-scene visual anchor within one Reel. It does not yet generate a reusable multi-angle character portrait sheet, guarantee identity across episodes, or generate/upload/restore a production Blender rig automatically. Later scenes still require automated and human continuity review.
 
 ## Blender pilot
 

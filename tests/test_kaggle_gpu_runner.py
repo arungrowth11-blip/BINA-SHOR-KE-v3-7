@@ -91,6 +91,38 @@ class CameraCoverageTests(unittest.TestCase):
 
 
 
+class CharacterReferenceTests(unittest.TestCase):
+    def test_first_scene_reference_is_extracted_validated_and_hashed(self):
+        from PIL import Image
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            source = root / "scene_01.mp4"
+            destination = root / "input" / "reel_identity_anchor.png"
+            source.write_bytes(b"source")
+            commands = []
+            def fake_run(command, cwd=None, timeout=1800):
+                commands.append(command)
+                Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (704, 1280), (30, 50, 70)).save(command[-1])
+                return ""
+            with patch.object(runner, "run", side_effect=fake_run):
+                result = runner["create_character_reference_image"](source, destination, 4.0)
+            self.assertEqual(result["filename"], "reel_identity_anchor.png")
+            self.assertEqual((result["width"], result["height"]), (704, 1280))
+            self.assertEqual(result["sha256"], runner["sha256_file"](destination))
+            self.assertTrue(destination.is_file())
+            self.assertEqual(len(commands), 1)
+            self.assertIn("1.800", commands[0])
+
+    def test_first_scene_reference_rejects_non_finite_or_too_short_duration(self):
+        runner = load_gpu_runner_namespace()
+        with tempfile.TemporaryDirectory() as folder:
+            destination = Path(folder) / "identity.png"
+            with self.assertRaisesRegex(ValueError, "finite source scene"):
+                runner["create_character_reference_image"](Path("scene.mp4"), destination, float("nan"))
+
+
 class ComfyPromptDiagnosticsTests(unittest.TestCase):
     def test_prompt_timeout_is_extended_to_ninety_minutes_per_scene(self):
         runner = load_gpu_runner_namespace()
