@@ -326,6 +326,10 @@ class FluxImageFirstWorkflowTests(unittest.TestCase):
         }
         class Response:
             status = 200
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, traceback):
+                return False
             def read(self):
                 return json.dumps({name: {} for name in required}).encode("utf-8")
         with patch.object(runner["urllib"].request, "urlopen", return_value=Response()):
