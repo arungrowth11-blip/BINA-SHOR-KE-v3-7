@@ -1083,6 +1083,30 @@ class StudioPipelineTests(unittest.TestCase):
         self.assertEqual(studio_pipeline.self_test(), 0)
 
 
+    def test_image_first_checkpoint_collector_keeps_hash_verified_png_stills(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            reel_id = "reel_image_checkpoint"
+            scene_dir = root / reel_id
+            scene_dir.mkdir(parents=True)
+            still = scene_dir / "scene_01.png"
+            Image.effect_noise((704, 1280), 80).convert("RGB").save(still, format="PNG")
+            pending = {
+                "job_id": "image-checkpoint-job",
+                "reels": [{
+                    "reel_id": reel_id,
+                    "beats": [{}],
+                    "concept": {"visual_pipeline": producer.story_engine.PRIMARY_25D_PIPELINE},
+                }],
+            }
+            rows = studio_pipeline.collect_checkpoint_clips(root, pending)
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["media_type"], "image/png")
+            self.assertEqual(rows[0]["file"], f"{reel_id}__scene_01.png")
+            self.assertEqual((rows[0]["width"], rows[0]["height"]), (704, 1280))
+            self.assertEqual(rows[0]["sha256"], studio_pipeline._sha256(still))
+
     def test_hybrid_motion_comic_worker_pins_depth_model_and_finalizer_verifies_assets(self):
         runner_source = (ROOT / "scripts" / "kaggle_gpu_runner.py").read_text(encoding="utf-8")
         producer_source = (ROOT / "scripts" / "producer.py").read_text(encoding="utf-8")
