@@ -245,16 +245,23 @@ def hf_cache_revision(path) -> str:
 
 def install_comfyui():
     import torch
+    from huggingface_hub import hf_hub_download, model_info
+
+    primary_image_first = any(
+        is_25d_pipeline(reel.get('visual_pipeline'))
+        for reel in MANIFEST.get('reels', [])
+    )
     if not torch.cuda.is_available():
         raise RuntimeError('Kaggle did not provide a CUDA GPU. No CPU fallback was attempted because it would be too slow and low quality.')
     gpu_name = torch.cuda.get_device_name(0)
     total_vram_gib = torch.cuda.get_device_properties(0).total_memory / (1024**3)
     if total_vram_gib < 7.5:
-        raise RuntimeError(f'GPU {gpu_name} has only {total_vram_gib:.1f} GiB VRAM. The Wan2.2 5B Q4 path requires a larger GPU; no CPU or paid fallback was attempted.')
+        raise RuntimeError(f'GPU {gpu_name} has only {total_vram_gib:.1f} GiB VRAM. The qualified 4-bit still/video model paths require at least 7.5 GiB; no CPU or paid fallback was attempted.')
     free = shutil.disk_usage(WORK).free / (1024**3)
-    if free < 14.5:
-        raise RuntimeError(f'Only {free:.1f} GiB free disk space; the open-weight 5B GGUF + text encoder + VAE need about 11 GiB plus runtime/output. Aborting before download.')
-    print(f'GPU={gpu_name}; total_vram={total_vram_gib:.1f} GiB; free_disk={free:.1f} GiB')
+    min_disk = 14.5 if primary_image_first else 14.5
+    if free < min_disk:
+        raise RuntimeError(f'Only {free:.1f} GiB free disk space; the selected open-weight model, text encoders, VAE and depth model need about {min_disk:.1f} GiB plus runtime/output. Aborting before download.')
+    print(f'GPU={gpu_name}; total_vram={total_vram_gib:.1f} GiB; free_disk={free:.1f} GiB; mode={"image-first-primary-2.5d" if primary_image_first else "legacy-wan-video"}', flush=True)
 
     lock = MANIFEST.get('toolchain_lock') if isinstance(MANIFEST.get('toolchain_lock'), dict) else {}
     comfy_sha = clone_and_pin_repo(
@@ -268,7 +275,7 @@ def install_comfyui():
     os.environ['BSK_COMFYUI_SHA'] = comfy_sha
     os.environ['BSK_COMFYUI_GGUF_SHA'] = gguf_sha
 
-    # Install runtime/node dependencies while allowing the Kaggle image's CUDA-enabled Torch to satisfy existing requirements.
+    # Install node dependencies while preserving Kaggle's CUDA-enabled Torch.
     run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '-r', str(COMFY / 'requirements.txt')], timeout=1800)
     req = gguf_dir / 'requirements.txt'
     if req.exists():
@@ -276,12 +283,10 @@ def install_comfyui():
     else:
         run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'gguf'], timeout=900)
 
-    # FFmpeg exists in many Kaggle images; install only if missing.
     if shutil.which('ffmpeg') is None:
         run(['bash', '-lc', 'apt-get update -qq && apt-get install -y ffmpeg'], timeout=900)
-
-    # Ensure the one download helper exists without changing the notebook's CUDA-enabled Torch.
     run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'huggingface_hub'], timeout=900)
+
     try:
         import cv2  # noqa: F401
     except ImportError:
@@ -291,57 +296,105 @@ def install_comfyui():
     except ImportError:
         run([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', 'transformers>=4.46,<5'], timeout=900)
 
-    # Resolve large licensed model files into Hugging Face cache and symlink them into ComfyUI model folders.
-    from huggingface_hub import hf_hub_download, model_info
-    paths = {
-        'unet': ('timfromhcs/Wan2.2-TI2V-5B-GGUF', 'Wan2.2-TI2V-5B-Q4_K_M.gguf', COMFY / 'models' / 'unet' / 'Wan2.2-TI2V-5B-Q4_K_M.gguf'),
-        # The Wan2.2 repackaged snapshot contains the compatible UMT5 text encoder and Wan2.2 VAE.
-        'clip': ('Comfy-Org/Wan_2.2_ComfyUI_Repackaged', 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', COMFY / 'models' / 'text_encoders' / 'umt5_xxl_fp8_e4m3fn_scaled.safetensors'),
-        'vae': ('Comfy-Org/Wan_2.2_ComfyUI_Repackaged', 'split_files/vae/wan2.2_vae.safetensors', COMFY / 'models' / 'vae' / 'wan2.2_vae.safetensors'),
-    }
-    model_revisions = {}
-    locked_revisions = lock.get('model_revisions') if isinstance(lock.get('model_revisions'), dict) else {}
-    for key, (repo, filename, dest) in paths.items():
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        revision = locked_revisions.get(key)
-        if revision and not re.fullmatch(r'[0-9a-f]{40}', str(revision)):
-            raise RuntimeError(
-                f'Invalid locked Hugging Face revision for {key}: {revision!r}. '
-                'Expected an immutable 40-character snapshot commit SHA, not a model folder name.'
-            )
-        if dest.exists() or dest.is_symlink():
-            # Reuse only a real snapshot link whose immutable commit can be independently recovered.
-            if dest.is_symlink():
-                model_revisions[key] = hf_cache_revision(dest)
-                if revision and model_revisions[key] != revision:
-                    raise RuntimeError(
-                        f'Existing {key} model symlink resolves to {model_revisions[key]}, '
-                        f'but the manifest locks {revision}.'
-                    )
+    if primary_image_first:
+        # One image-generation model only: do not download Wan into the same Kaggle
+        # session. This keeps disk use predictable and makes the primary path truly
+        # still-first rather than video-first with a parallax keyframe afterthought.
+        paths = {
+            'unet': ('city96/FLUX.1-schnell-gguf', 'flux1-schnell-Q4_K_S.gguf',
+                     COMFY / 'models' / 'unet' / 'flux1-schnell-Q4_K_S.gguf'),
+            'clip_l': ('comfyanonymous/flux_text_encoders', 'clip_l.safetensors',
+                       COMFY / 'models' / 'text_encoders' / 'clip_l.safetensors'),
+            't5xxl': ('comfyanonymous/flux_text_encoders', 't5xxl_fp8_e4m3fn_scaled.safetensors',
+                      COMFY / 'models' / 'text_encoders' / 't5xxl_fp8_e4m3fn_scaled.safetensors'),
+            'vae': ('Comfy-Org/Lumina_Image_2.0_Repackaged', 'split_files/vae/ae.safetensors',
+                    COMFY / 'models' / 'vae' / 'ae.safetensors'),
+        }
+        locked_revisions = MANIFEST.get('image_toolchain_lock')
+        locked_revisions = locked_revisions.get('model_revisions', {}) if isinstance(locked_revisions, dict) else {}
+        model_revisions: dict[str, str] = {}
+        for key, (repo, filename, destination) in paths.items():
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            expected_revision = str(locked_revisions.get(key, '') or '').strip()
+            if expected_revision and not re.fullmatch(r'[0-9a-f]{40}', expected_revision):
+                raise RuntimeError(f'Image toolchain lock has an invalid {key} snapshot SHA: {expected_revision!r}')
+            if destination.is_symlink():
+                resolved = hf_cache_revision(destination)
+                if expected_revision and resolved != expected_revision:
+                    raise RuntimeError(f'Existing {key} model snapshot {resolved} differs from locked {expected_revision}.')
+                model_revisions[key] = resolved
                 continue
-            raise RuntimeError(f'Model path already exists as a non-symlink; refusing to guess revision: {dest}')
-        print(f'Downloading model component: {key} ({repo}/{filename})' + (f' at locked revision {revision}' if revision else ' at current revision for first lock'))
-        kwargs = {'repo_id': repo, 'filename': filename, 'cache_dir': str(HF_CACHE)}
-        if revision:
-            kwargs['revision'] = revision
-        cached = Path(hf_hub_download(**kwargs))
-        model_revisions[key] = hf_cache_revision(cached)
-        if revision and model_revisions[key] != revision:
-            raise RuntimeError(
-                f'Downloaded {key} snapshot {model_revisions[key]} does not match the locked SHA {revision}.'
-            )
-        dest.symlink_to(cached)
-    depth_revision = locked_revisions.get('depth')
-    depth_info = model_info('depth-anything/Depth-Anything-V2-Small-hf', revision=depth_revision)
-    resolved_depth_revision = str(getattr(depth_info, 'sha', '') or '').strip()
-    if not re.fullmatch(r'[0-9a-f]{40}', resolved_depth_revision):
-        raise RuntimeError('Depth Anything V2 model did not resolve to an immutable commit SHA.')
-    if depth_revision and resolved_depth_revision != depth_revision:
-        raise RuntimeError(f'Depth model revision drift: expected {depth_revision}, resolved {resolved_depth_revision}.')
-    model_revisions['depth'] = resolved_depth_revision
+            if destination.exists():
+                raise RuntimeError(f'Image model path exists but is not a Hugging Face cache symlink: {destination}')
+            info = model_info(repo, revision=expected_revision or None)
+            revision = str(getattr(info, 'sha', '') or '').strip()
+            if not re.fullmatch(r'[0-9a-f]{40}', revision):
+                raise RuntimeError(f'Could not resolve immutable Hugging Face revision for {repo}.')
+            if expected_revision and revision != expected_revision:
+                raise RuntimeError(f'{repo} revision drift: expected {expected_revision}, got {revision}.')
+            cached = Path(hf_hub_download(
+                repo_id=repo, filename=filename, revision=revision, cache_dir=str(HF_CACHE)
+            ))
+            resolved = hf_cache_revision(cached)
+            if resolved != revision:
+                raise RuntimeError(f'{key} model cache snapshot {resolved} differs from resolved revision {revision}.')
+            destination.symlink_to(cached)
+            model_revisions[key] = resolved
+    else:
+        paths = {
+            'unet': ('timfromhcs/Wan2.2-TI2V-5B-GGUF', 'Wan2.2-TI2V-5B-Q4_K_M.gguf', COMFY / 'models' / 'unet' / 'Wan2.2-TI2V-5B-Q4_K_M.gguf'),
+            'clip': ('Comfy-Org/Wan_2.2_ComfyUI_Repackaged', 'split_files/text_encoders/umt5_xxl_fp8_e4m3fn_scaled.safetensors', COMFY / 'models' / 'text_encoders' / 'umt5_xxl_fp8_e4m3fn_scaled.safetensors'),
+            'vae': ('Comfy-Org/Wan_2.2_ComfyUI_Repackaged', 'split_files/vae/wan2.2_vae.safetensors', COMFY / 'models' / 'vae' / 'wan2.2_vae.safetensors'),
+        }
+        model_revisions = {}
+        locked_revisions = lock.get('model_revisions') if isinstance(lock.get('model_revisions'), dict) else {}
+        for key, (repo, filename, dest) in paths.items():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            revision = locked_revisions.get(key)
+            if revision and not re.fullmatch(r'[0-9a-f]{40}', str(revision)):
+                raise RuntimeError(f'Invalid locked Hugging Face revision for {key}: {revision!r}.')
+            if dest.exists() or dest.is_symlink():
+                if dest.is_symlink():
+                    model_revisions[key] = hf_cache_revision(dest)
+                    if revision and model_revisions[key] != revision:
+                        raise RuntimeError(f'Existing {key} model symlink differs from locked revision.')
+                    continue
+                raise RuntimeError(f'Model path already exists as a non-symlink; refusing to guess revision: {dest}')
+            info = model_info(repo, revision=revision or None)
+            resolved = str(getattr(info, 'sha', '') or '').strip()
+            if not re.fullmatch(r'[0-9a-f]{40}', resolved):
+                raise RuntimeError(f'Could not resolve immutable Hugging Face revision for {repo}.')
+            cached = Path(hf_hub_download(
+                repo_id=repo, filename=filename, revision=resolved, cache_dir=str(HF_CACHE)
+            ))
+            model_revisions[key] = hf_cache_revision(cached)
+            if model_revisions[key] != resolved:
+                raise RuntimeError(f'{key} model cache SHA differs from resolved commit.')
+            dest.symlink_to(cached)
+
+    depth_revision = None
+    if primary_image_first:
+        lock_depth = locked_revisions.get('depth')
+        depth_info = model_info('depth-anything/Depth-Anything-V2-Small-hf', revision=lock_depth or None)
+        depth_revision = str(getattr(depth_info, 'sha', '') or '').strip()
+        if not re.fullmatch(r'[0-9a-f]{40}', depth_revision):
+            raise RuntimeError('Depth Anything V2 model did not resolve to an immutable commit SHA.')
+        if lock_depth and depth_revision != lock_depth:
+            raise RuntimeError(f'Depth model revision drift: expected {lock_depth}, resolved {depth_revision}.')
+        model_revisions['depth'] = depth_revision
+    else:
+        depth_revision = locked_revisions.get('depth')
+        depth_info = model_info('depth-anything/Depth-Anything-V2-Small-hf', revision=depth_revision)
+        depth_revision = str(getattr(depth_info, 'sha', '') or '').strip()
+        if not re.fullmatch(r'[0-9a-f]{40}', depth_revision):
+            raise RuntimeError('Depth Anything V2 model did not resolve to an immutable commit SHA.')
+        if locked_revisions.get('depth') and depth_revision != locked_revisions.get('depth'):
+            raise RuntimeError('Depth model revision drift detected.')
+        model_revisions['depth'] = depth_revision
     return {
         'gpu': gpu_name,
-        'depth_model_revision': resolved_depth_revision,
+        'model_family': 'flux_1_schnell_gguf' if primary_image_first else 'wan22_ti2v_5b_gguf',
+        'depth_model_revision': depth_revision,
         'comfyui_commit': comfy_sha,
         'comfyui_gguf_commit': gguf_sha,
         'model_revisions': model_revisions,
