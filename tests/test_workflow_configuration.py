@@ -109,6 +109,8 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('tesseract-ocr', setup)
         self.assertIn('tesseract-ocr-hin', setup)
         self.assertIn('tesseract --list-langs', setup)
+        self.assertIn('grep -qx eng', setup)
+        self.assertIn('grep -qx hin', setup)
         self.assertNotIn('fonts-noto-extra', setup)
         self.assertIn('--no-install-recommends', setup)
         self.assertIn('skipping apt update/install', setup)
@@ -118,6 +120,7 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_offline_quality_gate_installs_hindi_tesseract_for_ocr_checks(self):
         body = (ROOT / '.github' / 'workflows' / 'quality-gates.yml').read_text(encoding='utf-8')
         self.assertIn('ffmpeg tesseract-ocr tesseract-ocr-hin', body)
+        self.assertIn('tesseract --list-langs | grep -qx eng', body)
         self.assertIn('tesseract --list-langs | grep -qx hin', body)
 
     def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
