@@ -17,6 +17,7 @@ import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / 'data'
@@ -1163,10 +1164,14 @@ def _poll_and_finalize_impl() -> int:
             slot = datetime.fromisoformat(reel['planned_publish_at'])
             quality = producer.write_pack(concept, build, reel_dir, slot)
             ensure_reel_qa_passed(build)
+            image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
             quality['video_generation'] = {
-                'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
+                'model': 'FLUX.1-schnell Q4_K_S GGUF still generation + Depth Anything V2 (ComfyUI)' if image_first else 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
                 'scene_count': needed,
-                'source_video_generation_count': needed,
+                'source_video_generation_count': 0 if image_first else needed,
+                'source_still_image_generation_count': needed if image_first else 0,
+                'parallax_video_count': needed if image_first else int((concept.get('editorial_shot_plan') or {}).get('depth_parallax_shot_count', 0)),
+                'generation_mode': 'still_image_first' if image_first else 'wan_video_first_legacy',
                 'editorial_shot_count': int((concept.get('editorial_shot_plan') or {}).get('editorial_shot_count', needed)),
                 'visual_pipeline': concept.get('visual_pipeline', 'legacy_wan_video'),
                 'depth_model': {
@@ -1175,7 +1180,11 @@ def _poll_and_finalize_impl() -> int:
                     'license': 'Apache-2.0',
                 },
                 'paid_generation_api_used': False,
-                'visual_quality_claim': 'Illustrated Wan2.2 source clips plus pinned Depth Anything V2 keyframe parallax and deterministic editorial coverage; human review required; no guarantee of aesthetic approval.',
+                'visual_quality_claim': (
+                    'Six FLUX-generated illustrated stills, pinned Depth Anything V2 maps and deterministic 100% 2.5D editorial coverage; no Wan video calls in the primary image-first path. Human review remains mandatory.'
+                    if image_first else
+                    'Illustrated Wan2.2 source clips plus pinned Depth Anything V2 keyframe parallax and deterministic editorial coverage; human review required; no guarantee of aesthetic approval.'
+                ),
                 'human_review_before_publish': True,
             }
             write_json(reel_dir / 'quality_report.json', quality)
