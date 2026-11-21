@@ -446,6 +446,7 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
         raise ValueError("Voice-first Wan scenes must use the qualified 24 FPS timeline.")
     total_scenes = len(story.get('beats', [])) or 6
     coverage = shot_coverage_instruction(scene_index, total_scenes)
+    reference_image = str(story.get('character_reference_image') or '').strip()
     narrative_role = str(beat.get('narrative_role') or ('hook' if scene_index == 1 else 'payoff' if scene_index == total_scenes else 'intermediate')).strip().lower()
     state_change = str(beat.get('state_change') or beat.get('visual_direction') or 'Preserve the beat-specific action and visual meaning.').strip()
     causal_link = str(beat.get('causal_link') or 'Preserve the approved order and causal relationship of the screenplay.').strip()
@@ -486,7 +487,6 @@ def build_api_workflow(objects, beat, story, scene_index, prefix):
     latent_inputs = {
         'width': 704, 'height': 1280, 'length': target_frames, 'batch_size': 1, 'vae': ['39', 0]
     }
-    reference_image = str(story.get('character_reference_image') or '').strip()
     uses_hybrid_reference = (
         scene_index > 1 and story.get('visual_pipeline') == 'hybrid_25d_motion_comic_v1'
     )
