@@ -594,6 +594,10 @@ def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
         (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
         for x in worker_manifest.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
     }
+    worker_parallax_items = {
+        (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
+        for x in worker_manifest.get('parallax_scenes', []) if x.get('reel_id') and x.get('scene_index')
+    }
     primary_image_first = (
         worker_manifest.get('generation_mode') == 'still_image_first'
         or any(
@@ -625,6 +629,7 @@ def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
                     continue
                 if (width, height) != (704, 1280):
                     continue
+                parallax_row = worker_parallax_items.get(key, {})
                 collected.append({
                     'reel_id': reel_id, 'scene_index': index,
                     'file': f'{reel_id}__scene_{index:02d}.png',
@@ -632,6 +637,7 @@ def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
                     'sha256': _sha256(source), 'media_type': 'image/png',
                     'width': width, 'height': height,
                     'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
+                    'parallax_elapsed_seconds': float(parallax_row.get('generation_elapsed_seconds', 0) or 0),
                     'prompt_id': old.get('prompt_id'),
                 })
             else:
@@ -675,9 +681,6 @@ def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
         # Private image-first checkpoints preserve PNG stills only, not parallax MP4s.
         # The resumed worker regenerates all parallax clips, including those finished
         # before the interrupted session, so estimate the entire parallax phase again.
-        worker_path = ROOT / 'data' / 'gpu_output_manifest.json'
-        # The actual worker manifest is staged with the extracted output root; the caller
-        # stores measured per-scene times into the pending job before estimating below.
         times = [
             float(x.get('parallax_elapsed_seconds', 0) or 0)
             for x in scenes if float(x.get('parallax_elapsed_seconds', 0) or 0) > 0
