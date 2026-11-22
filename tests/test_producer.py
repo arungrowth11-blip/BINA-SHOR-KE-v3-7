@@ -555,6 +555,8 @@ class FactoryLogicTests(unittest.TestCase):
         response.status_code = 400
         response.text = '{"error":{"message":"invalid voice"}}'
         with tempfile.TemporaryDirectory() as folder, \
+             patch.object(producer, "TTS_MIN_INTERVAL_SECONDS", 0), \
+             patch.object(producer, "_LAST_TTS_REQUEST_AT", 0), \
              patch.object(producer.requests, "post", return_value=response) as mocked_post, \
              patch.object(producer.time, "sleep") as mocked_sleep:
             with self.assertRaisesRegex(RuntimeError, "non-retryable HTTP 400"):
@@ -568,6 +570,8 @@ class FactoryLogicTests(unittest.TestCase):
         response.text = ""
         response.json.return_value = {"status": "completed", "steps": []}
         with tempfile.TemporaryDirectory() as folder, \
+             patch.object(producer, "TTS_MIN_INTERVAL_SECONDS", 0), \
+             patch.object(producer, "_LAST_TTS_REQUEST_AT", 0), \
              patch.object(producer.requests, "post", return_value=response) as mocked_post, \
              patch.object(producer.time, "sleep") as mocked_sleep:
             with self.assertRaisesRegex(ValueError, "No audio block"):
