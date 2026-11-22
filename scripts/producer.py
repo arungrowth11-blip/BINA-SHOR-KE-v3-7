@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """BINA SHOR KE weekly faceless Reel factory.
 
-The default GitHub/Kaggle production path generates original Hindi stories, scene-level
-Wan2.2 video, Hindi AI narration, branded post-production, technical/visual QA and a
-publish kit for one pinned private Telegram chat. It never publishes to Facebook and
-never falls back to a paid service.
+The default GitHub/Kaggle production path generates original Hindi stories, FLUX.1 Schnell
+illustrated stills, Depth Anything V2 depth maps, deterministic 2.5D parallax, Hindi narration,
+branded post-production, technical/visual QA and a publish kit for one pinned private Telegram
+chat. Legacy Wan2.2 manifests remain supported separately; it never publishes to Facebook or
+falls back to a paid service.
 """
 from __future__ import annotations
 

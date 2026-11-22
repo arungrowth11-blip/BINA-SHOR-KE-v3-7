@@ -29,6 +29,34 @@ def load_runner_module():
 
 
 class StudioPipelineTests(unittest.TestCase):
+    def test_plan_week_requires_free_tier_ack_before_credentials_or_gpu_setup(self):
+        with patch.dict(studio_pipeline.os.environ, {}, clear=True):
+            with (
+                patch.object(studio_pipeline.producer, "require_env") as require_env,
+                patch.object(studio_pipeline, "configure_kaggle_cli") as configure_kaggle,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "BSK_FREE_TIER_ONLY_ACK=true"):
+                    studio_pipeline.plan_week(1)
+        require_env.assert_not_called()
+        configure_kaggle.assert_not_called()
+
+    def test_plan_week_accepts_explicit_free_tier_ack_before_checking_credentials(self):
+        with patch.dict(
+            studio_pipeline.os.environ, {"BSK_FREE_TIER_ONLY_ACK": "true"}, clear=True
+        ):
+            with (
+                patch.object(
+                    studio_pipeline.producer,
+                    "require_env",
+                    side_effect=RuntimeError("credential preflight reached"),
+                ) as require_env,
+                patch.object(studio_pipeline, "configure_kaggle_cli") as configure_kaggle,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "credential preflight reached"):
+                    studio_pipeline.plan_week(1)
+        require_env.assert_called_once()
+        configure_kaggle.assert_not_called()
+
     def test_clone_and_pin_repo_checks_out_locked_sha(self):
         runner = load_runner_module()
         with tempfile.TemporaryDirectory() as folder:
@@ -1079,7 +1107,7 @@ class StudioPipelineTests(unittest.TestCase):
         }
         self.assertEqual(studio_pipeline.terminal_finalization_qa_reason(pending), "")
 
-    def test_offline_graph_has_native_t2v_shape(self):
+    def test_offline_preflight_validates_primary_flux_and_legacy_graphs(self):
         self.assertEqual(studio_pipeline.self_test(), 0)
 
 

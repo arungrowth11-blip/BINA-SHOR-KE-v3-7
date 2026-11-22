@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Orchestrate BINA SHOR KE: editorial planning -> Kaggle Wan GPU -> final QA -> Telegram.
-No Facebook publishing; paid fallbacks are intentionally disabled.
+"""Orchestrate BINA SHOR KE: voice-first planning -> FLUX stills -> 2.5D parallax -> QA -> Telegram.
+Legacy Wan manifests remain isolated for backward compatibility; no paid fallback or auto-publishing.
 """
 from __future__ import annotations
 import argparse
@@ -341,9 +341,21 @@ def persist_character_cast(concept: dict) -> int:
     return len(characters)
 
 
+def require_free_tier_confirmation() -> None:
+    """Block live AI planning/TTS and GPU dispatch unless the owner confirms free-tier billing."""
+    confirmed = os.getenv('BSK_FREE_TIER_ONLY_ACK', '').strip().lower()
+    if confirmed != 'true':
+        raise RuntimeError(
+            'Live plan-one/plan-week is blocked before AI provider requests or Kaggle dispatch. '
+            'Set BSK_FREE_TIER_ONLY_ACK=true only after confirming every configured AI provider '
+            'and the Gemini TTS project/key are Free Tier with paid billing disabled.'
+        )
+
+
 def plan_week(reel_count: int = 3) -> int:
     if reel_count not in (1, 3):
         raise ValueError('This zero-spend workflow supports a one-Reel test or a 3-Reel weekly batch only.')
+    require_free_tier_confirmation()
     producer.require_env()
     configure_kaggle_cli()
     prior = load_json(PENDING, {}) or {}
@@ -2100,9 +2112,50 @@ def self_test() -> int:
         spec.loader.exec_module(module)
     finally:
         tmp_runner.unlink(missing_ok=True)
-    build_api_workflow = module.build_api_workflow
+    # Validate the actual default image-first FLUX still graph, not just the legacy Wan graph.
+    flux_schema = {
+        'UnetLoaderGGUF': ['unet_name'],
+        'DualCLIPLoader': ['clip_name1', 'clip_name2', 'type', 'device'],
+        'VAELoader': ['vae_name'],
+        'EmptySD3LatentImage': ['width', 'height', 'batch_size'],
+        'CLIPTextEncodeFlux': ['clip', 'clip_l', 't5xxl', 'guidance'],
+        'ConditioningZeroOut': ['conditioning'],
+        'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+        'VAEDecode': ['samples', 'vae'],
+        'SaveImage': ['images', 'filename_prefix'],
+    }
+    flux_object_info = {
+        node: {'input': {'required': {key: [] for key in keys}, 'optional': {}}}
+        for node, keys in flux_schema.items()
+    }
+    demo = {
+        'reel_id': 'reel_01_test',
+        'visual_bible': 'Consistent illustrated Indian street setting, warm practical light, charcoal jacket.',
+        'visual_style_profile': {'palette': 'monsoon teal and warm amber', 'lighting': 'soft window light'},
+        'characters': [],
+        'beats': [],
+    }
+    beat = {
+        'video_prompt': 'Illustrated close-up of a hand placing a phone face down on a scratched wooden desk under a warm practical lamp.',
+        'narrative_role': 'hook',
+        'state_change': 'The hand deliberately turns the phone face down.',
+        'causal_link': 'The action reveals the character choosing not to answer.',
+    }
+    flux_graph = module.build_flux_image_workflow(
+        flux_object_info, beat, demo, 1, 'bsk/reel_01_test/scene_01'
+    )
+    if (
+        len(flux_graph) != 9
+        or flux_graph['27']['inputs']['width'] != 704
+        or flux_graph['27']['inputs']['height'] != 1280
+        or flux_graph['31']['inputs']['steps'] != 4
+        or flux_graph['9']['class_type'] != 'SaveImage'
+    ):
+        raise RuntimeError('Offline primary FLUX image-first graph validation failed.')
+
+    # Keep the old Wan graph covered for previously saved legacy manifests only.
     mock_object_info = {}
-    schema = {
+    legacy_schema = {
         'UnetLoaderGGUF': ['unet_name'],
         'CLIPLoader': ['clip_name', 'type', 'device'], 'VAELoader': ['vae_name'],
         'ModelSamplingSD3': ['model', 'shift'], 'CLIPTextEncode': ['text', 'clip'],
@@ -2111,19 +2164,24 @@ def self_test() -> int:
         'VAEDecode': ['samples', 'vae'], 'CreateVideo': ['images', 'fps'],
         'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
     }
-    for node, keys in schema.items():
+    for node, keys in legacy_schema.items():
         required_keys = [k for k in keys if not (node == 'Wan22ImageToVideoLatent' and k == 'start_image')]
         optional_keys = ['start_image'] if node == 'Wan22ImageToVideoLatent' else []
         mock_object_info[node] = {'input': {'required': {k: [] for k in required_keys}, 'optional': {k: [] for k in optional_keys}}}
-    demo = {'reel_id': 'reel_01_test', 'visual_bible': 'Natural practical light, consistent charcoal jacket, anonymous partial profile.', 'beats': []}
-    beat = {'video_prompt': 'Photoreal vertical close-up of a phone placed on a scratched wooden desk, hand slowly turns it face down, warm practical lamp light, subtle handheld movement, realistic texture, no readable text or logos.'}
-    graph = build_api_workflow(mock_object_info, beat, demo, 1, 'bsk/reel_01_test/scene_01')
-    if len(graph) != 11 or graph['55']['inputs']['length'] != 81 or graph['55']['inputs']['width'] != 704 or graph['55']['inputs']['height'] != 1280:
-        raise RuntimeError('Offline GPU graph validation failed.')
+    legacy_graph = module.build_api_workflow(
+        mock_object_info, beat, demo, 1, 'bsk/reel_01_test/legacy_scene_01'
+    )
+    if (
+        len(legacy_graph) != 11
+        or legacy_graph['55']['inputs']['length'] != 81
+        or legacy_graph['55']['inputs']['width'] != 704
+        or legacy_graph['55']['inputs']['height'] != 1280
+    ):
+        raise RuntimeError('Offline legacy Wan graph compatibility validation failed.')
     pending = load_json(PENDING, {})
-    if pending and pending.get('status') in {'dispatching', 'gpu_running'} and not pending.get('manifest', {}).get('reels'):
+    if pending and pending.get('status') in ACTIVE_GPU_STATES and not pending.get('manifest', {}).get('reels'):
         raise RuntimeError('Pending state exists without a Reel manifest.')
-    log('OFFLINE STUDIO PREFLIGHT PASSED: graph schema, 720p portrait dimensions, 81-frame (~3.4s) clip, pending state shape. No API keys/network/GPU used.')
+    log('OFFLINE STUDIO PREFLIGHT PASSED: primary FLUX 704x1280 image graph, four-step sampler, SaveImage output, legacy Wan compatibility, pending state shape. No API keys/network/GPU used.')
     return 0
 
 
