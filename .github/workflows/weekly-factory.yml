@@ -14,7 +14,7 @@ on:
           - "plan-week"
           - "live-tts-smoke"
       confirm_free_tier_only:
-        description: "Confirm every configured AI provider and the Gemini TTS project/key are Free Tier with paid billing disabled. Live planning also queues one Kaggle GPU job."
+        description: "For live-tts-smoke, confirm the Gemini TTS project/key is Free Tier with paid billing disabled. For plan-one/plan-week, also confirm every enabled text provider is Free Tier or disabled; those modes queue a Kaggle GPU job."
         required: true
         type: boolean
         default: false
@@ -26,6 +26,7 @@ on:
       - feature/voice-first-3d-foundation
     paths:
       - ".github/dispatch/plan-one.once"
+    - ".github/dispatch/live-tts-smoke.once"
 
 permissions:
   contents: write
@@ -39,8 +40,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && 'plan-one' || 'plan-week') }}
-      BSK_FREE_TIER_ONLY_ACK: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_free_tier_only) || (github.event_name != 'workflow_dispatch' && vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true') }}
+      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && (contains(github.event.head_commit.added, '.github/dispatch/live-tts-smoke.once') || contains(github.event.head_commit.modified, '.github/dispatch/live-tts-smoke.once')) && 'live-tts-smoke' || (github.event_name == 'push' && contains(github.event.head_commit.removed, '.github/dispatch/live-tts-smoke.once') && 'preflight' || (github.event_name == 'push' && 'plan-one' || 'plan-week')) }}
+      BSK_FREE_TIER_ONLY_ACK: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_free_tier_only) || (github.event_name == 'push' && (contains(github.event.head_commit.added, '.github/dispatch/live-tts-smoke.once') || contains(github.event.head_commit.modified, '.github/dispatch/live-tts-smoke.once'))) || (github.event_name != 'workflow_dispatch' && vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
@@ -65,13 +66,19 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Validate one-shot plan-one push trigger
+      - name: Validate branch-scoped one-shot feature trigger
         if: github.event_name == 'push'
         shell: bash
         run: |
           test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"
-          test -f .github/dispatch/plan-one.once
-          grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once
+          if [[ "$RUN_MODE" == "live-tts-smoke" ]]; then
+            test "$GITHUB_RUN_ATTEMPT" = "1"
+            test -f .github/dispatch/live-tts-smoke.once
+            grep -qx "GEMINI_TTS_FREE_TIER_CONFIRMED" .github/dispatch/live-tts-smoke.once
+          else
+            test -f .github/dispatch/plan-one.once
+            grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once
+          fi
 
       - name: Restore previously measured voice WAVs
         uses: actions/cache/restore@v4
@@ -115,10 +122,12 @@ jobs:
         shell: bash
         run: |
           if [[ "$BSK_FREE_TIER_ONLY_ACK" != "true" ]]; then
-            if [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
-              echo "Stopped before any live API request or GPU dispatch. Confirm every configured AI provider and the Gemini TTS project/key are Free Tier with paid billing disabled, then tick confirm_free_tier_only."
+            if [[ "$RUN_MODE" == "live-tts-smoke" ]]; then
+              echo "Stopped before the Gemini API call. Confirm the Gemini TTS project/key is Free Tier with paid billing disabled."
+            elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              echo "Stopped before any live provider request or GPU dispatch. Confirm every enabled text provider and the Gemini TTS project/key are Free Tier with paid billing disabled, then tick confirm_free_tier_only."
             else
-              echo "Stopped before any live API request or GPU dispatch. Push and scheduled runs require the Actions repository variable BSK_FREE_TIER_ONLY_CONFIRMED=true, set only after confirming every configured AI provider and the Gemini TTS project/key are Free Tier with paid billing disabled."
+              echo "Stopped before any live provider request or GPU dispatch. Push and scheduled plan runs require Actions repository variable BSK_FREE_TIER_ONLY_CONFIRMED=true after confirming every enabled text provider and the Gemini TTS project/key are Free Tier with paid billing disabled."
             fi
             exit 1
           fi
@@ -196,3 +205,19 @@ jobs:
             git commit -m "Record BSK plan and GPU dispatch state [skip ci]"
             git push
           fi
+
+      - name: Consume one-shot live TTS trigger
+        if: always() && github.event_name == 'push' && env.RUN_MODE == 'live-tts-smoke'
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [[ ! -f .github/dispatch/live-tts-smoke.once ]]; then
+            echo "One-shot TTS trigger is already absent."
+            exit 0
+          fi
+          git config user.name "bina-shor-ke-studio[bot]"
+          git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
+          git rm .github/dispatch/live-tts-smoke.once
+          git commit -m "Consume one-shot live TTS trigger [skip ci]"
+          git push
+
