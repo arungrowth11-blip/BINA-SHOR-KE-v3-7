@@ -20,6 +20,10 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"', body)
         self.assertIn('grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once', body)
         self.assertIn("github.event_name == 'workflow_dispatch' && inputs.mode", body)
+        self.assertIn("BSK_FREE_TIER_ONLY_ACK:", body)
+        self.assertIn("vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true'", body)
+        self.assertIn("BSK_FREE_TIER_ONLY_ACK", body)
+        self.assertIn("plan-week", body)
 
     def test_optional_provider_secrets_and_cloudflare_model_are_yaml_safe(self):
         for name in ("weekly-factory.yml", "poll-gpu.yml"):

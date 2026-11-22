@@ -109,7 +109,8 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 producer.save_history(fresh)
                 return 0  # approval is not counted as an insight row
 
-            with patch.object(studio_pipeline, "PENDING", pending_path), \
+            with patch.dict(os.environ, {"BSK_FREE_TIER_ONLY_ACK": "true"}), \
+                 patch.object(studio_pipeline, "PENDING", pending_path), \
                  patch.object(studio_pipeline, "TOOLCHAIN_LOCK", lock_path), \
                  patch.object(studio_pipeline, "IMAGE_TOOLCHAIN_LOCK", image_lock_path), \
                  patch.object(studio_pipeline.producer, "HISTORY_PATH", history_path), \
@@ -176,7 +177,8 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
             pending_path.write_text(json.dumps({
                 "status": "gpu_checkpoint_saved", "job_id": "saved-checkpoint-job"
             }), encoding="utf-8")
-            with patch.object(studio_pipeline, "PENDING", pending_path), \
+            with patch.dict(os.environ, {"BSK_FREE_TIER_ONLY_ACK": "true"}), \
+                 patch.object(studio_pipeline, "PENDING", pending_path), \
                  patch.object(studio_pipeline.producer, "require_env"), \
                  patch.object(studio_pipeline, "configure_kaggle_cli"):
                 with self.assertRaisesRegex(RuntimeError, "unfinished GPU batch"):
