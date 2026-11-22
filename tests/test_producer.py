@@ -295,6 +295,47 @@ class FactoryLogicTests(unittest.TestCase):
         generic["share_recipient"] = "everyone"
         with self.assertRaisesRegex(ValueError, "too generic"):
             producer.validate_concept_shape(generic)
+        audience = self.sample_concept()
+        audience["share_recipient"] = "Hindi audience"
+        with self.assertRaisesRegex(ValueError, "too generic"):
+            producer.validate_concept_shape(audience)
+
+    def test_structural_repair_completes_near_threshold_video_prompt_without_extra_ai_call(self):
+        concept = self.sample_concept()
+        original = concept["beats"][2]["video_prompt"]
+        concept["beats"][2]["video_prompt"] = " ".join(original.split()[:53])
+        self.assertEqual(len(concept["beats"][2]["video_prompt"].split()), 53)
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        prompt = repaired["beats"][2]["video_prompt"]
+        self.assertGreaterEqual(len(prompt.split()), 55)
+        self.assertLessEqual(len(prompt.split()), 180)
+        self.assertIn("layered foreground", prompt)
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
+
+    def test_structural_repair_replaces_generic_share_recipient_with_specific_relationship(self):
+        concept = self.sample_concept()
+        concept["share_recipient"] = "Hindi audience"
+        with patch.object(
+            producer, "text_json",
+            return_value={"share_recipient": "अपने छोटे भाई को"},
+        ) as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["share_recipient"], "अपने छोटे भाई को")
+        self.assertIn("Hindi audience", mocked.call_args.args[1])
+        self.assertIn("share_recipient", mocked.call_args.args[1])
+        producer.validate_concept_shape(repaired)
+
+    def test_structural_repair_rejects_generic_recipient_returned_by_repair_model(self):
+        concept = self.sample_concept()
+        concept["share_recipient"] = "Hindi audience"
+        with patch.object(
+            producer, "text_json",
+            return_value={"share_recipient": "general viewers"},
+        ):
+            with self.assertRaisesRegex(ValueError, "did not identify one specific share recipient"):
+                producer.repair_concept_structure(concept)
 
     def test_concept_validation_requires_exactly_six_beats(self):
         concept = self.sample_concept()
