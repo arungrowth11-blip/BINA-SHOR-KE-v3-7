@@ -1540,7 +1540,7 @@ def retry_failed_gpu() -> int:
     retry_reason = (
         'Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained.'
         if allowed_timeout_retry
-        else 'Corrected immutable Hugging Face image-first or legacy model snapshot pins; original Reel manifest retained.'
+        else 'Corrected immutable Hugging Face snapshot SHA pins for image-first or legacy model revisions; original Reel manifest retained.'
         if known_hf_revision_failure
         else 'ComfyUI KSampler API schema compatibility fix; original Reel manifest retained.'
     )
