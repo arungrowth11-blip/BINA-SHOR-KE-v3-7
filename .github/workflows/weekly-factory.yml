@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && (contains(github.event.head_commit.added, '.github/dispatch/live-tts-smoke.once') || contains(github.event.head_commit.modified, '.github/dispatch/live-tts-smoke.once')) && 'live-tts-smoke' || (github.event_name == 'push' && contains(github.event.head_commit.removed, '.github/dispatch/live-tts-smoke.once') && 'preflight' || (github.event_name == 'push' && 'plan-one' || 'plan-week')) }}
+      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && (contains(github.event.head_commit.added, '.github/dispatch/live-tts-smoke.once') || contains(github.event.head_commit.modified, '.github/dispatch/live-tts-smoke.once')) && 'live-tts-smoke') || (github.event_name == 'push' && (contains(github.event.head_commit.added, '.github/dispatch/plan-one.once') || contains(github.event.head_commit.modified, '.github/dispatch/plan-one.once')) && 'plan-one') || (github.event_name == 'schedule' && 'plan-week') || 'preflight' }}
       BSK_FREE_TIER_ONLY_ACK: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_free_tier_only) || (github.event_name == 'push' && (contains(github.event.head_commit.added, '.github/dispatch/live-tts-smoke.once') || contains(github.event.head_commit.modified, '.github/dispatch/live-tts-smoke.once'))) || (github.event_name != 'workflow_dispatch' && vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -75,9 +75,11 @@ jobs:
             test "$GITHUB_RUN_ATTEMPT" = "1"
             test -f .github/dispatch/live-tts-smoke.once
             grep -qx "GEMINI_TTS_FREE_TIER_CONFIRMED" .github/dispatch/live-tts-smoke.once
-          else
+          elif [[ "$RUN_MODE" == "plan-one" ]]; then
             test -f .github/dispatch/plan-one.once
             grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once
+          else
+            echo "No live one-shot sentinel changed; push is restricted to offline preflight."
           fi
 
       - name: Restore previously measured voice WAVs
