@@ -214,6 +214,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertIn(feedback, prompt)
         self.assertIn("young_adult male=hi_male_young_puck", prompt)
         self.assertIn("adult male=hi_male_adult_charon", prompt)
+        self.assertIn('"video_prompt":"55–80 concrete English words', prompt)
         self.assertIn("Never put the Gemini display name", prompt)
 
     def test_transient_provider_outage_stops_redundant_second_candidate(self):
@@ -314,28 +315,35 @@ class FactoryLogicTests(unittest.TestCase):
         mocked.assert_not_called()
         producer.validate_concept_shape(repaired)
 
-    def test_structural_repair_replaces_generic_share_recipient_with_specific_relationship(self):
+    def test_structural_repair_replaces_generic_recipient_without_an_ai_call(self):
         concept = self.sample_concept()
         concept["share_recipient"] = "Hindi audience"
-        with patch.object(
-            producer, "text_json",
-            return_value={"share_recipient": "अपने छोटे भाई को"},
-        ) as mocked:
+        concept["theme"] += " यह बात उसके छोटे भाई के काम आएगी।"
+        with patch.object(producer, "text_json") as mocked:
             repaired = producer.repair_concept_structure(concept)
-        self.assertEqual(repaired["share_recipient"], "अपने छोटे भाई को")
-        self.assertIn("Hindi audience", mocked.call_args.args[1])
-        self.assertIn("share_recipient", mocked.call_args.args[1])
+        self.assertEqual(repaired["share_recipient"], "अपने भाई को")
+        mocked.assert_not_called()
         producer.validate_concept_shape(repaired)
 
-    def test_structural_repair_rejects_generic_recipient_returned_by_repair_model(self):
+    def test_structural_repair_infers_story_specific_recipient_from_mother_context(self):
+        concept = self.sample_concept()
+        concept["share_recipient"] = "everyone"
+        concept["share_reason"] = "A daughter wants her mother to understand the small sacrifice."
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["share_recipient"], "अपनी माँ को")
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
+
+    def test_structural_repair_uses_singular_relationship_fallback_without_provider(self):
         concept = self.sample_concept()
         concept["share_recipient"] = "Hindi audience"
-        with patch.object(
-            producer, "text_json",
-            return_value={"share_recipient": "general viewers"},
-        ):
-            with self.assertRaisesRegex(ValueError, "did not identify one specific share recipient"):
-                producer.repair_concept_structure(concept)
+        concept["share_reason"] = "A small everyday observation that has no explicit family relationship."
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["share_recipient"], "उस दोस्त को")
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
 
     def test_concept_validation_requires_exactly_six_beats(self):
         concept = self.sample_concept()
