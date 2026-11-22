@@ -550,6 +550,31 @@ class FactoryLogicTests(unittest.TestCase):
                 self.assertEqual(wav_file.getframerate(), 24000)
                 self.assertEqual(wav_file.getnframes(), 24000)
 
+    def test_tts_client_error_is_not_retried(self):
+        response = Mock()
+        response.status_code = 400
+        response.text = '{"error":{"message":"invalid voice"}}'
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(producer.requests, "post", return_value=response) as mocked_post, \
+             patch.object(producer.time, "sleep") as mocked_sleep:
+            with self.assertRaisesRegex(RuntimeError, "non-retryable HTTP 400"):
+                producer.tts_wav("यह परीक्षण पंक्ति है।", Path(folder) / "voice.wav", voice_name="Puck")
+        mocked_post.assert_called_once()
+        mocked_sleep.assert_not_called()
+
+    def test_tts_success_response_without_audio_is_not_retried(self):
+        response = Mock()
+        response.status_code = 200
+        response.text = ""
+        response.json.return_value = {"status": "completed", "steps": []}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(producer.requests, "post", return_value=response) as mocked_post, \
+             patch.object(producer.time, "sleep") as mocked_sleep:
+            with self.assertRaisesRegex(ValueError, "No audio block"):
+                producer.tts_wav("यह परीक्षण पंक्ति है।", Path(folder) / "voice.wav", voice_name="Puck")
+        mocked_post.assert_called_once()
+        mocked_sleep.assert_not_called()
+
     def test_tts_cache_reuses_exact_text_and_valid_wav_across_reruns(self):
         text = "एक छोटी कहानी की परीक्षण पंक्ति।"
         cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"

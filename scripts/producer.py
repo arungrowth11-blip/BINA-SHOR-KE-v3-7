@@ -1426,53 +1426,70 @@ def tts_wav(
     }
     global _LAST_TTS_REQUEST_AT
     last_error = None
+    retryable_http_statuses = {408, 429, 500, 502, 503, 504}
     for attempt in range(3):
+        elapsed = time.monotonic() - _LAST_TTS_REQUEST_AT
+        if _LAST_TTS_REQUEST_AT and elapsed < TTS_MIN_INTERVAL_SECONDS:
+            time.sleep(TTS_MIN_INTERVAL_SECONDS - elapsed)
+        _LAST_TTS_REQUEST_AT = time.monotonic()
+
         try:
-            # Pace calls even when a 3-Reel batch contains 15–18 short narration beats.
-            # Never upgrade to a paid endpoint if free limits are reached.
-            elapsed = time.monotonic() - _LAST_TTS_REQUEST_AT
-            if _LAST_TTS_REQUEST_AT and elapsed < TTS_MIN_INTERVAL_SECONDS:
-                time.sleep(TTS_MIN_INTERVAL_SECONDS - elapsed)
-            _LAST_TTS_REQUEST_AT = time.monotonic()
             response = requests.post(
                 url,
                 headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
                 json=payload,
                 timeout=180,
             )
-            if response.status_code in (429, 500, 502, 503, 504):
-                last_error = f"Gemini TTS HTTP {response.status_code}: {response.text[:300]}"
-                time.sleep((attempt + 1) * (20 if response.status_code == 429 else 8))
-                continue
-            response.raise_for_status()
-            body = response.json()
-            audio_data = (body.get("output_audio") or {}).get("data")
-            if not audio_data:
-                for step in body.get("steps", []):
-                    if step.get("type") == "model_output":
-                        for content in step.get("content", []):
-                            if content.get("type") == "audio" and content.get("data"):
-                                audio_data = content["data"]
-            if not audio_data:
-                raise ValueError("No audio block found in Gemini TTS response.")
-            pcm = base64.b64decode(audio_data, validate=True)
-            if len(pcm) < 4000 or len(pcm) % 2:
-                raise ValueError("Gemini TTS returned an unexpectedly small or misaligned PCM payload.")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with wave.open(str(destination), "wb") as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(24000)
-                wav_file.writeframes(pcm)
-            with wave.open(str(destination), "rb") as check:
-                if check.getnchannels() != 1 or check.getsampwidth() != 2 or check.getframerate() != 24000:
-                    raise ValueError("Rendered voice WAV failed sample-format verification.")
-            return
-        except Exception as exc:
-            last_error = str(exc)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
             if attempt < 2:
                 time.sleep((attempt + 1) * 5)
-    raise RuntimeError(f"Gemini TTS failed after retries: {last_error}. No paid model fallback was attempted.")
+                continue
+            break
+
+        if response.status_code in retryable_http_statuses:
+            last_error = f"Gemini TTS HTTP {response.status_code}: {response.text[:300]}"
+            if attempt < 2:
+                # Back off only for explicit transient provider statuses. Never retry an
+                # authentication, request, safety-policy, response-format or local file error.
+                time.sleep((attempt + 1) * (20 if response.status_code == 429 else 8))
+                continue
+            break
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Gemini TTS non-retryable HTTP {response.status_code}: {response.text[:300]}. "
+                "The request was not retried."
+            )
+
+        body = response.json()
+        audio_data = (body.get("output_audio") or {}).get("data")
+        if not audio_data:
+            for step in body.get("steps", []):
+                if step.get("type") == "model_output":
+                    for content in step.get("content", []):
+                        if content.get("type") == "audio" and content.get("data"):
+                            audio_data = content["data"]
+        if not audio_data:
+            raise ValueError("No audio block found in Gemini TTS response; request was not retried.")
+        pcm = base64.b64decode(audio_data, validate=True)
+        if len(pcm) < 4000 or len(pcm) % 2:
+            raise ValueError("Gemini TTS returned an unexpectedly small or misaligned PCM payload; request was not retried.")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(destination), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(24000)
+            wav_file.writeframes(pcm)
+        with wave.open(str(destination), "rb") as check:
+            if check.getnchannels() != 1 or check.getsampwidth() != 2 or check.getframerate() != 24000:
+                raise ValueError("Rendered voice WAV failed sample-format verification; request was not retried.")
+        return
+
+    raise RuntimeError(
+        f"Gemini TTS failed after bounded transient retries: {last_error}. "
+        "No paid model fallback was attempted."
+    )
 
 
 def _tts_wav_validation_error(path: Path) -> str | None:
