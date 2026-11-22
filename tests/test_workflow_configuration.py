@@ -11,6 +11,16 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('timezone: "Asia/Kolkata"', body)
         self.assertNotIn('cron: "37 7 * * 0"', body)
 
+    def test_one_shot_plan_one_push_trigger_is_branch_and_path_scoped(self):
+        body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
+        self.assertIn('branches:', body)
+        self.assertIn('- feature/voice-first-3d-foundation', body)
+        self.assertIn('".github/dispatch/plan-one.once"', body)
+        self.assertIn("github.event_name == 'push' && 'plan-one'", body)
+        self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"', body)
+        self.assertIn('grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once', body)
+        self.assertIn("github.event_name == 'workflow_dispatch' && inputs.mode", body)
+
     def test_optional_provider_secrets_and_cloudflare_model_are_yaml_safe(self):
         for name in ("weekly-factory.yml", "poll-gpu.yml"):
             body = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
