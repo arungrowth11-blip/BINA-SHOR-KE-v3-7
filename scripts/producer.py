@@ -668,6 +668,25 @@ CAST AGE/VOICE HARD GATE: visible age is selected first and is immutable. The ag
     return concept
 
 
+def _share_recipient_is_generic(value: str) -> bool:
+    """Reject audience labels; a recipient must be one identifiable person or relationship."""
+    normalized = normalize_for_similarity(str(value or ""))
+    generic_phrases = {
+        "everyone", "anyone", "all people", "people", "sabko", "har kisi ko",
+        "kisi ko", "logon ko", "log", "sabhi log", "hindi audience",
+        "general audience", "social media audience", "audience", "viewers",
+        "general public", "public", "followers", "friends", "family",
+        "darshak", "darshakon", "janata", "users", "all viewers",
+    }
+    if normalized in generic_phrases:
+        return True
+    generic_tokens = {
+        "audience", "viewers", "followers", "public", "people", "users",
+        "friends", "family", "darshak", "darshakon", "janata",
+    }
+    return bool(set(normalized.split()) & generic_tokens)
+
+
 def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
     """Apply safe local fixes, then make one constrained AI repair for narration length only.
 
@@ -699,6 +718,123 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
             log(f"Structural repair: Beat {i+1} overlay_type normalized to {fallback}.")
         else:
             beat["overlay_type"] = overlay_type
+
+    # Repair the two common draft-level structural misses before the hard validator.
+    # Keep the visual fix deterministic when a prompt is only a few words short; ask a
+    # text model only for genuinely incomplete shots or an unusable share recipient.
+    recipient = str(concept.get("share_recipient") or "").strip()
+    recipient_needs_repair = (
+        not 1 <= len(recipient.split()) <= 12
+        or len(recipient) > 100
+        or _share_recipient_is_generic(recipient)
+    )
+    prompt_repairs = []
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        prompt = str(beat.get("video_prompt") or "").strip()
+        words = len(prompt.split())
+        if words < 45 or words > 180 or len(prompt) > 1600:
+            prompt_repairs.append({
+                "beat": i + 1,
+                "visual_direction": str(beat.get("visual_direction") or ""),
+                "visual_query": str(beat.get("visual_query") or ""),
+                "current_prompt": prompt,
+            })
+
+    if recipient_needs_repair or prompt_repairs:
+        context = {
+            "title": str(concept.get("title") or ""),
+            "theme": str(concept.get("theme") or ""),
+            "share_reason": str(concept.get("share_reason") or ""),
+            "human_detail": str(concept.get("human_detail") or ""),
+            "character_contradiction": str(concept.get("character_contradiction") or ""),
+            "characters": [
+                {
+                    "display_name": item.get("display_name", ""),
+                    "role": item.get("role", ""),
+                }
+                for item in concept.get("characters", [])
+                if isinstance(item, dict)
+            ],
+            "current_share_recipient": recipient if recipient_needs_repair else None,
+            "visual_bible": str(concept.get("visual_bible") or ""),
+            "shots_requiring_repair": prompt_repairs,
+        }
+        requested_fields = []
+        if recipient_needs_repair:
+            requested_fields.append("share_recipient")
+        if prompt_repairs:
+            requested_fields.append("video_prompts")
+        repair_system = (
+            "You are a production continuity editor. Repair only the explicitly requested "
+            "structural fields. Preserve the story, characters, actions, emotional meaning "
+            "and visual continuity. Return one valid JSON object only."
+        )
+        repair_prompt = f"""Repair this BINA SHOR KE draft's structural defects.
+
+CONTEXT:
+{json.dumps(context, ensure_ascii=False)}
+
+REQUIRED OUTPUT FIELDS: {json.dumps(requested_fields)}
+Rules:
+- share_recipient, when requested, must be ONE specific person or singular relationship who would naturally receive this story (for example: "अपने छोटे भाई को", "उस पुराने दोस्त को", "अपनी माँ को"). Never return an audience category such as viewers, followers, friends, family, people or everyone. Do not force a share call-to-action.
+- video_prompts, when requested, must contain exactly one object for every supplied beat, preserving its beat number. Each replacement must be 65–100 concrete English words, describe only the supplied shot and its actual visible action, and retain the visual bible. Include framing, motivated light, tactile detail and coherent depth. Do not invent dialogue, characters, props or plot. No text, subtitles, logos or watermark.
+- Do not return or alter the Hindi script, voiceover, speaker identity, beat order, caption or any unrequested field.
+Return JSON only, using this shape where relevant:
+{{"share_recipient":"one specific relationship","video_prompts":[{{"beat":3,"video_prompt":"65–100 concrete English words"}}]}}"""
+        repaired = text_json(repair_system, repair_prompt, temperature=0.2, timeout=90)
+        if recipient_needs_repair:
+            replacement_recipient = repaired.get("share_recipient") if isinstance(repaired, dict) else None
+            if not isinstance(replacement_recipient, str) or not replacement_recipient.strip():
+                raise ValueError("Targeted structural repair returned no specific share_recipient.")
+            replacement_recipient = replacement_recipient.strip()
+            if (
+                not 1 <= len(replacement_recipient.split()) <= 12
+                or len(replacement_recipient) > 100
+                or _share_recipient_is_generic(replacement_recipient)
+            ):
+                raise ValueError("Targeted structural repair did not identify one specific share recipient.")
+            concept["share_recipient"] = replacement_recipient
+            log("Structural repair: replaced generic share recipient with one specific relationship.")
+        if prompt_repairs:
+            returned = repaired.get("video_prompts") if isinstance(repaired, dict) else None
+            if not isinstance(returned, list):
+                raise ValueError("Targeted structural repair returned no video_prompts list.")
+            expected = {int(item["beat"]) for item in prompt_repairs}
+            replacements: dict[int, str] = {}
+            for item in returned:
+                if not isinstance(item, dict):
+                    raise ValueError("Targeted structural repair returned a malformed video prompt.")
+                number = item.get("beat")
+                prompt = item.get("video_prompt")
+                if isinstance(number, bool) or not isinstance(number, int) or number not in expected or number in replacements:
+                    raise ValueError("Targeted structural repair returned an unexpected or duplicate beat.")
+                if not isinstance(prompt, str) or not 55 <= len(prompt.split()) <= 180 or len(prompt) > 1600:
+                    raise ValueError(f"Targeted structural repair left Beat {number} outside the 55–180 word prompt gate.")
+                lowered = prompt.lower()
+                if any(term in lowered for term in ("subtitle overlay", "watermark text", "show the words", "write a caption")):
+                    raise ValueError(f"Targeted structural repair introduced a forbidden text instruction in Beat {number}.")
+                replacements[number] = prompt.strip()
+            if set(replacements) != expected:
+                raise ValueError("Targeted structural repair omitted one or more requested video prompts.")
+            for number, prompt in replacements.items():
+                beats[number - 1]["video_prompt"] = prompt
+                log(f"Structural repair: Beat {number} visual prompt rewritten and revalidated.")
+
+    # A near-threshold prompt can be completed safely without another model request.
+    continuity_suffix = (
+        "Preserve the established character design, wardrobe, spatial continuity, and layered "
+        "foreground, middle ground, and background throughout."
+    )
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        prompt = str(beat.get("video_prompt") or "").strip()
+        words = len(prompt.split())
+        if 45 <= words < 55 and len(prompt) + len(continuity_suffix) + 1 <= 1600:
+            beat["video_prompt"] = prompt + " " + continuity_suffix
+            log(f"Structural repair: Beat {i+1} visual prompt completed with continuity detail ({words} -> {len(beat['video_prompt'].split())} words).")
 
     invalid_lines = []
     for i, beat in enumerate(beats):
@@ -783,7 +919,7 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
     if not 1 <= len(recipient.split()) <= 12 or len(recipient) > 100:
         raise ValueError("Share recipient must identify one specific person or relationship (1–12 words), not a broad audience.")
     recipient_normalized = normalize_for_similarity(recipient)
-    if recipient_normalized in {"everyone", "anyone", "all people", "sabko", "har kisi ko", "kisi ko", "logon ko", "people"}:
+    if _share_recipient_is_generic(recipient):
         raise ValueError("Share recipient is too generic; name a concrete relationship or person.")
     if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
         raise ValueError("Screenplay must contain exactly 6 narrative beats; editorial coverage is derived after measured voice timing.")
