@@ -587,6 +587,54 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertNotEqual(first, second)
         self.assertNotEqual(first, third)
 
+    def test_tts_cache_accepts_valid_nine_second_audio_then_scene_planner_enforces_shot_limit(self):
+        text = "यह नौ सेकंड की सीमा जाँचने वाली परीक्षण पंक्ति है।"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_cache = producer.TTS_CACHE_DIR
+            old_interval = producer.TTS_MIN_INTERVAL_SECONDS
+            old_last = producer._LAST_TTS_REQUEST_AT
+            producer.TTS_CACHE_DIR = root / "cache"
+            producer.TTS_MIN_INTERVAL_SECONDS = 0
+            producer._LAST_TTS_REQUEST_AT = 0
+            try:
+                out = root / "render" / "long-line.wav"
+
+                def fake_tts(line, destination, voice_direction=None, voice_name=None):
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with wave.open(str(destination), "wb") as wav_file:
+                        wav_file.setnchannels(1)
+                        wav_file.setsampwidth(2)
+                        wav_file.setframerate(24000)
+                        wav_file.writeframes(b"\\x00\\x00" * (24000 * 9))
+
+                with patch.object(producer, "tts_wav", side_effect=fake_tts):
+                    self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
+                self.assertTrue(producer._valid_tts_wav(out))
+                self.assertAlmostEqual(producer.voice_first.wav_duration(out), 9.0, places=3)
+                with self.assertRaisesRegex(ValueError, "Beat voice track requires"):
+                    producer.voice_first.build_scene_timing_plan(
+                        [{"segment_id": "long_line", "speaker_id": "narrator"}],
+                        {"long_line": 9.0},
+                    )
+            finally:
+                producer.TTS_CACHE_DIR = old_cache
+                producer.TTS_MIN_INTERVAL_SECONDS = old_interval
+                producer._LAST_TTS_REQUEST_AT = old_last
+
+    def test_tts_wav_validation_reports_measured_duration_outside_transport_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "too-long.wav"
+            with wave.open(str(path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(24000)
+                wav_file.writeframes(b"\\x00\\x00" * (24000 * 13))
+            reason = producer._tts_wav_validation_error(path)
+            self.assertIn("measured duration 13.000s", reason)
+            self.assertIn("12.00s TTS transport/cache range", reason)
+            self.assertFalse(producer._valid_tts_wav(path))
+
     def test_tts_cache_marks_new_audio_for_cross_run_persistence(self):
         text = "नया ऑडियो कैश परीक्षण।"
         with tempfile.TemporaryDirectory() as folder:
