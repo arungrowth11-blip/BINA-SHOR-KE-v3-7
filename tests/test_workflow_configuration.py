@@ -1,5 +1,6 @@
 from __future__ import annotations
 import unittest
+import yaml
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -7,6 +8,16 @@ ROOT = Path(__file__).resolve().parents[1]
 class WorkflowConfigTests(unittest.TestCase):
     def test_weekly_dispatch_runs_saturday_in_ist(self):
         body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
+        workflow = yaml.load(body, Loader=yaml.BaseLoader)
+        push = workflow["on"]["push"]
+        self.assertEqual(push["branches"], ["feature/voice-first-3d-foundation"])
+        self.assertEqual(
+            push["paths"],
+            [
+                ".github/dispatch/plan-one.once",
+                ".github/dispatch/live-tts-smoke.once",
+            ],
+        )
         self.assertIn('cron: "37 7 * * 6"', body)
         self.assertIn('timezone: "Asia/Kolkata"', body)
         self.assertNotIn('cron: "37 7 * * 0"', body)
