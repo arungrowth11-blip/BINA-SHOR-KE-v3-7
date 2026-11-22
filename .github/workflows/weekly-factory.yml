@@ -21,6 +21,11 @@ on:
   schedule:
     - cron: "37 7 * * 6"
       timezone: "Asia/Kolkata"
+  push:
+    branches:
+      - feature/voice-first-3d-foundation
+    paths:
+      - ".github/dispatch/plan-one.once"
 
 permissions:
   contents: write
@@ -34,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'plan-week' }}
+      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && 'plan-one' || 'plan-week') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
@@ -54,6 +59,14 @@ jobs:
       TTS_VOICE: Kore
       TTS_MIN_INTERVAL_SECONDS: "21"
     steps:
+      - name: Validate one-shot plan-one push trigger
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"
+          test -f .github/dispatch/plan-one.once
+          grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once
+
       - name: Checkout private repository
         uses: actions/checkout@v4
         with:
