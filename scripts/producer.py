@@ -640,7 +640,7 @@ Return one JSON object with exactly these fields:
   "hook": "a compelling first-screen line, 4–10 Hindi words, no deceptive promise",
   "visual_bible": "consistent visual language, scene setting, lighting and any recurring non-identifiable character details",
   "beats": [
-    {{"narrative_role":"hook|context|conflict|escalation|turn|payoff in exact sequence", "state_change":"4–32 words describing the new information/action/interpretation in this beat", "causal_link":"4–32 words linking this beat to the opening pressure or immediately previous beat", "speech_segments":[{{"segment_id":"beat_01_line_01","speaker_id":"protagonist","text":"one complete natural Hindi spoken turn","emotion":"subtle emotion or acting cue"}}], "voiceover":"exact spoken words in this beat, joined in dialogue order for subtitle/ASR compatibility", "voice_direction":"optional overall beat direction", "screen_text":"short readable line, max 2 lines", "visual_query":"3–7 English keywords describing the shot", "visual_direction":"what new information or emotion this shot contributes", "video_prompt":"100–160 words in English describing a beat-appropriate visual shot whose duration will be selected after voice generation; clear subject, action, shot size/lens, camera movement, light source, material texture, continuity, restrained grade; explicitly no text, subtitles, logo or watermark", "overlay_type":"message|note|step|contrast|keyword", "overlay_text":"a short original clue/label that adds context rather than repeating the subtitle"}}
+    {{"narrative_role":"hook|context|conflict|escalation|turn|payoff in exact sequence", "state_change":"4–32 words describing the new information/action/interpretation in this beat", "causal_link":"4–32 words linking this beat to the opening pressure or immediately previous beat", "speech_segments":[{{"segment_id":"beat_01_line_01","speaker_id":"protagonist","text":"one complete natural Hindi spoken turn","emotion":"subtle emotion or acting cue"}}], "voiceover":"exact spoken words in this beat, joined in dialogue order for subtitle/ASR compatibility", "voice_direction":"optional overall beat direction", "screen_text":"short readable line, max 2 lines", "visual_query":"3–7 English keywords describing the shot", "visual_direction":"what new information or emotion this shot contributes", "video_prompt":"55–80 concrete English words describing the beat's visible action, shot size, motivated light, tactile materials, continuity and restrained grade; this is a temporary prompt and will be replaced after measured voice generation; no text, subtitles, logo or watermark", "overlay_type":"message|note|step|contrast|keyword", "overlay_text":"a short original clue/label that adds context rather than repeating the subtitle"}}
   ],
   "caption": "2–3 short natural lines, do not simply repeat the whole script",
   "hashtags": ["#BinaShorKe", "#relevant2", "#relevant3"],
@@ -668,6 +668,41 @@ CAST AGE/VOICE HARD GATE: visible age is selected first and is immutable. The ag
     return concept
 
 
+def _infer_share_recipient(concept: dict[str, Any]) -> str:
+    """Choose one concrete, singular recipient from the story without spending an AI call."""
+    parts = [
+        concept.get("title", ""),
+        concept.get("theme", ""),
+        concept.get("share_reason", ""),
+        concept.get("human_detail", ""),
+        concept.get("character_contradiction", ""),
+        concept.get("cost_of_choice", ""),
+    ]
+    for beat in concept.get("beats", []):
+        if isinstance(beat, dict):
+            parts.extend((beat.get("voiceover", ""), beat.get("visual_direction", "")))
+    for character in concept.get("characters", []):
+        if isinstance(character, dict):
+            parts.extend((character.get("role", ""), character.get("personality", "")))
+    tokens = set(normalize_for_similarity(" ".join(str(value or "") for value in parts)).split())
+
+    relationship_rules = (
+        ({"mother", "mom", "mum", "mummy", "ma", "माँ", "मां", "माता", "अम्मा"}, "अपनी माँ को"),
+        ({"father", "dad", "papa", "papi", "पिता", "पापा", "बाबा", "बाप"}, "अपने पिता को"),
+        ({"sister", "बहन", "दीदी", "अप्पा"}, "अपनी बहन को"),
+        ({"brother", "भाई", "भैया", "दादा"}, "अपने भाई को"),
+        ({"wife", "husband", "spouse", "partner", "पति", "पत्नी", "जीवनसाथी"}, "अपने जीवनसाथी को"),
+        ({"daughter", "son", "child", "children", "बेटी", "बेटा", "बच्चा", "बच्चे", "संतान"}, "अपने बच्चे को"),
+        ({"teacher", "mentor", "शिक्षक", "शिक्षिका", "गुरु", "अध्यापक"}, "अपने शिक्षक को"),
+        ({"colleague", "coworker", "office", "सहकर्मी", "दफ्तर", "ऑफिस"}, "अपने सहकर्मी को"),
+        ({"friend", "दोस्त", "मित्र", "यार"}, "उस दोस्त को"),
+    )
+    for markers, recipient in relationship_rules:
+        if tokens & markers:
+            return recipient
+    return "उस दोस्त को"
+
+
 def _share_recipient_is_generic(value: str) -> bool:
     """Reject audience labels; a recipient must be one identifiable person or relationship."""
     normalized = normalize_for_similarity(str(value or ""))
@@ -688,11 +723,10 @@ def _share_recipient_is_generic(value: str) -> bool:
 
 
 def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
-    """Apply safe local fixes, then make one constrained AI repair for narration length only.
+    """Repair mechanical draft defects locally and use AI only for incomplete visual shots.
 
-    Overlay type is a presentation enum, so an unknown value can safely fall back to
-    the neutral `keyword` style. Spoken narration is semantic content and is never
-    truncated locally; out-of-range lines receive one targeted rewrite request.
+    Share-recipient selection is a deterministic editorial label, not a creative field
+    worth another provider call. Spoken narration is never shortened locally.
     """
     if not isinstance(concept, dict):
         raise ValueError("Generated Reel must be a JSON object.")
@@ -719,15 +753,18 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
         else:
             beat["overlay_type"] = overlay_type
 
-    # Repair the two common draft-level structural misses before the hard validator.
-    # Keep the visual fix deterministic when a prompt is only a few words short; ask a
-    # text model only for genuinely incomplete shots or an unusable share recipient.
+    # Resolve the recipient locally: provider outages must not invalidate an otherwise
+    # sound story merely because the model returned "everyone" or "Hindi audience".
     recipient = str(concept.get("share_recipient") or "").strip()
     recipient_needs_repair = (
         not 1 <= len(recipient.split()) <= 12
         or len(recipient) > 100
         or _share_recipient_is_generic(recipient)
     )
+    if recipient_needs_repair:
+        concept["share_recipient"] = _infer_share_recipient(concept)
+        recipient = concept["share_recipient"]
+        log(f"Structural repair: selected specific share recipient locally ({recipient}).")
     prompt_repairs = []
     for i, beat in enumerate(beats):
         if not isinstance(beat, dict):
@@ -757,13 +794,10 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
                 for item in concept.get("characters", [])
                 if isinstance(item, dict)
             ],
-            "current_share_recipient": recipient if recipient_needs_repair else None,
             "visual_bible": str(concept.get("visual_bible") or ""),
             "shots_requiring_repair": prompt_repairs,
         }
         requested_fields = []
-        if recipient_needs_repair:
-            requested_fields.append("share_recipient")
         if prompt_repairs:
             requested_fields.append("video_prompts")
         repair_system = (
@@ -778,25 +812,11 @@ CONTEXT:
 
 REQUIRED OUTPUT FIELDS: {json.dumps(requested_fields)}
 Rules:
-- share_recipient, when requested, must be ONE specific person or singular relationship who would naturally receive this story (for example: "अपने छोटे भाई को", "उस पुराने दोस्त को", "अपनी माँ को"). Never return an audience category such as viewers, followers, friends, family, people or everyone. Do not force a share call-to-action.
-- video_prompts, when requested, must contain exactly one object for every supplied beat, preserving its beat number. Each replacement must be 65–100 concrete English words, describe only the supplied shot and its actual visible action, and retain the visual bible. Include framing, motivated light, tactile detail and coherent depth. Do not invent dialogue, characters, props or plot. No text, subtitles, logos or watermark.
+- video_prompts must contain exactly one object for every supplied beat, preserving its beat number. Each replacement must be 65–100 concrete English words, describe only the supplied shot and its actual visible action, and retain the visual bible. Include framing, motivated light, tactile detail and coherent depth. Do not invent dialogue, characters, props or plot. No text, subtitles, logos or watermark.
 - Do not return or alter the Hindi script, voiceover, speaker identity, beat order, caption or any unrequested field.
-Return JSON only, using this shape where relevant:
-{{"share_recipient":"one specific relationship","video_prompts":[{{"beat":3,"video_prompt":"65–100 concrete English words"}}]}}"""
+Return JSON only:
+{{"video_prompts":[{{"beat":3,"video_prompt":"65–100 concrete English words"}}]}}"""
         repaired = text_json(repair_system, repair_prompt, temperature=0.2, timeout=90)
-        if recipient_needs_repair:
-            replacement_recipient = repaired.get("share_recipient") if isinstance(repaired, dict) else None
-            if not isinstance(replacement_recipient, str) or not replacement_recipient.strip():
-                raise ValueError("Targeted structural repair returned no specific share_recipient.")
-            replacement_recipient = replacement_recipient.strip()
-            if (
-                not 1 <= len(replacement_recipient.split()) <= 12
-                or len(replacement_recipient) > 100
-                or _share_recipient_is_generic(replacement_recipient)
-            ):
-                raise ValueError("Targeted structural repair did not identify one specific share recipient.")
-            concept["share_recipient"] = replacement_recipient
-            log("Structural repair: replaced generic share recipient with one specific relationship.")
         if prompt_repairs:
             returned = repaired.get("video_prompts") if isinstance(repaired, dict) else None
             if not isinstance(returned, list):
