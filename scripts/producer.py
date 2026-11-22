@@ -62,6 +62,10 @@ TTS_VOICE = os.getenv("TTS_VOICE", "Kore")
 FONT_DIR = "/usr/share/fonts/truetype/noto"
 # A conservative request pacing guard for free-tier TTS quotas (roughly <= 3 requests/min).
 TTS_MIN_INTERVAL_SECONDS = max(0.0, float(os.getenv("TTS_MIN_INTERVAL_SECONDS", "21")))
+# The WAV/cache transport gate accepts up to 12s; the voice-first scene planner
+# separately enforces its stricter 8.1s shot limit and reports when a beat must split.
+TTS_MIN_DURATION_SECONDS = 1.0
+TTS_MAX_DURATION_SECONDS = 12.0
 _LAST_TTS_REQUEST_AT = 0.0
 _ASR_MODEL = None
 _LAST_TEXT_PROVIDER_USED: str | None = None
@@ -1470,17 +1474,36 @@ def tts_wav(
     raise RuntimeError(f"Gemini TTS failed after retries: {last_error}. No paid model fallback was attempted.")
 
 
-def _valid_tts_wav(path: Path) -> bool:
+def _tts_wav_validation_error(path: Path) -> str | None:
+    """Return a precise cache-format/duration defect without hiding WAV measurements."""
     try:
         with wave.open(str(path), "rb") as wav_file:
-            return (
-                wav_file.getnchannels() == 1
-                and wav_file.getsampwidth() == 2
-                and wav_file.getframerate() == 24000
-                and 24000 <= wav_file.getnframes() <= 24000 * 8
-            )
-    except (OSError, EOFError, wave.Error):
-        return False
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            sample_rate = wav_file.getframerate()
+            frames = wav_file.getnframes()
+            if channels != 1:
+                return f"expected mono audio, received {channels} channel(s)"
+            if sample_width != 2:
+                return f"expected 16-bit PCM, received {sample_width * 8}-bit samples"
+            if sample_rate != 24000:
+                return f"expected 24000 Hz, received {sample_rate} Hz"
+            if frames <= 0:
+                return "WAV contains zero PCM frames"
+            duration = frames / float(sample_rate)
+            if duration < TTS_MIN_DURATION_SECONDS or duration > TTS_MAX_DURATION_SECONDS:
+                return (
+                    f"measured duration {duration:.3f}s is outside the "
+                    f"{TTS_MIN_DURATION_SECONDS:.2f}–{TTS_MAX_DURATION_SECONDS:.2f}s "
+                    "TTS transport/cache range"
+                )
+            return None
+    except (OSError, EOFError, wave.Error) as exc:
+        return f"unreadable WAV container ({type(exc).__name__}): {exc}"
+
+
+def _valid_tts_wav(path: Path) -> bool:
+    return _tts_wav_validation_error(path) is None
 
 
 def ensure_tts_wav(
@@ -1527,8 +1550,11 @@ def ensure_tts_wav(
     destination.unlink(missing_ok=True)
     local_sidecar.unlink(missing_ok=True)
     tts_wav(text, destination, voice_direction=voice_direction, voice_name=selected_voice)
-    if not _valid_tts_wav(destination):
-        raise RuntimeError("TTS result failed cache-format/duration validation.")
+    validation_error = _tts_wav_validation_error(destination)
+    if validation_error:
+        raise RuntimeError(
+            "TTS result failed cache-format/duration validation: " + validation_error
+        )
 
     TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     # Write a temporary file then atomically replace to avoid partially cached audio.
