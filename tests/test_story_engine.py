@@ -166,12 +166,17 @@ class MotionComicTests(unittest.TestCase):
             shots = [dict(self.shots[1], start_seconds=0.0, end_seconds=2.5)]
             with patch.object(motion_comic.subprocess, "run") as run_cmd:
                 encoded = root / "output.partial.mp4"
-                encoded.write_bytes(b"x" * 100_001)
                 probe = SimpleNamespace(returncode=0, stdout="2.500", stderr="")
-                run_cmd.side_effect = [
-                    SimpleNamespace(returncode=0, stdout="", stderr=""),
-                    probe,
-                ]
+
+                def fake_run(command, **kwargs):
+                    if command[0] == "ffmpeg":
+                        # The renderer removes stale partial output before invoking FFmpeg.
+                        # Create the mocked encoder output during the call, not before it.
+                        encoded.write_bytes(b"x" * 100_001)
+                        return SimpleNamespace(returncode=0, stdout="", stderr="")
+                    return probe
+
+                run_cmd.side_effect = fake_run
                 result = motion_comic.render_editorial_montage(
                     None, depth, output, shots, target_duration=2.5, fps=30
                 )
