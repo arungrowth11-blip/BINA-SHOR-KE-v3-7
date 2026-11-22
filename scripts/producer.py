@@ -669,7 +669,7 @@ CAST AGE/VOICE HARD GATE: visible age is selected first and is immutable. The ag
 
 
 def _infer_share_recipient(concept: dict[str, Any]) -> str:
-    """Choose one concrete, singular recipient from the story without spending an AI call."""
+    """Choose one concrete, singular recipient from story context without an AI call."""
     parts = [
         concept.get("title", ""),
         concept.get("theme", ""),
@@ -684,21 +684,22 @@ def _infer_share_recipient(concept: dict[str, Any]) -> str:
     for character in concept.get("characters", []):
         if isinstance(character, dict):
             parts.extend((character.get("role", ""), character.get("personality", "")))
-    tokens = set(normalize_for_similarity(" ".join(str(value or "") for value in parts)).split())
 
+    raw_text = " ".join(str(value or "") for value in parts).casefold()
+    tokens = set(normalize_for_similarity(raw_text).split())
     relationship_rules = (
-        ({"mother", "mom", "mum", "mummy", "ma", "माँ", "मां", "माता", "अम्मा"}, "अपनी माँ को"),
-        ({"father", "dad", "papa", "papi", "पिता", "पापा", "बाबा", "बाप"}, "अपने पिता को"),
-        ({"sister", "बहन", "दीदी", "अप्पा"}, "अपनी बहन को"),
-        ({"brother", "भाई", "भैया", "दादा"}, "अपने भाई को"),
-        ({"wife", "husband", "spouse", "partner", "पति", "पत्नी", "जीवनसाथी"}, "अपने जीवनसाथी को"),
-        ({"daughter", "son", "child", "children", "बेटी", "बेटा", "बच्चा", "बच्चे", "संतान"}, "अपने बच्चे को"),
-        ({"teacher", "mentor", "शिक्षक", "शिक्षिका", "गुरु", "अध्यापक"}, "अपने शिक्षक को"),
-        ({"colleague", "coworker", "office", "सहकर्मी", "दफ्तर", "ऑफिस"}, "अपने सहकर्मी को"),
-        ({"friend", "दोस्त", "मित्र", "यार"}, "उस दोस्त को"),
+        ({"mother", "mom", "mum", "mummy", "ma"}, ("माँ", "मां", "माता", "अम्मा"), "अपनी माँ को"),
+        ({"father", "dad", "papa", "papi"}, ("पिता", "पापा", "बाबा", "बाप"), "अपने पिता को"),
+        ({"sister"}, ("बहन", "दीदी", "अप्पा"), "अपनी बहन को"),
+        ({"brother"}, ("भाई", "भैया"), "अपने भाई को"),
+        ({"wife", "husband", "spouse", "partner"}, ("पति", "पत्नी", "जीवनसाथी"), "अपने जीवनसाथी को"),
+        ({"daughter", "son", "child", "children"}, ("बेटी", "बेटा", "बच्चा", "बच्चे", "संतान"), "अपने बच्चे को"),
+        ({"teacher", "mentor"}, ("शिक्षक", "शिक्षिका", "गुरु", "अध्यापक"), "अपने शिक्षक को"),
+        ({"colleague", "coworker", "office"}, ("सहकर्मी", "दफ्तर", "ऑफिस"), "अपने सहकर्मी को"),
+        ({"friend"}, ("दोस्त", "मित्र", "यार"), "उस दोस्त को"),
     )
-    for markers, recipient in relationship_rules:
-        if tokens & markers:
+    for english_markers, hindi_markers, recipient in relationship_rules:
+        if tokens & english_markers or any(marker in raw_text for marker in hindi_markers):
             return recipient
     return "उस दोस्त को"
 
@@ -779,7 +780,7 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
                 "current_prompt": prompt,
             })
 
-    if recipient_needs_repair or prompt_repairs:
+    if prompt_repairs:
         context = {
             "title": str(concept.get("title") or ""),
             "theme": str(concept.get("theme") or ""),
