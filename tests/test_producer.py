@@ -606,7 +606,7 @@ class FactoryLogicTests(unittest.TestCase):
                         wav_file.setnchannels(1)
                         wav_file.setsampwidth(2)
                         wav_file.setframerate(24000)
-                        wav_file.writeframes(b"\\x00\\x00" * (24000 * 9))
+                        wav_file.writeframes(b"\x00\x00" * (24000 * 9))
 
                 with patch.object(producer, "tts_wav", side_effect=fake_tts):
                     self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
@@ -629,7 +629,7 @@ class FactoryLogicTests(unittest.TestCase):
                 wav_file.setnchannels(1)
                 wav_file.setsampwidth(2)
                 wav_file.setframerate(24000)
-                wav_file.writeframes(b"\\x00\\x00" * (24000 * 13))
+                wav_file.writeframes(b"\x00\x00" * (24000 * 13))
             reason = producer._tts_wav_validation_error(path)
             self.assertIn("measured duration 13.000s", reason)
             self.assertIn("12.00s TTS transport/cache range", reason)
