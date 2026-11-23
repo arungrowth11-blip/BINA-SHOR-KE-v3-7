@@ -628,7 +628,7 @@ Return one JSON object with exactly these fields:
 {{
   "title": "short distinct internal title",
   "characters": [
-    {{"character_id":"protagonist","display_name":"natural Hindi name","role":"protagonist|supporting|narrator","gender_presentation":"male|female|unspecified","age_band":"child|teen|young_adult|adult|older_adult|elder","visual_age_description":"visible age anchor consistent with age_band; normalized by the pipeline","appearance":"specific visual identity and exact age-consistent face/body/clothing anchors","personality":"brief behaviour traits","voice_profile_id":"use the exact canonical ID: young_adult male=hi_male_young_puck/female=hi_female_young_leda; adult male=hi_male_adult_charon/female=hi_female_adult_aoede; older_adult or elder male=hi_male_older_algenib/female=hi_female_older_gacrux; narrator=hi_narrator_kore; child/teen=empty because no qualified age-appropriate voice is available. Never put the Gemini display name (Puck, Leda, Charon, Aoede, Algenib, Gacrux or Kore) in voice_profile_id.","voice_direction":"natural Hindi performance direction for this character"}}
+    {{"character_id":"protagonist","display_name":"natural Hindi name","role":"protagonist|supporting|narrator","gender_presentation":"male|female|unspecified","age_band":"child|teen|young_adult|adult|older_adult|elder","visual_age_description":"visible age anchor consistent with age_band; normalized by the pipeline","appearance":"specific visual identity and exact age-consistent face/body/clothing anchors","personality":"brief behaviour traits","voice_direction":"natural Hindi performance direction for this character"}}
   ],
   "pillar": "{pillar}",
   "story_type": "emotional|suspense|twist|comedy|poetry|insight",
