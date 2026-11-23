@@ -167,7 +167,10 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             )
         char["age_band"] = normalise_age_band(char.get("age_band") or "adult")
         char["visual_age_description"] = visual_age_description(char["age_band"])
-        requested_profile = str(char.get("voice_profile_id") or "").strip()
+        # Keep the model-supplied value for diagnostics even if a Gemini display alias
+        # is normalized to a canonical profile ID for validation.
+        requested_profile_raw = str(char.get("voice_profile_id") or "").strip()
+        requested_profile = requested_profile_raw
         if requested_profile and requested_profile not in VOICE_PROFILES:
             # Models sometimes return the Gemini display voice (for example "Puck")
             # instead of the canonical, age-bound profile ID. Accept only an exact
@@ -194,7 +197,7 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             # gender are the source of truth; always derive the canonical profile locally.
             # This prevents a model from assigning an adult voice to a young-adult character.
             if requested_profile and requested_profile != expected_profile:
-                char["voice_profile_override_ignored"] = requested_profile
+                char["voice_profile_override_ignored"] = requested_profile_raw
             char["voice_profile_id"] = expected_profile
             profile = resolve_voice_profile(expected_profile)
             char["gemini_voice"] = profile["gemini_voice"]
