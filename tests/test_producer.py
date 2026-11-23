@@ -237,6 +237,32 @@ class FactoryLogicTests(unittest.TestCase):
                 )
         generate.assert_called_once()
 
+    def test_all_free_provider_cooldowns_stop_candidate_retries(self):
+        cooldown_until = producer.time.monotonic() + 3600
+        cooldowns = {
+            "gemini": cooldown_until,
+            "groq": cooldown_until,
+            "mistral": cooldown_until,
+        }
+
+        def generate_without_available_provider(*args, **kwargs):
+            return producer.text_json("system", "prompt")
+
+        with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+             patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+             patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
+             patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+             patch.dict(producer._PROVIDER_COOLDOWN_UNTIL, cooldowns), \
+             patch.object(producer, "generate_concept", side_effect=generate_without_available_provider) as generate, \
+             patch.object(producer.requests, "post") as request:
+            with self.assertRaisesRegex(RuntimeError, "temporarily unavailable"):
+                producer.acquire_approved_concept(
+                    {"topics": [], "generated_count": 0, "performance": []},
+                    "micro_story", producer.datetime.now(producer.TZ), 0,
+                )
+        generate.assert_called_once()
+        request.assert_not_called()
+
     def test_text_router_falls_back_from_gemini_to_groq(self):
         with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", return_value={"writer": "groq"}) as groq:
             result = producer.text_json("system", "prompt")
