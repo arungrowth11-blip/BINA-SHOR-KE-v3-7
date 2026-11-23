@@ -190,12 +190,11 @@ def normalise_screenplay(concept: dict[str, Any]) -> dict[str, Any]:
             char["voice_direction"] = ""
         else:
             expected_profile = infer_voice_profile(char["gender_presentation"], char["age_band"])
+            # The model's optional voice_profile_id is advisory only. Visible age and
+            # gender are the source of truth; always derive the canonical profile locally.
+            # This prevents a model from assigning an adult voice to a young-adult character.
             if requested_profile and requested_profile != expected_profile:
-                raise ValueError(
-                    f"Character {char_id} age/gender metadata requires voice_profile_id "
-                    f"{expected_profile!r}; received {requested_profile!r}. Correct the visible "
-                    "age/gender cast metadata or remove the conflicting override."
-                )
+                char["voice_profile_override_ignored"] = requested_profile
             char["voice_profile_id"] = expected_profile
             profile = resolve_voice_profile(expected_profile)
             char["gemini_voice"] = profile["gemini_voice"]
