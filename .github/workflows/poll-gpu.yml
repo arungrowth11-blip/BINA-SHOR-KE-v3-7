@@ -350,8 +350,9 @@ jobs:
           if [ "$missing_fonts" = true ]; then
             packages+=(fonts-noto-core)
           fi
-          if ! command -v tesseract >/dev/null 2>&1 || ! tesseract --list-langs 2>/dev/null | grep -qx eng
-          tesseract --list-langs 2>/dev/null | grep -qx hin; then
+          if ! command -v tesseract >/dev/null 2>&1 \
+          || ! tesseract --list-langs 2>/dev/null | grep -qx eng \
+          || ! tesseract --list-langs 2>/dev/null | grep -qx hin; then
             packages+=(tesseract-ocr tesseract-ocr-hin)
           fi
           if [ "${#packages[@]}" -gt 0 ]; then
