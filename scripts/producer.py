@@ -368,7 +368,7 @@ def text_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
     global _LAST_TEXT_PROVIDER_USED
     order = _text_provider_order(prefer_independent=False)
     if not order:
-        raise RuntimeError("No text AI provider is configured. Add GEMINI_API_KEY and/or an optional Groq/Mistral key.")
+        raise RuntimeError("No configured free text providers are currently available (missing credentials, disabled provider, or active cooldown).")
     failures = []
     for index, (name, provider) in enumerate(order):
         try:
@@ -1242,6 +1242,7 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
             # Once all configured free providers have failed with quota/transient errors,
             # a second candidate cannot help. Stop here instead of making a redundant call.
             provider_unavailable = any(marker in lowered for marker in (
+                "no configured free text providers are currently available",
                 "http 429", "http 500", "http 502", "http 503", "http 504",
                 "quota exceeded", "rate limit", "temporarily unavailable",
                 "timed out", "timeout", "connection error",
