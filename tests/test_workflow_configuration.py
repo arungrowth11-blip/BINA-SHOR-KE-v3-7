@@ -1,4 +1,5 @@
 from __future__ import annotations
+import subprocess
 import unittest
 import yaml
 from pathlib import Path
@@ -226,6 +227,23 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-core', setup)
         self.assertNotIn('fonts-noto-extra', setup)
         self.assertIn('fc-match "Noto Sans Devanagari"', setup)
+
+
+    def test_gpu_finalizer_prerequisite_shell_block_is_valid_bash(self):
+        body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
+        workflow = yaml.load(body, Loader=yaml.BaseLoader)
+        step = next(
+            item for item in workflow["jobs"]["finalize"]["steps"]
+            if item.get("name") == "Install only missing FFmpeg and Devanagari prerequisites"
+        )
+        script = step["run"]
+        self.assertIn("grep -qx eng", script)
+        self.assertIn("grep -qx hin", script)
+        result = subprocess.run(
+            ["bash", "-n"], input=script, text=True, capture_output=True, check=False
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
