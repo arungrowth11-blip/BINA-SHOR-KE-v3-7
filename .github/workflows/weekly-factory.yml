@@ -41,7 +41,7 @@ jobs:
     timeout-minutes: 30
     env:
       RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && contains(github.event.head_commit.message, 'RUN_GEMINI_TTS_SMOKE') && 'live-tts-smoke') || (github.event_name == 'push' && contains(github.event.head_commit.message, 'PLAN_ONE_ONLY') && 'plan-one') || (github.event_name == 'schedule' && 'plan-week') || 'preflight' }}
-      BSK_FREE_TIER_ONLY_ACK: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_free_tier_only) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'RUN_GEMINI_TTS_SMOKE')) || (github.event_name != 'workflow_dispatch' && vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true') }}
+      BSK_FREE_TIER_ONLY_ACK: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_free_tier_only) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'RUN_GEMINI_TTS_SMOKE')) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'PLAN_ONE_ONLY_FREE_TIER_CONFIRMED')) || (github.event_name != 'workflow_dispatch' && vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
@@ -77,9 +77,10 @@ jobs:
             test -f .github/dispatch/live-tts-smoke.once
             grep -qx "GEMINI_TTS_FREE_TIER_CONFIRMED" .github/dispatch/live-tts-smoke.once
           elif [[ "$RUN_MODE" == "plan-one" ]]; then
-            git log -1 --format=%B | grep -qx "PLAN_ONE_ONLY"
+            git log -1 --format=%B | grep -qx "PLAN_ONE_ONLY_FREE_TIER_CONFIRMED"
             test -f .github/dispatch/plan-one.once
             grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once
+            grep -qx "FREE_TIER_ONLY_CONFIRMED" .github/dispatch/plan-one.once
           else
             echo "No live one-shot sentinel changed; push is restricted to offline preflight."
           fi

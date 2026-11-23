@@ -30,7 +30,9 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn("contains(github.event.head_commit.message, 'PLAN_ONE_ONLY')", body)
         self.assertIn("contains(github.event.head_commit.message, 'PLAN_ONE_ONLY')", body)
         self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"', body)
+        self.assertIn('git log -1 --format=%B | grep -qx "PLAN_ONE_ONLY_FREE_TIER_CONFIRMED"', body)
         self.assertIn('grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once', body)
+        self.assertIn('grep -qx "FREE_TIER_ONLY_CONFIRMED" .github/dispatch/plan-one.once', body)
         self.assertIn("github.event_name == 'workflow_dispatch' && inputs.mode", body)
         self.assertIn('".github/dispatch/live-tts-smoke.once"', body)
         self.assertIn("contains(github.event.head_commit.message, 'RUN_GEMINI_TTS_SMOKE')", body)
@@ -43,6 +45,7 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn("git rm .github/dispatch/live-tts-smoke.once", body)
         self.assertIn("BSK_FREE_TIER_ONLY_ACK:", body)
         self.assertIn("vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true'", body)
+        self.assertIn("PLAN_ONE_ONLY_FREE_TIER_CONFIRMED", body)
         self.assertIn("BSK_FREE_TIER_ONLY_ACK", body)
         self.assertIn("plan-week", body)
 
