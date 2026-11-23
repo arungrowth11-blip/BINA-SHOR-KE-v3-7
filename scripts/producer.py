@@ -243,7 +243,8 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
         # GPT-OSS supports hidden reasoning in JSON mode; low effort reserves more of the
         # completion budget for the structured screenplay instead of internal reasoning.
         "reasoning_effort": "low",
-        "reasoning_format": "hidden",
+        # GPT-OSS 120B does not support reasoning_format; suppress its separate reasoning field.
+        "include_reasoning": False,
         "response_format": {"type": "json_object"},
         "stream": False,
     }
