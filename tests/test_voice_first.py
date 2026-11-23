@@ -84,7 +84,7 @@ class VoiceFirstTests(unittest.TestCase):
         self.assertEqual(character["voice_profile_id"], "hi_male_young_puck")
         self.assertEqual(character["gemini_voice"], "Puck")
 
-    def test_wrong_gemini_display_voice_alias_still_fails_age_voice_gate(self):
+    def test_wrong_gemini_display_voice_alias_is_overridden_by_age_gender(self):
         concept = {
             "characters": [{
                 "character_id": "arjun", "display_name": "अर्जुन",
@@ -93,13 +93,13 @@ class VoiceFirstTests(unittest.TestCase):
             }],
             "beats": [{"speech_segments": []} for _ in range(6)],
         }
-        with self.assertRaisesRegex(
-            ValueError,
-            "requires voice_profile_id 'hi_male_young_puck'.*received 'hi_male_adult_charon'",
-        ):
-            voice_first.normalise_screenplay(concept)
+        result = voice_first.normalise_screenplay(concept)
+        character = result["characters"][0]
+        self.assertEqual(character["voice_profile_id"], "hi_male_young_puck")
+        self.assertEqual(character["gemini_voice"], "Puck")
+        self.assertEqual(character["voice_profile_override_ignored"], "Charon")
 
-    def test_conflicting_explicit_voice_profile_is_rejected_against_visual_age(self):
+    def test_conflicting_explicit_voice_profile_is_overridden_against_visual_age(self):
         concept = {
             "characters": [{
                 "character_id": "meera", "display_name": "मीरा",
@@ -108,8 +108,11 @@ class VoiceFirstTests(unittest.TestCase):
             }],
             "beats": [{"speech_segments": []} for _ in range(6)],
         }
-        with self.assertRaisesRegex(ValueError, "requires voice_profile_id 'hi_female_adult_aoede'"):
-            voice_first.normalise_screenplay(concept)
+        result = voice_first.normalise_screenplay(concept)
+        character = result["characters"][0]
+        self.assertEqual(character["voice_profile_id"], "hi_female_adult_aoede")
+        self.assertEqual(character["gemini_voice"], "Aoede")
+        self.assertEqual(character["voice_profile_override_ignored"], "hi_female_older_gacrux")
 
     def test_silent_child_keeps_child_visual_age_without_an_adult_voice(self):
         concept = {
