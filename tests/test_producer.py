@@ -212,7 +212,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertIn("causal_link", mocked.call_args.args[1])
         prompt = mocked.call_args.args[1]
         self.assertIn(feedback, prompt)
-        self.assertIn("the pipeline derives the canonical age/gender-matched profile", prompt)
+        self.assertIn("the production pipeline derives the canonical age/gender-matched profile", prompt)
         self.assertIn("If you choose a young-adult woman, the pipeline assigns Leda", prompt)
         self.assertIn("if you choose an adult woman (30–54), it assigns Aoede", prompt)
         self.assertIn('"video_prompt":"55–80 concrete English words', prompt)
