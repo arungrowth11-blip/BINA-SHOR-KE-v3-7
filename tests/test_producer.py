@@ -93,7 +93,9 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(mocked.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")
         self.assertEqual(mocked.call_args.kwargs["json"]["model"], producer.GROQ_TEXT_MODEL)
         payload = mocked.call_args.kwargs["json"]
-        self.assertEqual(payload["max_completion_tokens"], 5000)
+        self.assertEqual(payload["max_completion_tokens"], 12000)
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertEqual(payload["reasoning_format"], "hidden")
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertNotIn("reasoning_format", payload)
 
@@ -108,7 +110,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(mocked.call_args.kwargs["headers"]["Authorization"], "Bearer test-mistral-key")
         payload = mocked.call_args.kwargs["json"]
         self.assertEqual(payload["model"], "ministral-8b-latest")
-        self.assertEqual(payload["max_tokens"], 5000)
+        self.assertEqual(payload["max_tokens"], 8000)
         self.assertEqual(payload["response_format"], {"type": "json_object"})
 
     def test_openai_json_completion_rejects_truncated_output(self):
