@@ -1213,9 +1213,10 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
     """Draft, independently critique, apply targeted revisions once, then fail closed."""
     concept = None
     draft_failures: list[str] = []
-    # Two bounded candidate attempts handle malformed/duplicate model output without looping forever.
+    # Three bounded candidate attempts absorb occasional malformed beat-count/cast metadata
+    # without unbounded provider calls. All providers remain on the configured free-tier allowlist.
     previous_feedback = ""
-    for candidate_attempt in range(2):
+    for candidate_attempt in range(3):
         try:
             candidate = generate_concept(
                 history, pillar, slot, index + candidate_attempt * 7,
@@ -1230,7 +1231,7 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
         except Exception as exc:
             message = str(exc)
             draft_failures.append(message[:400])
-            log(f"Draft candidate {candidate_attempt + 1}/2 rejected: {message[:400]}")
+            log(f"Draft candidate {candidate_attempt + 1}/3 rejected: {message[:400]}")
             previous_feedback = message[:700]
             lowered = message.lower()
             # Once all configured free providers have failed with quota/transient errors,
