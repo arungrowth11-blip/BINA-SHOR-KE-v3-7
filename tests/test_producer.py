@@ -132,10 +132,10 @@ class FactoryLogicTests(unittest.TestCase):
         }
         self.assertEqual(producer._openai_json_completion(body, "Mistral", 5000), {"ok": True})
 
-    def test_invalid_provider_json_disables_that_provider_for_current_run(self):
+    def test_invalid_provider_json_does_not_open_permanent_provider_circuit(self):
         error = json.JSONDecodeError("Unterminated string", '{"title":"broken', 9)
         producer._provider_failure_cooldown("groq", error)
-        self.assertFalse(producer._provider_available("groq"))
+        self.assertTrue(producer._provider_available("groq"))
         self.assertTrue(producer._provider_available("mistral"))
 
     def test_cloudflare_is_disabled_without_explicit_free_only_flag(self):
