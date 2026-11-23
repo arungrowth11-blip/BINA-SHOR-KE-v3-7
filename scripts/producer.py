@@ -239,7 +239,11 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
             {"role": "user", "content": user_prompt},
         ],
         "temperature": temperature,
-        "max_completion_tokens": 5000,
+        "max_completion_tokens": 12000,
+        # GPT-OSS supports hidden reasoning in JSON mode; low effort reserves more of the
+        # completion budget for the structured screenplay instead of internal reasoning.
+        "reasoning_effort": "low",
+        "reasoning_format": "hidden",
         "response_format": {"type": "json_object"},
         "stream": False,
     }
@@ -251,7 +255,7 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Groq HTTP {response.status_code}: {response.text[:300]}")
-    return _openai_json_completion(response.json(), "Groq", 5000)
+    return _openai_json_completion(response.json(), "Groq", 12000)
 
 
 
@@ -266,7 +270,7 @@ def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeou
             {"role": "user", "content": user_prompt},
         ],
         "temperature": temperature,
-        "max_tokens": 5000,
+        "max_tokens": 8000,
         "response_format": {"type": "json_object"},
         "stream": False,
     }
@@ -278,7 +282,7 @@ def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeou
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Mistral HTTP {response.status_code}: {response.text[:300]}")
-    return _openai_json_completion(response.json(), "Mistral", 5000)
+    return _openai_json_completion(response.json(), "Mistral", 8000)
 
 def cloudflare_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
     """Optional Cloudflare Workers AI tertiary route; requires explicit free-plan opt-in."""
@@ -327,8 +331,9 @@ def _provider_failure_cooldown(name: str, exc: Exception) -> None:
         "jsondecodeerror", "unterminated string", "expecting ',' delimiter",
         "output reached its", "invalid json", "empty or unsupported message content",
     )):
-        _PROVIDER_DISABLED_THIS_RUN.add(name)
-        log(f"Provider circuit opened for {name} for the remainder of this run (invalid or truncated structured output).")
+        # Invalid JSON is a response-quality failure, not proof the provider is unavailable.
+        # Keep the bounded candidate loop able to retry; hard truncation has larger budgets.
+        log(f"Provider {name} returned invalid/truncated structured output; retaining it for a bounded candidate retry.")
     elif any(token in message for token in ("http 500", "http 502", "http 503", "http 504", "timeout", "connection", "temporarily unavailable")):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 120
         log(f"Provider circuit opened for {name} for 2 minutes (transient failure).")
@@ -1240,8 +1245,6 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
                 "http 429", "http 500", "http 502", "http 503", "http 504",
                 "quota exceeded", "rate limit", "temporarily unavailable",
                 "timed out", "timeout", "connection error",
-                "jsondecodeerror", "unterminated string", "expecting ',' delimiter",
-                "output reached its", "invalid json",
             ))
             if provider_unavailable:
                 raise RuntimeError(
