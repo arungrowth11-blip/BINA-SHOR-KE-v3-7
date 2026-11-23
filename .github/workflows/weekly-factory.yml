@@ -102,7 +102,7 @@ jobs:
         if: env.RUN_MODE != 'live-tts-smoke'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-core
           ffmpeg -filters 2>/dev/null | grep -q subtitles
           fc-match "Noto Sans Devanagari"
 
