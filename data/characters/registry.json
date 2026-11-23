@@ -40,6 +40,46 @@
         "licence": null,
         "commercial_use_verified": false
       }
+    },
+    {
+      "character_id": "story_b593dfae_protagonist",
+      "display_name": "रिशा",
+      "role": "protagonist",
+      "gender_presentation": "female",
+      "age_band": "adult",
+      "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+      "appearance": "लंबी काली बाल, सफ़ेद कुर्ता, हल्का मेकअप, किचन में हल्के जूते",
+      "personality": "ध्यानशील, थोड़ा घबराहट भरा, काम में फोकस्ड",
+      "voice_profile_id": "hi_female_adult_aoede",
+      "gemini_voice": "Aoede",
+      "voice_status": "age_aligned_profile",
+      "asset_folder": "characters/story_b593dfae_protagonist",
+      "asset_status": "metadata_only_pending_3d_pilot",
+      "licence_review": {
+        "source": null,
+        "licence": null,
+        "commercial_use_verified": false
+      }
+    },
+    {
+      "character_id": "story_b593dfae_supporting",
+      "display_name": "अमन",
+      "role": "supporting",
+      "gender_presentation": "male",
+      "age_band": "adult",
+      "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+      "appearance": "छोटा दाढ़ी, नीला शर्ट, किचन में हल्के सैंडल, हाथ में मोबाइल",
+      "personality": "सहज, थोड़ी अनभिज्ञ, मददगार लेकिन अंधेरे में",
+      "voice_profile_id": "hi_male_adult_charon",
+      "gemini_voice": "Charon",
+      "voice_status": "age_aligned_profile",
+      "asset_folder": "characters/story_b593dfae_supporting",
+      "asset_status": "metadata_only_pending_3d_pilot",
+      "licence_review": {
+        "source": null,
+        "licence": null,
+        "commercial_use_verified": false
+      }
     }
   ]
 }
