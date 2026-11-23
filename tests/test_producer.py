@@ -97,7 +97,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(payload["reasoning_effort"], "low")
         self.assertEqual(payload["reasoning_format"], "hidden")
         self.assertEqual(payload["response_format"], {"type": "json_object"})
-        self.assertNotIn("reasoning_format", payload)
+        self.assertEqual(payload["reasoning_format"], "hidden")
 
     def test_mistral_free_mode_uses_chat_completions_endpoint(self):
         response = Mock()
