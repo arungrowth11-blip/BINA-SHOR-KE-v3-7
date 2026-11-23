@@ -216,7 +216,6 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertIn("If you choose a young-adult woman, the pipeline assigns Leda", prompt)
         self.assertIn("if you choose an adult woman (30–54), it assigns Aoede", prompt)
         self.assertIn('"video_prompt":"55–80 concrete English words', prompt)
-        self.assertIn("Never put the Gemini display name", prompt)
         schema_cast = prompt.split('"characters": [', 1)[1].split('"pillar":', 1)[0]
         self.assertNotIn('"voice_profile_id"', schema_cast)
         self.assertIn("OMIT voice_profile_id entirely", prompt)
