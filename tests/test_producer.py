@@ -216,6 +216,11 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertIn("adult male=hi_male_adult_charon", prompt)
         self.assertIn('"video_prompt":"55–80 concrete English words', prompt)
         self.assertIn("Never put the Gemini display name", prompt)
+        schema_cast = prompt.split('"characters": [', 1)[1].split('"pillar":', 1)[0]
+        self.assertNotIn('"voice_profile_id"', schema_cast)
+        self.assertIn("OMIT voice_profile_id entirely", prompt)
+        self.assertIn("Return a beats array containing EXACTLY SIX objects", prompt)
+        self.assertIn("no prologue object, no epilogue object, no seventh beat, and no merged beats", prompt)
 
     def test_transient_provider_outage_stops_redundant_second_candidate(self):
         failure = RuntimeError(
