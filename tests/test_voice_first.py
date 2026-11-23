@@ -99,6 +99,21 @@ class VoiceFirstTests(unittest.TestCase):
         self.assertEqual(character["gemini_voice"], "Puck")
         self.assertEqual(character["voice_profile_override_ignored"], "Charon")
 
+    def test_ignored_voice_display_alias_preserves_original_case(self):
+        concept = {
+            "characters": [{
+                "character_id": "arjun", "display_name": "अर्जुन",
+                "gender_presentation": "male", "age_band": "young_adult",
+                "voice_profile_id": "cHaRoN",
+            }],
+            "beats": [{"speech_segments": []} for _ in range(6)],
+        }
+        result = voice_first.normalise_screenplay(concept)
+        character = result["characters"][0]
+        self.assertEqual(character["voice_profile_id"], "hi_male_young_puck")
+        self.assertEqual(character["gemini_voice"], "Puck")
+        self.assertEqual(character["voice_profile_override_ignored"], "cHaRoN")
+
     def test_conflicting_explicit_voice_profile_is_overridden_against_visual_age(self):
         concept = {
             "characters": [{
