@@ -219,5 +219,13 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('cancel-in-progress: false', body)
         self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
 
+
+    def test_director_installs_only_required_ffmpeg_and_devanagari_fonts(self):
+        body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
+        setup = body[body.index('      - name: Install FFmpeg and Devanagari fonts'):body.index('      - name: Install free workflow dependencies')]
+        self.assertIn('sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-core', setup)
+        self.assertNotIn('fonts-noto-extra', setup)
+        self.assertIn('fc-match "Noto Sans Devanagari"', setup)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)
