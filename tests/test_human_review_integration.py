@@ -165,7 +165,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         self.assertEqual(second["sent_count"], 3)
         self.assertEqual(second["pending_count"], 0)
 
-    def test_local_visual_fallback_requires_three_real_reviewers_and_all_local_gates(self):
+    def test_local_visual_fallback_does_not_require_telegram_reviewer_ids_but_keeps_all_local_gates(self):
         build = {"technical": {
             "technical_checks_passed": True,
             "rendered_frame_visual_qa": {
@@ -180,18 +180,51 @@ class HumanReviewIntegrationTests(unittest.TestCase):
                 "metadata_ocr_qa": {"status": "passed"},
             },
         }}
-        with patch.object(studio_pipeline.producer, "external_human_reviewer_chat_ids", return_value=["1", "2"]), \
-             patch.object(studio_pipeline.producer, "human_review_minimum_responses", return_value=3):
-            with self.assertRaisesRegex(RuntimeError, "at least 3 allowlisted independent"):
-                studio_pipeline.ensure_reel_qa_passed(build)
-        with patch.object(studio_pipeline.producer, "external_human_reviewer_chat_ids", return_value=["1", "2", "3"]), \
-             patch.object(studio_pipeline.producer, "human_review_minimum_responses", return_value=3):
+        with patch.object(
+            studio_pipeline.producer,
+            "external_human_reviewer_chat_ids",
+            side_effect=AssertionError("manual review must not query Telegram reviewer IDs"),
+        ):
             self.assertEqual(studio_pipeline.ensure_reel_qa_passed(build), "human_review_fallback")
         build["technical"]["rendered_frame_visual_qa"]["metadata_ocr_qa"]["status"] = "not_completed"
-        with patch.object(studio_pipeline.producer, "external_human_reviewer_chat_ids", return_value=["1", "2", "3"]), \
-             patch.object(studio_pipeline.producer, "human_review_minimum_responses", return_value=3):
+        with patch.object(
+            studio_pipeline.producer,
+            "external_human_reviewer_chat_ids",
+            side_effect=AssertionError("manual review must not query Telegram reviewer IDs"),
+        ):
             with self.assertRaisesRegex(RuntimeError, "OCR must complete"):
                 studio_pipeline.ensure_reel_qa_passed(build)
+
+    def test_owner_approval_attests_three_manual_external_passes_without_reviewer_ids(self):
+        history = {"topics": [{
+            "title": "Manual fallback Reel", "reel_id": "reel_manual_fallback",
+            "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": False, "eligible_for_human_review": True,
+            "human_review_fallback_required": True, "human_review_qa_passed": False,
+            "technical_checks_passed": True, "visual_qa_status": "local_pass_human_review",
+            "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
+            "telegram_delivered": True,
+        }]}
+        with patch.object(producer, "external_human_reviewer_chat_ids", return_value=[]):
+            approved = producer._parse_review_message(
+                "/approve title=Manual fallback Reel", history, approved=True
+            )
+        self.assertTrue(approved["weekly_qualification_created"])
+        topic = history["topics"][0]
+        self.assertTrue(topic["qa_passed"])
+        self.assertTrue(topic["human_review_qa_passed"])
+        self.assertEqual(topic["human_review_qa_source"], "owner_attested_manual_external_review")
+        attestation = topic["manual_external_review_attestation"]
+        self.assertEqual(attestation["reported_independent_reviewers"], 3)
+        self.assertTrue(attestation["attested_by_owner"])
+        self.assertEqual(attestation["verification"], "owner_attested_not_bot_verified")
+        qualification = history["one_reel_qualification"]
+        self.assertTrue(qualification["human_review_qa_passed"])
+        self.assertEqual(qualification["human_review_qa_source"], "owner_attested_manual_external_review")
+        self.assertEqual(
+            qualification["manual_external_review_attestation"]["verification"],
+            "owner_attested_not_bot_verified",
+        )
 
     def test_weekly_qualification_rejects_local_fallback_without_human_pass(self):
         history = {"one_reel_qualification": {
