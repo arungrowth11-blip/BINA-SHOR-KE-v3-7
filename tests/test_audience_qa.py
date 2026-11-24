@@ -22,6 +22,7 @@ def fixture():
                 "text_legibility": 4, "visual_quality": 4,
                 "character_continuity": 3, "story_visual_match": 4,
                 "anatomy_integrity": 5, "safe_composition": 4,
+                "devanagari_rendering": 5, "metadata_text_cleanliness": 5,
             },
             "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
             "metadata_ocr_qa": {"status": "passed"},
