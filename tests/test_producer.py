@@ -1076,12 +1076,79 @@ class FactoryLogicTests(unittest.TestCase):
         record_again = producer._parse_published_message("/published title=एक अलग कहानी", history)
         self.assertTrue(record_again["already_published"])
 
-    def test_final_audio_mix_applies_integrated_loudness_and_true_peak_mastering(self):
+    def test_final_audio_mix_applies_true_peak_headroom_without_limiter_makeup_gain(self):
         filter_graph = producer.final_audio_mix_filter()
         self.assertIn("amix=inputs=2:duration=first", filter_graph)
         self.assertIn("volume=0.22[bed]", filter_graph)
-        self.assertIn("loudnorm=I=-16:TP=-1.5:LRA=11", filter_graph)
-        self.assertIn("alimiter=limit=0.84[a]", filter_graph)
+        self.assertIn("loudnorm=I=-16:TP=-2.5:LRA=11", filter_graph)
+        self.assertIn("alimiter=limit=0.84:level=false[a]", filter_graph)
+
+    def test_final_audio_loudness_measurement_parses_ffmpeg_json(self):
+        payload = (
+            'video stream metadata\\n'
+            + '{"input_i" : "-16.31", "input_tp" : "-2.42", '
+            + '"input_lra" : "3.80", "input_thresh" : "-26.50"}'
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            media = Path(folder) / "reel.mp4"
+            media.write_bytes(b"valid media placeholder")
+            with patch.object(producer.subprocess, "run", return_value=Mock(returncode=0, stderr=payload)) as mocked:
+                result = producer.measure_audio_loudness(media)
+        self.assertEqual(result["integrated_loudness_lufs"], -16.31)
+        self.assertEqual(result["true_peak_dbtp"], -2.42)
+        self.assertIn("loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", mocked.call_args.args[0])
+
+    def test_final_audio_qa_accepts_encoded_audio_inside_limits_without_remaster(self):
+        measured = {"integrated_loudness_lufs": -16.2, "true_peak_dbtp": -2.1}
+        with patch.object(producer, "measure_audio_loudness", return_value=measured), \\
+             patch.object(producer, "run_cmd") as remaster:
+            result = producer.enforce_final_audio_qa(Path("reel.mp4"))
+        self.assertEqual(result["status"], "passed")
+        self.assertFalse(result["remastered"])
+        self.assertEqual(result["measured"], measured)
+        remaster.assert_not_called()
+
+    def test_final_audio_qa_remasters_hot_aac_once_and_rechecks_before_replace(self):
+        before = {"integrated_loudness_lufs": -15.15, "true_peak_dbtp": 0.31}
+        after = {"integrated_loudness_lufs": -16.67, "true_peak_dbtp": -2.46}
+        command_seen = []
+
+        def fake_remaster(command, timeout=240):
+            command_seen.append(command)
+            Path(command[-1]).write_bytes(b"remastered-aac" * 10000)
+
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "reel.mp4"
+            video.write_bytes(b"original-video" * 1000)
+            original = video.read_bytes()
+            with patch.object(producer, "measure_audio_loudness", side_effect=[before, after]), \\
+                 patch.object(producer, "run_cmd", side_effect=fake_remaster):
+                result = producer.enforce_final_audio_qa(video)
+            self.assertEqual(video.read_bytes(), b"remastered-aac" * 10000)
+            self.assertNotEqual(video.read_bytes(), original)
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(result["remastered"])
+        self.assertEqual(result["before"], before)
+        self.assertEqual(result["measured"], after)
+        self.assertIn("level=false", command_seen[0])
+        self.assertIn("48000", command_seen[0])
+
+    def test_final_audio_qa_fails_closed_and_preserves_original_when_remaster_stays_hot(self):
+        before = {"integrated_loudness_lufs": -15.15, "true_peak_dbtp": 0.31}
+        still_hot = {"integrated_loudness_lufs": -16.0, "true_peak_dbtp": -0.4}
+
+        def fake_remaster(command, timeout=240):
+            Path(command[-1]).write_bytes(b"unsafe-remaster" * 10000)
+
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "reel.mp4"
+            original = b"original-video" * 1000
+            video.write_bytes(original)
+            with patch.object(producer, "measure_audio_loudness", side_effect=[before, still_hot]), \\
+                 patch.object(producer, "run_cmd", side_effect=fake_remaster):
+                with self.assertRaisesRegex(RuntimeError, "remaster"):
+                    producer.enforce_final_audio_qa(video)
+            self.assertEqual(video.read_bytes(), original)
 
     def test_sound_bed_has_valid_stereo_wave(self):
         with tempfile.TemporaryDirectory() as folder:
