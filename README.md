@@ -28,7 +28,7 @@ Twelve rotating narrative devices reduce repeated formula. Every concept require
 
 Every finalized Reel receives a reproducible **10,000-profile synthetic audience simulation** using all 13 editorial-critic dimensions and all 8 rendered-frame VLM dimensions, plus objective technical gates. It reports strengths, weak dimensions and preference-segment reactions. The seed is stable for the same Reel/evidence, and missing evidence is not fabricated. These profiles are simulated preferences, **not real people**; intent percentages are not reach, watch-time, virality or view predictions. This is an evidence-conditioned Monte Carlo model, not 10,000 independent LLM essays or a calibrated platform-performance predictor.
 
-**Normal path:** complete AI evidence, technical QA and owner full-playback review are required before /approve.
+**Normal path:** complete AI evidence and technical QA must pass. The owner must watch the full Reel, obtain separate Pass responses from three independent external viewers, fix any reported shortcomings, and only then send /approve.
 
 **Manual external-review fallback:** if AI semantic evidence is incomplete, delivery is allowed only when deterministic local visual-integrity checks pass, technical checks pass, the full-video motion/black/freeze scan passes, and metadata OCR passes. The Reel is explicitly labelled **AI EVIDENCE INCOMPLETE**. This path is not an AI-QA pass and cannot override a failed objective gate.
 
@@ -56,7 +56,7 @@ See [`README_HINDI.md`](README_HINDI.md) for the Windows/GitHub Desktop walkthro
 
 Recommended optional free text keys: `GROQ_API_KEY` and `MISTRAL_API_KEY`. Cloudflare uses `CF_ACCOUNT_ID`, `CF_API_TOKEN`, and exact opt-in secret `CF_WORKERS_AI_FREE_ONLY=YES`; it is OFF by default because Workers Paid usage above the free allocation can be billable. Do not enable it unless you have confirmed the account is on Workers Free. Do not configure billing/Pay-as-you-go for Gemini, Groq or Mistral. Disable GitHub Actions paid overage.
 
-Run: `preflight` → `plan-one` → confirm the Reel is QA-passed and delivered to Telegram → send `/approve title=Exact Reel Title` → run `plan-week`. The workflow re-checks Telegram updates and requires the persistent one-Reel qualification record plus a qualified GPU benchmark before dispatching a weekly batch. The system has not yet been live-tested against your API/GPU/Telegram accounts. Free provider quotas and Kaggle GPU availability may change; the software stops rather than selecting a paid fallback.
+Run: `preflight` → `plan-one` → receive the Reel in Telegram → complete the owner full-playback and three-person Pass/Fail review → send `/approve title=Exact Reel Title` → run `plan-week`. The workflow re-checks Telegram updates and requires the persistent one-Reel qualification record plus a qualified GPU benchmark before dispatching a weekly batch. The system has not yet been live-tested against your API/GPU/Telegram accounts. Free provider quotas and Kaggle GPU availability may change; the software stops rather than selecting a paid fallback.
 
 ## Important limitations
 
