@@ -26,11 +26,11 @@ Twelve rotating narrative devices reduce repeated formula. Every concept require
 
 ## Human Reality QA and independent audience review
 
-Every finalized Reel now receives a reproducible **10,000-profile synthetic audience simulation** using the editorial critic's 1–5 scorecard and the rendered-frame VLM scorecard. It reports strengths, weak dimensions and preference-segment reactions. The seed is stable for the same Reel/evidence, and missing evidence is not fabricated. These profiles are simulated preferences, **not real people**, and their intent percentages are not reach, watch-time, virality or view predictions.
+Every finalized Reel receives a reproducible **10,000-profile synthetic audience simulation** using all 13 editorial-critic dimensions and all 8 rendered-frame VLM dimensions, plus the objective technical gates. It reports strengths, weak dimensions and preference-segment reactions. The seed is stable for the same Reel/evidence, and missing evidence is not fabricated. A missing dimension or failed technical gate blocks delivery. These profiles are simulated preferences, **not real people**, and their intent percentages are not reach, watch-time, virality or view predictions. This is a transparent evidence-conditioned Monte Carlo model, not 10,000 independent LLM-generated essays and not a calibrated platform-performance predictor.
 
 Real human review is a separate Telegram workflow. To enable an independent review panel:
 
-1. Ask each trusted reviewer to open the connected Telegram bot privately and send `/start`.
+1. The owner must already have opened the connected Telegram bot privately and sent `/start` so the feedback workflow is enrolled. Ask each trusted reviewer to open that bot privately and send `/start` as well.
 2. Each reviewer sends `/reviewer_id` and shares the returned private chat ID with the project owner.
 3. In GitHub repository Settings → Secrets and variables → Actions, add:
    - `BSK_HUMAN_REVIEWER_CHAT_IDS`: comma-separated numeric IDs for at least three trusted external reviewers. Do not include the owner; the owner is excluded from the independent panel.
