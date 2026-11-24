@@ -58,6 +58,8 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "motion_diagnostics_status": "passed",
                 "metadata_ocr_status": "passed",
                 "telegram_delivered": True,
+                "manual_external_review_required": True,
+                "manual_external_reviewers_required": 3,
             }]
         }
         result = producer._parse_review_message(
@@ -88,6 +90,8 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "qa_passed": True, "visual_qa_status": "reviewed",
                 "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
                 "telegram_delivered": True,
+                "manual_external_review_required": True,
+                "manual_external_reviewers_required": 3,
             }]}), encoding="utf-8")
             lock_path = base / "toolchain_lock.json"
             lock_path.write_text(json.dumps({
