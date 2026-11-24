@@ -1344,29 +1344,54 @@ def _poll_and_finalize_impl() -> int:
                 quality=quality,
                 sample_size=simulated_sample_size,
             )
+            review_path = ensure_reel_qa_passed(build)
+            human_fallback_required = audience_report.get('status') != 'completed'
+            if human_fallback_required:
+                reviewers = producer.external_human_reviewer_chat_ids()
+                minimum = producer.human_review_minimum_responses()
+                objective_gates = audience_report.get('evidence', {}).get('technical_gates', {})
+                objective_checks_passed = all(
+                    objective_gates.get(key) is True
+                    for key in ('technical_checks_passed', 'motion_scan_passed', 'metadata_ocr_passed')
+                )
+                if not objective_checks_passed or len(reviewers) < minimum:
+                    missing_dimensions = audience_report.get('missing_evidence_dimensions', [])
+                    failed_gates = audience_report.get('failed_technical_gates', [])
+                    raise RuntimeError(
+                        'Human Reality QA is incomplete and cannot be handed off safely. '
+                        + 'Review path: ' + review_path + '. Missing evidence dimensions: '
+                        + (', '.join(missing_dimensions) or 'none reported')
+                        + '; failed technical gates: ' + (', '.join(failed_gates) or 'none reported')
+                        + '. A deterministic technical pass and at least ' + str(minimum)
+                        + ' independent Telegram reviewers are required for the human fallback.'
+                    )
+                audience_report['human_review_fallback_required'] = True
+                audience_report['qualification_status'] = 'waiting_for_independent_human_panel_and_owner_approval'
+                quality['human_review_fallback_required'] = True
+                build['human_review_fallback_required'] = True
+            else:
+                audience_report['human_review_fallback_required'] = False
+                audience_report['qualification_status'] = 'ai_evidence_complete_owner_approval_required'
+                quality['human_review_fallback_required'] = False
+                build['human_review_fallback_required'] = False
             quality['audience_qa'] = audience_report
             build['audience_qa'] = audience_report
             write_json(reel_dir / 'audience_qa.json', audience_report)
-            write_json(reel_dir / 'quality_report.json', quality)
-            if audience_report.get('status') != 'completed':
-                missing_dimensions = audience_report.get('missing_evidence_dimensions', [])
-                failed_gates = audience_report.get('failed_technical_gates', [])
-                raise RuntimeError(
-                    'Human Reality QA is incomplete; this Reel will not be delivered. '
-                    + 'Missing evidence dimensions: ' + (', '.join(missing_dimensions) or 'none reported')
-                    + '; failed technical gates: ' + (', '.join(failed_gates) or 'none reported')
-                    + '. Inspect audience_qa.json and quality_report.json, correct the evidence gap, then retry.'
-                )
             write_json(reel_dir / 'quality_report.json', quality)
             publish_kit = reel_dir / 'publish.txt'
             with publish_kit.open('a', encoding='utf-8') as handle:
                 handle.write(
                     '\n\nSYNTHETIC AUDIENCE SIMULATION — NOT REAL PEOPLE / NOT A VIEW PREDICTION\n'
                     + json.dumps(audience_report, ensure_ascii=False, indent=2)
-                    + '\n\nREAL HUMAN REVIEW: separate allowlisted Telegram reviewers, if configured. '
-                    + 'Owner full-playback approval remains mandatory.\n'
+                    + (
+                        '\n\nAI EVIDENCE INCOMPLETE: this Reel is NOT QA-passed. '
+                        'It is being handed to the allowlisted independent human panel as a controlled fallback. '
+                        'All required real-human reviews must pass before owner approval.\n'
+                        if human_fallback_required else
+                        '\n\nAI EVIDENCE COMPLETE: the independent owner full-playback approval remains mandatory.\n'
+                    )
+                    + 'No Facebook auto-publishing is enabled.\n'
                 )
-            ensure_reel_qa_passed(build)
             image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
             quality['video_generation'] = {
                 'model': 'FLUX.1-schnell Q4_K_S GGUF still generation + Depth Anything V2 (ComfyUI)' if image_first else 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
