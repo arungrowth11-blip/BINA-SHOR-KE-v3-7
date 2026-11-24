@@ -1179,7 +1179,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertGreater(producer.character_error_rate("नमस्ते दुनिया", "नमस्ते दोस्त"), 0.0)
 
     def test_review_command_marks_ready_for_manual_publish_only(self):
-        history = {"topics": [{"title": "सीमा तय करना", "status": "ready_for_manual_publish_not_confirmed_published"}]}
+        history = {"topics": [{"title": "सीमा तय करना", "status": "ready_for_manual_publish_not_confirmed_published", "qa_passed": True}]}
         result = producer._parse_review_message("/approve title=सीमा तय करना", history, approved=True)
         self.assertTrue(result["approved"])
         self.assertEqual(history["topics"][0]["status"], "owner_approved_for_manual_publish")
