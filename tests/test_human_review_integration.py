@@ -99,6 +99,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
             video = Path(folder) / "reel.mp4"
             video.write_bytes(b"sample-video")
             sent_chats = []
+            progress_events = []
             def fake_post(method, data=None, files=None, timeout=180):
                 sent_chats.append(data["chat_id"])
                 return {"ok": True}
@@ -106,7 +107,10 @@ class HumanReviewIntegrationTests(unittest.TestCase):
                 "BSK_HUMAN_REVIEWER_CHAT_IDS": "12345,67890,24680,99999,not-an-id,12345",
                 "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
             }), patch.object(producer, "telegram_chat_id", return_value="99999"), patch.object(producer, "telegram_post", side_effect=fake_post):
-                first = producer.dispatch_human_review_panel("reel_001", "शीर्षक", video)
+                first = producer.dispatch_human_review_panel(
+                    "reel_001", "शीर्षक", video,
+                    on_progress=lambda state: progress_events.append(state),
+                )
                 second = producer.dispatch_human_review_panel(
                     "reel_001", "शीर्षक", video,
                     already_sent_hashes=first["sent_reviewer_hashes"],
@@ -114,6 +118,8 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         self.assertEqual(sent_chats, ["12345", "67890", "24680"])
         self.assertEqual(first["configured_count"], 3)
         self.assertEqual(first["sent_count"], 3)
+        self.assertEqual([event["sent_count"] for event in progress_events], [1, 2, 3])
+        self.assertEqual([event["pending_count"] for event in progress_events], [2, 1, 0])
         self.assertEqual(second["sent_count"], 3)
         self.assertEqual(second["pending_count"], 0)
 
