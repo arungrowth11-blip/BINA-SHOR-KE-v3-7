@@ -2143,12 +2143,113 @@ def create_original_sound_bed(destination: Path, duration: float, pillar: str) -
 
 
 def final_audio_mix_filter() -> str:
-    """Mix the restrained original ambience, then master the complete Reel audio."""
+    """Mix ambience, leave AAC true-peak headroom, and disable limiter makeup gain."""
     return (
         "[1:a]volume=0.22[bed];"
         "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-        "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.84[a]"
+        "loudnorm=I=-16:TP=-2.5:LRA=11,alimiter=limit=0.84:level=false[a]"
     )
+
+
+def measure_audio_loudness(path: Path, timeout: int = 180) -> dict[str, float]:
+    """Measure the encoded file's integrated loudness and true peak with FFmpeg."""
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise RuntimeError("Final audio QA cannot measure a missing or empty media file.")
+    command = [
+        "ffmpeg", "-hide_banner", "-i", str(path), "-vn",
+        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(
+        command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    diagnostics = (result.stderr or "") + "\n" + (result.stdout or "")
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Final encoded-audio loudness measurement failed: "
+            + diagnostics[-1800:]
+        )
+    matches = re.findall(r'\{\s*"input_i"\s*:.*?\}', diagnostics, flags=re.DOTALL)
+    if not matches:
+        raise RuntimeError("FFmpeg loudnorm did not return a parseable final-audio measurement.")
+    try:
+        report = json.loads(matches[-1])
+        integrated = float(report["input_i"])
+        true_peak = float(report["input_tp"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Final encoded-audio measurement is incomplete or invalid.") from exc
+    if not math.isfinite(integrated) or not math.isfinite(true_peak):
+        raise RuntimeError("Final encoded-audio measurement is non-finite; refusing delivery.")
+    return {
+        "integrated_loudness_lufs": round(integrated, 2),
+        "true_peak_dbtp": round(true_peak, 2),
+    }
+
+
+def enforce_final_audio_qa(video_path: Path) -> dict[str, Any]:
+    """Verify final AAC; perform at most one measured remaster, then fail closed."""
+    max_true_peak_dbtp = -1.0
+    min_integrated_lufs = -18.0
+    max_integrated_lufs = -14.0
+
+    def within_limits(measurement: dict[str, float]) -> bool:
+        integrated = measurement.get("integrated_loudness_lufs")
+        true_peak = measurement.get("true_peak_dbtp")
+        return (
+            isinstance(integrated, (int, float))
+            and isinstance(true_peak, (int, float))
+            and math.isfinite(float(integrated))
+            and math.isfinite(float(true_peak))
+            and min_integrated_lufs <= float(integrated) <= max_integrated_lufs
+            and float(true_peak) <= max_true_peak_dbtp
+        )
+
+    before = measure_audio_loudness(video_path)
+    if within_limits(before):
+        return {
+            "status": "passed",
+            "remastered": False,
+            "measured": before,
+            "limits": {
+                "integrated_loudness_lufs": [min_integrated_lufs, max_integrated_lufs],
+                "maximum_true_peak_dbtp": max_true_peak_dbtp,
+            },
+        }
+
+    temporary = video_path.with_name(video_path.stem + ".audio-remaster.tmp.mp4")
+    try:
+        temporary.unlink(missing_ok=True)
+        run_cmd([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(video_path), "-map", "0:v:0", "-map", "0:a:0",
+            "-c:v", "copy",
+            "-af", "loudnorm=I=-16:TP=-2.5:LRA=11,alimiter=limit=0.84:level=false",
+            "-ar", "48000", "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart", str(temporary),
+        ], timeout=360)
+        if not temporary.is_file() or temporary.stat().st_size < 100_000:
+            raise RuntimeError("The one permitted final-audio remaster did not produce a valid media file.")
+        after = measure_audio_loudness(temporary)
+        if not within_limits(after):
+            raise RuntimeError(
+                "Final AAC remains outside the loudness/true-peak limits after one remaster: "
+                + json.dumps(after, ensure_ascii=False)
+            )
+        temporary.replace(video_path)
+        return {
+            "status": "passed",
+            "remastered": True,
+            "before": before,
+            "measured": after,
+            "limits": {
+                "integrated_loudness_lufs": [min_integrated_lufs, max_integrated_lufs],
+                "maximum_true_peak_dbtp": max_true_peak_dbtp,
+                "remaster_true_peak_target_dbtp": -2.5,
+            },
+        }
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def probe_duration(path: Path) -> float:
@@ -2850,11 +2951,13 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     run_cmd([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path), "-i", str(bed_path),
         "-filter_complex", final_audio_mix_filter(),
-        "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(mixed_path),
+        "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+        "-ar", "48000", "-movflags", "+faststart", str(mixed_path),
     ], timeout=300)
     if not mixed_path.exists() or mixed_path.stat().st_size < 100_000:
         raise RuntimeError("Original sound design mix failed technical validation.")
     mixed_path.replace(video_path)
+    audio_loudness_qa = enforce_final_audio_qa(video_path)
     final_duration = probe_duration(video_path)
     media_info = probe_media(video_path, expected_fps=target_fps)
     duration_policy = story_engine.policy_for(concept.get("story_type", "emotional"))
@@ -2895,6 +2998,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         "visual_style_profile": concept.get("visual_style_profile", {}),
         "primary_visual_pipeline": story_engine.PRIMARY_25D_PIPELINE,
         "ffprobe_media_info": media_info, "file_size_mb": round(video_path.stat().st_size / 1024 / 1024, 2),
+        "audio_loudness_qa": audio_loudness_qa,
         "voice_segments": len(concept["beats"]), "editorial_shots": int((concept.get("editorial_shot_plan") or {}).get("editorial_shot_count", len(concept["beats"]))), "stock_video_segments": stock_scenes,
         "original_custom_graphic_scenes": original_graphic_scenes,
         "ai_source_video_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").exists()),
