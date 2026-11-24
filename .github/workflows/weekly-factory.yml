@@ -48,7 +48,7 @@ jobs:
       TTS_VOICE: Kore
     steps:
       - name: Checkout private repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
