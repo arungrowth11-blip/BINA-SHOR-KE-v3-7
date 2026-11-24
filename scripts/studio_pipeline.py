@@ -1363,21 +1363,22 @@ def _poll_and_finalize_impl() -> int:
                         + '. Technical checks, full-video motion scan and metadata OCR must all pass.'
                     )
                 audience_report['human_review_fallback_required'] = True
-                audience_report['qualification_status'] = 'waiting_for_manual_external_human_review_and_owner_attestation'
-                audience_report['manual_external_human_review'] = {
-                    'required': True,
-                    'independent_reviewers_required': 3,
-                    'collection_method': 'owner_managed_manual_review',
-                    'reviewer_identity_collection': 'none',
-                    'verification': 'owner_attested_not_bot_verified',
-                }
                 quality['human_review_fallback_required'] = True
                 build['human_review_fallback_required'] = True
             else:
                 audience_report['human_review_fallback_required'] = False
-                audience_report['qualification_status'] = 'ai_evidence_complete_owner_approval_required'
                 quality['human_review_fallback_required'] = False
                 build['human_review_fallback_required'] = False
+            audience_report['qualification_status'] = 'waiting_for_three_manual_external_reviews_and_owner_approval'
+            audience_report['manual_external_human_review'] = {
+                'required': True,
+                'independent_reviewers_required': 3,
+                'collection_method': 'owner_managed_manual_review',
+                'reviewer_identity_collection': 'none',
+                'accepted_response': 'pass_or_fail_with_shortcomings',
+                'fail_policy': 'any_fail_blocks_owner_approval_until_corrected_reel_is_reviewed_again',
+                'verification': 'owner_attested_not_bot_verified',
+            }
             quality['audience_qa'] = audience_report
             build['audience_qa'] = audience_report
             write_json(reel_dir / 'audience_qa.json', audience_report)
@@ -1389,11 +1390,13 @@ def _poll_and_finalize_impl() -> int:
                     + json.dumps(audience_report, ensure_ascii=False, indent=2)
                     + (
                         '\n\nAI EVIDENCE INCOMPLETE: this Reel is NOT AI-QA-passed. '
-                        'It is delivered to the owner for manual review by three independent external viewers. '
-                        'Collect their separate Pass/Fail feedback and fix every reported issue; only then may the owner send /approve. '
-                        'The bot does not collect reviewer names, IDs, or votes.\n'
+                        'It is delivered only because objective technical, local visual, full-video motion and OCR gates passed. '
+                        'The owner and three independent external viewers must review it; any Fail blocks approval until issues are fixed and the corrected Reel is reviewed again. '
+                        'The bot does not collect reviewer names, IDs, scores or votes.\n'
                         if human_fallback_required else
-                        '\n\nAI EVIDENCE COMPLETE: the independent owner full-playback approval remains mandatory.\n'
+                        '\n\nAI EVIDENCE COMPLETE: the owner must watch the full Reel and obtain separate Pass/Fail opinions from three independent external viewers. '
+                        'Any Fail blocks /approve until shortcomings are fixed and the corrected Reel is reviewed again. '
+                        'The bot does not collect reviewer names, IDs, scores or votes.\n'
                     )
                     + 'No Facebook auto-publishing is enabled.\n'
                 )
@@ -1458,6 +1461,8 @@ def _poll_and_finalize_impl() -> int:
                 ),
                 'eligible_for_human_review': bool(quality.get('human_review_fallback_required', False)),
                 'human_review_fallback_required': bool(quality.get('human_review_fallback_required', False)),
+                'manual_external_review_required': True,
+                'manual_external_reviewers_required': 3,
                 'human_review_qa_passed': False,
                 'technical_checks_passed': build.get('technical', {}).get('technical_checks_passed') is True,
                 'visual_qa_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status'),
