@@ -246,18 +246,13 @@ def ensure_reel_qa_passed(build: dict) -> str:
             raise RuntimeError(
                 'Local visual fallback did not pass its deterministic frame-integrity checks; no human override is allowed.'
             )
-        reviewers = producer.external_human_reviewer_chat_ids()
-        minimum = producer.human_review_minimum_responses()
-        if len(reviewers) < minimum:
-            raise RuntimeError(
-                'AI visual review is incomplete. Technical local checks passed, but at least '
-                + str(minimum) + ' allowlisted independent Telegram reviewers are required before the Reel can be handed off.'
-            )
+        # The owner collects independent external opinions manually after delivery.
+        # No reviewer identity, Telegram ID or reviewer-specific secret is required.
         review_path = 'human_review_fallback'
     else:
         raise RuntimeError(
             f'Rendered-frame visual QA is {visual_status}; a technical or AI review outage is not a pass. '
-            'A deterministic local pass plus an allowlisted independent human panel is required for fallback.'
+            'A deterministic local pass plus owner-managed manual external human review is required for fallback.'
         )
     motion = visual.get('full_video_motion_diagnostics')
     if not isinstance(motion, dict) or motion.get('status') != 'passed' or motion.get('full_video_scanned') is not True:
@@ -1352,26 +1347,30 @@ def _poll_and_finalize_impl() -> int:
             review_path = ensure_reel_qa_passed(build)
             human_fallback_required = audience_report.get('status') != 'completed'
             if human_fallback_required:
-                reviewers = producer.external_human_reviewer_chat_ids()
-                minimum = producer.human_review_minimum_responses()
                 objective_gates = audience_report.get('evidence', {}).get('technical_gates', {})
                 objective_checks_passed = all(
                     objective_gates.get(key) is True
                     for key in ('technical_checks_passed', 'motion_scan_passed', 'metadata_ocr_passed')
                 )
-                if not objective_checks_passed or len(reviewers) < minimum:
+                if not objective_checks_passed:
                     missing_dimensions = audience_report.get('missing_evidence_dimensions', [])
                     failed_gates = audience_report.get('failed_technical_gates', [])
                     raise RuntimeError(
-                        'Human Reality QA is incomplete and cannot be handed off safely. '
+                        'Human Reality QA cannot override an objective technical failure. '
                         + 'Review path: ' + review_path + '. Missing evidence dimensions: '
                         + (', '.join(missing_dimensions) or 'none reported')
                         + '; failed technical gates: ' + (', '.join(failed_gates) or 'none reported')
-                        + '. A deterministic technical pass and at least ' + str(minimum)
-                        + ' independent Telegram reviewers are required for the human fallback.'
+                        + '. Technical checks, full-video motion scan and metadata OCR must all pass.'
                     )
                 audience_report['human_review_fallback_required'] = True
-                audience_report['qualification_status'] = 'waiting_for_independent_human_panel_and_owner_approval'
+                audience_report['qualification_status'] = 'waiting_for_manual_external_human_review_and_owner_attestation'
+                audience_report['manual_external_human_review'] = {
+                    'required': True,
+                    'independent_reviewers_required': 3,
+                    'collection_method': 'owner_managed_manual_review',
+                    'reviewer_identity_collection': 'none',
+                    'verification': 'owner_attested_not_bot_verified',
+                }
                 quality['human_review_fallback_required'] = True
                 build['human_review_fallback_required'] = True
             else:
@@ -1389,9 +1388,10 @@ def _poll_and_finalize_impl() -> int:
                     '\n\nSYNTHETIC AUDIENCE SIMULATION — NOT REAL PEOPLE / NOT A VIEW PREDICTION\n'
                     + json.dumps(audience_report, ensure_ascii=False, indent=2)
                     + (
-                        '\n\nAI EVIDENCE INCOMPLETE: this Reel is NOT QA-passed. '
-                        'It is being handed to the allowlisted independent human panel as a controlled fallback. '
-                        'All required real-human reviews must pass before owner approval.\n'
+                        '\n\nAI EVIDENCE INCOMPLETE: this Reel is NOT AI-QA-passed. '
+                        'It is delivered to the owner for manual review by three independent external viewers. '
+                        'Collect their separate Pass/Fail feedback and fix every reported issue; only then may the owner send /approve. '
+                        'The bot does not collect reviewer names, IDs, or votes.\n'
                         if human_fallback_required else
                         '\n\nAI EVIDENCE COMPLETE: the independent owner full-playback approval remains mandatory.\n'
                     )
