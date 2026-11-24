@@ -17,7 +17,8 @@ DEFAULT_SIMULATED_REVIEWERS = 10_000
 EDITORIAL_DIMENSIONS = (
     "hook_clarity", "story_progression", "payoff", "originality", "share_value",
     "human_specificity", "emotional_resonance", "illustrated_visual_quality",
-    "continuity_coherence", "voiceover_rhythm", "readability", "platform_safety",
+    "creative_contribution_beyond_stock", "continuity_coherence", "voiceover_rhythm",
+    "readability", "platform_safety",
 )
 HUMAN_DIMENSIONS = (
     "hook", "story", "emotion", "visual", "audio", "ending", "clarity", "share_value",
@@ -74,6 +75,8 @@ def collect_evidence(concept: dict[str, Any], build: dict[str, Any], quality: di
         "frame_story_visual_match": "story_visual_match",
         "frame_anatomy_integrity": "anatomy_integrity",
         "frame_safe_composition": "safe_composition",
+        "frame_devanagari_rendering": "devanagari_rendering",
+        "frame_metadata_text_cleanliness": "metadata_text_cleanliness",
     }
     for target, source_key in visual_map.items():
         value = visual_scores.get(source_key)
