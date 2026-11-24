@@ -159,9 +159,19 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                     "qa_passed": qa_passed,
                     "telegram_delivered": delivered,
                 }]}
-                producer._parse_review_message(
-                    "/approve title=परीक्षण कहानी", history, approved=True
-                )
+                if not qa_passed:
+                    with self.assertRaisesRegex(ValueError, "has not completed its QA path"):
+                        producer._parse_review_message(
+                            "/approve title=परीक्षण कहानी", history, approved=True
+                        )
+                    self.assertEqual(
+                        history["topics"][0]["status"],
+                        "ready_for_manual_publish_not_confirmed_published",
+                    )
+                else:
+                    producer._parse_review_message(
+                        "/approve title=परीक्षण कहानी", history, approved=True
+                    )
                 self.assertNotIn("one_reel_qualification", history)
 
     def test_slug_uses_safe_default_for_unset_empty_and_whitespace(self):
