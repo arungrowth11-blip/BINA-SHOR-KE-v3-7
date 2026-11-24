@@ -26,7 +26,7 @@ import unicodedata
 import sys
 import time
 import wave
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -3339,7 +3339,7 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
                 raise ValueError(
                     "Independent human panel is not qualified: "
                     + str(count) + "/" + str(minimum)
-                    + " reviews received. Every recorded verdict must be pass "
+                    + " reviews received. All reviewers must return verdict=pass; every rating average must be at least 3.0"
                     + "and every rating average must be at least 3.0 before owner approval."
                 )
         if topic.get("qa_passed") is not True:
