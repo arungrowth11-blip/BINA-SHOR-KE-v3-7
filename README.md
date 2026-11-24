@@ -41,6 +41,14 @@ Real human review is a separate Telegram workflow. To enable an independent revi
 
 Human feedback is stored in memory during processing and persisted only as authenticated ciphertext in `data/human_reviews.enc`; raw Telegram chat IDs are never written to the review database, and the unencrypted JSON is not committed. The periodic Telegram Feedback Sync workflow decrypts, updates and re-encrypts the store (or run it manually to sync sooner). Keep the reviewer allowlist small and use only people who explicitly agreed to receive private review videos. Do not ask reviewers to include personal or identifying details in notes. With no reviewer allowlist configured, the existing owner-only human approval remains mandatory; no claim of external human review is made. The repository is public, so never add reviewer IDs, encryption keys, hash salts or raw review exports to tracked source files. Only the encrypted `.enc` artifact may be committed.
 
+## Telegram state privacy
+
+The Telegram owner chat binding is encrypted at rest in `data/telegram_state.json` using Fernet. Its key is deterministically derived from the already-required `TELEGRAM_BOT_TOKEN` with domain separation, so no additional GitHub secret is required. The numeric update cursor remains persisted beside the ciphertext, preserving Telegram polling and duplicate-update protection. The migration keeps the existing owner binding and cursor; it does not delete or reset either value.
+
+A push that changes `scripts/producer.py` on `feature/human-reality-qa-engine` automatically runs the Telegram feedback workflow, which first migrates any legacy plaintext owner binding and commits the encrypted state before polling updates. Normal weekly/GPU/sync writes also keep the owner binding encrypted. If the bot token is rotated, state decryption fails closed rather than silently discarding the owner binding or cursor; migrate the state before rotating that token.
+
+**Historical privacy limitation:** earlier public commits may still contain the legacy plaintext Telegram chat identifier. This change protects the current state and future commits; it does not rewrite public Git history. The identifier is not a bot credential, but its historical exposure cannot be undone without a separate history rewrite and coordinated clone recovery. This change deliberately does not rewrite history, change repository visibility, or remove any tracked state.
+
 ## No-code setup
 
 See [`README_HINDI.md`](README_HINDI.md) for the Windows/GitHub Desktop walkthrough. Required Actions secrets:
