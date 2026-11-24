@@ -147,7 +147,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
             "BSK_HUMAN_REVIEW_MIN_RESPONSES": "3",
             "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
         }):
-            with tempfile.TemporaryDirectory() as folder:
+            with patch.object(producer, "telegram_chat_id", return_value="99999"), tempfile.TemporaryDirectory() as folder:
                 video = Path(folder) / "reel.mp4"
                 video.write_bytes(b"video")
                 with self.assertRaisesRegex(RuntimeError, "independent responses are required"):
