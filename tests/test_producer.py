@@ -1100,8 +1100,10 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_final_audio_qa_accepts_encoded_audio_inside_limits_without_remaster(self):
         measured = {"integrated_loudness_lufs": -16.2, "true_peak_dbtp": -2.1}
-        with patch.object(producer, "measure_audio_loudness", return_value=measured), \\
-             patch.object(producer, "run_cmd") as remaster:
+        with (
+            patch.object(producer, "measure_audio_loudness", return_value=measured),
+            patch.object(producer, "run_cmd") as remaster,
+        ):
             result = producer.enforce_final_audio_qa(Path("reel.mp4"))
         self.assertEqual(result["status"], "passed")
         self.assertFalse(result["remastered"])
@@ -1121,8 +1123,10 @@ class FactoryLogicTests(unittest.TestCase):
             video = Path(folder) / "reel.mp4"
             video.write_bytes(b"original-video" * 1000)
             original = video.read_bytes()
-            with patch.object(producer, "measure_audio_loudness", side_effect=[before, after]), \\
-                 patch.object(producer, "run_cmd", side_effect=fake_remaster):
+            with (
+                patch.object(producer, "measure_audio_loudness", side_effect=[before, after]),
+                patch.object(producer, "run_cmd", side_effect=fake_remaster),
+            ):
                 result = producer.enforce_final_audio_qa(video)
             self.assertEqual(video.read_bytes(), b"remastered-aac" * 10000)
             self.assertNotEqual(video.read_bytes(), original)
@@ -1144,8 +1148,10 @@ class FactoryLogicTests(unittest.TestCase):
             video = Path(folder) / "reel.mp4"
             original = b"original-video" * 1000
             video.write_bytes(original)
-            with patch.object(producer, "measure_audio_loudness", side_effect=[before, still_hot]), \\
-                 patch.object(producer, "run_cmd", side_effect=fake_remaster):
+            with (
+                patch.object(producer, "measure_audio_loudness", side_effect=[before, still_hot]),
+                patch.object(producer, "run_cmd", side_effect=fake_remaster),
+            ):
                 with self.assertRaisesRegex(RuntimeError, "remaster"):
                     producer.enforce_final_audio_qa(video)
             self.assertEqual(video.read_bytes(), original)
