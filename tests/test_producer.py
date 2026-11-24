@@ -1092,7 +1092,7 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             media = Path(folder) / "reel.mp4"
             media.write_bytes(b"valid media placeholder")
-            with patch.object(producer.subprocess, "run", return_value=Mock(returncode=0, stderr=payload)) as mocked:
+            with patch.object(producer.subprocess, "run", return_value=Mock(returncode=0, stderr=payload, stdout="")) as mocked:
                 result = producer.measure_audio_loudness(media)
         self.assertEqual(result["integrated_loudness_lufs"], -16.31)
         self.assertEqual(result["true_peak_dbtp"], -2.42)
@@ -1134,7 +1134,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertTrue(result["remastered"])
         self.assertEqual(result["before"], before)
         self.assertEqual(result["measured"], after)
-        self.assertIn("level=false", command_seen[0])
+        self.assertIn("level=false", " ".join(command_seen[0]))
         self.assertIn("48000", command_seen[0])
 
     def test_final_audio_qa_fails_closed_and_preserves_original_when_remaster_stays_hot(self):
