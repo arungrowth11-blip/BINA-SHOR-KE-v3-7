@@ -24,6 +24,20 @@ A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels
 
 Twelve rotating narrative devices reduce repeated formula. Every concept requires a small lived-in human detail, a character contradiction, the cost of a choice and an emotional aftertaste. An independent critic scores human specificity, emotional resonance, dialogue naturalness, originality, payoff, story progression, visual feasibility and platform safety. Weak concepts are revised once, then rejected. The 0–100 “10K-ambition” index is an editorial readiness rubric, **not a view prediction**.
 
+## Human Reality QA and independent audience review
+
+Every finalized Reel now receives a reproducible **10,000-profile synthetic audience simulation** using the editorial critic's 1–5 scorecard and the rendered-frame VLM scorecard. It reports strengths, weak dimensions and preference-segment reactions. The seed is stable for the same Reel/evidence, and missing evidence is not fabricated. These profiles are simulated preferences, **not real people**, and their intent percentages are not reach, watch-time, virality or view predictions.
+
+Real human review is a separate Telegram workflow. To enable an independent review panel:
+
+1. Ask each trusted reviewer to open the connected Telegram bot privately and send `/start`.
+2. Each reviewer sends `/reviewer_id` and shares the returned private chat ID with the project owner.
+3. In the private GitHub repository, add Actions secret `BSK_HUMAN_REVIEWER_CHAT_IDS` containing comma-separated numeric IDs (for example `123456789,234567890`). Add `BSK_REVIEWER_HASH_SALT` as a random long secret used to pseudonymize reviewer IDs in saved records.
+4. Each configured reviewer receives the full Reel privately. They must watch it and send one `/bskreview` response with eight ratings (hook, story, emotion, visual, audio, ending, clarity and share value), plus `verdict=pass|revise|reject`. Each reviewer gets one vote per Reel; duplicate votes are ignored.
+5. With an external panel configured, owner `/approve` is blocked until at least three independent reviews arrive, every verdict is `pass`, and every rating average is at least 3/5. The owner must still watch the full Reel and approve it. The system never publishes automatically.
+
+Human feedback is saved separately in `data/human_reviews.json`; only a salted reviewer hash is stored, not the raw Telegram chat ID. The periodic Telegram Feedback Sync workflow records responses (or run it manually to sync sooner). Keep the reviewer allowlist small and use only people who explicitly agreed to receive private review videos. Do not ask reviewers to include personal or identifying details in notes. With no reviewer allowlist configured, the existing owner-only human approval remains mandatory; no claim of external human review is made.
+
 ## No-code setup
 
 See [`README_HINDI.md`](README_HINDI.md) for the Windows/GitHub Desktop walkthrough. Required Actions secrets:
