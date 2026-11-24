@@ -27,7 +27,10 @@ class HumanReviewIntegrationTests(unittest.TestCase):
             "/bskreview reel_id=reel_001; hook=4; story=4; emotion=5; visual=4; "
             "audio=4; ending=5; clarity=4; share_value=4; verdict=pass; notes=Strong twist"
         )
-        with patch.dict(os.environ, {"BSK_HUMAN_REVIEW_MIN_RESPONSES": "3"}):
+        with patch.dict(os.environ, {
+            "BSK_HUMAN_REVIEW_MIN_RESPONSES": "3",
+            "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
+        }):
             first = producer._parse_human_review_message(command, history, store, "10001", 20)
             duplicate = producer._parse_human_review_message(command, history, store, "10001", 21)
         self.assertTrue(first["saved"])
@@ -100,19 +103,39 @@ class HumanReviewIntegrationTests(unittest.TestCase):
                 sent_chats.append(data["chat_id"])
                 return {"ok": True}
             with patch.dict(os.environ, {
-                "BSK_HUMAN_REVIEWER_CHAT_IDS": "12345,67890,not-an-id,12345",
-                "BSK_REVIEWER_HASH_SALT": "test-salt",
+                "BSK_HUMAN_REVIEWER_CHAT_IDS": "12345,67890,24680,not-an-id,12345",
+                "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
             }), patch.object(producer, "telegram_post", side_effect=fake_post):
                 first = producer.dispatch_human_review_panel("reel_001", "शीर्षक", video)
                 second = producer.dispatch_human_review_panel(
                     "reel_001", "शीर्षक", video,
                     already_sent_hashes=first["sent_reviewer_hashes"],
                 )
-        self.assertEqual(sent_chats, ["12345", "67890"])
-        self.assertEqual(first["configured_count"], 2)
-        self.assertEqual(first["sent_count"], 2)
+        self.assertEqual(sent_chats, ["12345", "67890", "24680"])
+        self.assertEqual(first["configured_count"], 3)
+        self.assertEqual(first["sent_count"], 3)
         self.assertEqual(second["sent_count"], 2)
         self.assertEqual(second["pending_count"], 0)
+
+    def test_reviewer_hash_salt_must_be_stable_and_at_least_32_characters(self):
+        with patch.dict(os.environ, {"BSK_REVIEWER_HASH_SALT": "short"}):
+            with self.assertRaisesRegex(RuntimeError, "at least 32 characters"):
+                producer.human_reviewer_hash_salt()
+        valid = "production-salt-0123456789-abcdefghijklmnopqrstuvwxyz"
+        with patch.dict(os.environ, {"BSK_REVIEWER_HASH_SALT": valid}):
+            self.assertEqual(producer.human_reviewer_hash_salt(), valid)
+
+    def test_panel_fails_closed_when_allowlist_is_smaller_than_minimum(self):
+        with patch.dict(os.environ, {
+            "BSK_HUMAN_REVIEWER_CHAT_IDS": "12345,67890",
+            "BSK_HUMAN_REVIEW_MIN_RESPONSES": "3",
+            "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
+        }):
+            with tempfile.TemporaryDirectory() as folder:
+                video = Path(folder) / "reel.mp4"
+                video.write_bytes(b"video")
+                with self.assertRaisesRegex(RuntimeError, "independent responses are required"):
+                    producer.dispatch_human_review_panel("reel_001", "शीर्षक", video)
 
     def test_reviewer_allowlist_is_deduplicated_and_validated(self):
         with patch.dict(os.environ, {"BSK_HUMAN_REVIEWER_CHAT_IDS": "10001, 10002;10001;bad;-10003"}):
