@@ -11,6 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import audience_qa  # noqa: E402
 import producer  # noqa: E402
+import studio_pipeline  # noqa: E402
 
 
 def full_ratings(value: int = 4) -> dict[str, int]:
@@ -163,6 +164,45 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         self.assertEqual([event["pending_count"] for event in progress_events], [2, 1, 0])
         self.assertEqual(second["sent_count"], 3)
         self.assertEqual(second["pending_count"], 0)
+
+    def test_local_visual_fallback_requires_three_real_reviewers_and_all_local_gates(self):
+        build = {"technical": {
+            "technical_checks_passed": True,
+            "rendered_frame_visual_qa": {
+                "status": "local_pass_human_review",
+                "review_mode": "deterministic_local_fallback",
+                "human_review_required": True,
+                "local_visual_diagnostics": {
+                    "engine": "bsk_local_frame_qa_v1", "status": "passed",
+                    "frames_scanned": 8, "hard_failures": [],
+                },
+                "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+                "metadata_ocr_qa": {"status": "passed"},
+            },
+        }}
+        with patch.object(studio_pipeline.producer, "external_human_reviewer_chat_ids", return_value=["1", "2"]), \
+             patch.object(studio_pipeline.producer, "human_review_minimum_responses", return_value=3):
+            with self.assertRaisesRegex(RuntimeError, "at least 3 allowlisted independent"):
+                studio_pipeline.ensure_reel_qa_passed(build)
+        with patch.object(studio_pipeline.producer, "external_human_reviewer_chat_ids", return_value=["1", "2", "3"]), \
+             patch.object(studio_pipeline.producer, "human_review_minimum_responses", return_value=3):
+            self.assertEqual(studio_pipeline.ensure_reel_qa_passed(build), "human_review_fallback")
+        build["technical"]["rendered_frame_visual_qa"]["metadata_ocr_qa"]["status"] = "not_completed"
+        with patch.object(studio_pipeline.producer, "external_human_reviewer_chat_ids", return_value=["1", "2", "3"]), \
+             patch.object(studio_pipeline.producer, "human_review_minimum_responses", return_value=3):
+            with self.assertRaisesRegex(RuntimeError, "OCR must complete"):
+                studio_pipeline.ensure_reel_qa_passed(build)
+
+    def test_weekly_qualification_rejects_local_fallback_without_human_pass(self):
+        history = {"one_reel_qualification": {
+            "status": "qualified", "qa_passed": True, "visual_qa_status": "local_pass_human_review",
+            "human_review_fallback_required": True, "human_review_qa_passed": False,
+            "telegram_delivered": True, "owner_approved": True,
+            "reel_id": "reel_fallback", "approved_at_ist": "2026-11-24T10:00:00+05:30",
+        }}
+        lock = {"gpu_benchmark": {"qualified": True, "estimated_3_reel_hours": 5.0}}
+        with self.assertRaisesRegex(RuntimeError, "Weekly 3-Reel production is locked"):
+            studio_pipeline.require_weekly_qualification(history, lock)
 
     def test_owner_cannot_be_counted_as_independent_reviewer(self):
         with patch.dict(os.environ, {
