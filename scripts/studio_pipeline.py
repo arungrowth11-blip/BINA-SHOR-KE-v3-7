@@ -30,6 +30,7 @@ sys.path.insert(0, str(ROOT / 'scripts'))
 import producer  # noqa: E402
 import voice_first  # noqa: E402
 import character_library  # noqa: E402
+import audience_qa  # noqa: E402
 
 DEFAULT_KAGGLE_SLUG = 'bina-shor-ke-studio-video'
 
@@ -1297,6 +1298,28 @@ def _poll_and_finalize_impl() -> int:
             build = producer.render_reel(concept, reel_dir, set(), set())
             slot = datetime.fromisoformat(reel['planned_publish_at'])
             quality = producer.write_pack(concept, build, reel_dir, slot)
+            try:
+                simulated_sample_size = int(os.getenv('BSK_SIMULATED_REVIEWERS', '10000'))
+            except ValueError as exc:
+                raise RuntimeError('BSK_SIMULATED_REVIEWERS must be an integer between 1 and 100000.') from exc
+            audience_report = audience_qa.generate_simulated_audience_report(
+                reel_id=str(reel['reel_id']),
+                concept=concept,
+                build=build,
+                quality=quality,
+                sample_size=simulated_sample_size,
+            )
+            quality['audience_qa'] = audience_report
+            write_json(reel_dir / 'audience_qa.json', audience_report)
+            write_json(reel_dir / 'quality_report.json', quality)
+            publish_kit = reel_dir / 'publish.txt'
+            with publish_kit.open('a', encoding='utf-8') as handle:
+                handle.write(
+                    '\\n\\nSYNTHETIC AUDIENCE SIMULATION — NOT REAL PEOPLE / NOT A VIEW PREDICTION\\n'
+                    + json.dumps(audience_report, ensure_ascii=False, indent=2)
+                    + '\\n\\nREAL HUMAN REVIEW: separate allowlisted Telegram reviewers, if configured. '
+                    + 'Owner full-playback approval remains mandatory.\\n'
+                )
             ensure_reel_qa_passed(build)
             image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
             quality['video_generation'] = {
@@ -1332,6 +1355,7 @@ def _poll_and_finalize_impl() -> int:
             reel['delivery_steps'] = producer.send_to_telegram(
                 concept, build, reel_dir, slot, ordinal, len(pending['reels']),
                 progress=reel.get('delivery_steps', {}), on_progress=save_delivery_progress,
+                review_id=str(reel['reel_id']),
             )
             ensure_complete_telegram_delivery(reel['delivery_steps'])
             reel['delivery_status'] = 'delivered'
@@ -1359,6 +1383,8 @@ def _poll_and_finalize_impl() -> int:
                 'metadata_ocr_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status'),
                 'telegram_delivered': all(reel['delivery_steps'].get(step) is True for step in ('video', 'cover', 'message', 'publish_kit')),
                 'qa_completed_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+                'audience_qa': quality.get('audience_qa', {}),
+                'human_review_panel_dispatch': reel.get('delivery_steps', {}).get('human_review_panel', {}),
             }
             existing_topic = next((item for item in reversed(history.setdefault('topics', [])) if item.get('reel_id') == reel['reel_id']), None)
             if existing_topic is not None:
