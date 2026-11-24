@@ -176,6 +176,10 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('scripts/telegram_feedback_sync.py', body)
         self.assertIn('data/telegram_state.json data/history.json data/performance_log.csv', body)
         self.assertIn('group: bina-shor-ke-studio', body)
+        self.assertIn('feature/human-reality-qa-engine', body)
+        self.assertIn('"scripts/producer.py"', body)
+        self.assertIn('Migrate legacy Telegram owner binding to encrypted state', body)
+        self.assertIn('Telegram owner binding encrypted; update cursor preserved.', body)
 
     def test_kaggle_status_timestamp_is_expanded_by_shell(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
