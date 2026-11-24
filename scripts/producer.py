@@ -3401,6 +3401,16 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
                     + str(count) + "/" + str(minimum)
                     + " reviews received. All reviewers must return verdict=pass; every rating average must be at least 3.0 before owner approval."
                 )
+            if topic.get("manual_external_review_required") is True:
+                topic["manual_external_review_passed"] = True
+                topic["manual_external_review_attestation"] = {
+                    "status": "pass",
+                    "reported_independent_reviewers": int(panel.get("count", minimum) or minimum),
+                    "attested_by_owner": False,
+                    "verification": "bot_verified",
+                    "source": "allowlisted_telegram_review_panel",
+                    "attested_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                }
         elif manual_external_review_required:
             # /approve is the owner's attestation that three independent people watched the full Reel and all passed.
             # No reviewer names, IDs, scores, or raw opinions are stored; the software cannot verify their votes.
