@@ -1319,6 +1319,15 @@ def _poll_and_finalize_impl() -> int:
             quality['audience_qa'] = audience_report
             build['audience_qa'] = audience_report
             write_json(reel_dir / 'audience_qa.json', audience_report)
+            if audience_report.get('status') != 'completed':
+                missing_dimensions = audience_report.get('missing_evidence_dimensions', [])
+                failed_gates = audience_report.get('failed_technical_gates', [])
+                raise RuntimeError(
+                    'Human Reality QA is incomplete; this Reel will not be delivered. '
+                    + 'Missing evidence dimensions: ' + (', '.join(missing_dimensions) or 'none reported')
+                    + '; failed technical gates: ' + (', '.join(failed_gates) or 'none reported')
+                    + '. Inspect audience_qa.json and quality_report.json, correct the evidence gap, then retry.'
+                )
             write_json(reel_dir / 'quality_report.json', quality)
             publish_kit = reel_dir / 'publish.txt'
             with publish_kit.open('a', encoding='utf-8') as handle:
