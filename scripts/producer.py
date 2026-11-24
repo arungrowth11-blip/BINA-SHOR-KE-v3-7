@@ -3510,9 +3510,13 @@ def dispatch_human_review_panel(
     already_sent_hashes: list[str] | None = None,
 ) -> dict[str, Any]:
     """Send the Reel only to operator-configured, allowlisted private reviewers."""
-    reviewer_ids = human_reviewer_chat_ids()
-    if not reviewer_ids:
+    configured_ids = human_reviewer_chat_ids()
+    if not configured_ids:
         return {"status": "not_configured", "configured_count": 0, "sent_count": 0, "sent_reviewer_hashes": []}
+    owner_id = str(telegram_chat_id())
+    reviewer_ids = [reviewer_id for reviewer_id in configured_ids if reviewer_id != owner_id]
+    if not reviewer_ids:
+        raise RuntimeError("The allowlist contains no external reviewers; the owner cannot count as an independent audience reviewer.")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", str(reel_id)):
         raise ValueError("Unsafe Reel ID for human review distribution.")
     minimum = human_review_minimum_responses()
