@@ -39,6 +39,10 @@ class SyntheticAudienceTests(unittest.TestCase):
         )
         self.assertEqual(report["simulated_review_count"], 10_000)
         self.assertEqual(report["simulation_type"], "synthetic_not_human")
+        self.assertEqual(report["status"], "completed")
+        self.assertEqual(report["evidence"]["evidence_count"], 21)
+        self.assertEqual(report["missing_evidence_dimensions"], [])
+        self.assertEqual(report["failed_technical_gates"], [])
         self.assertIsNone(report["view_prediction"])
         self.assertEqual(sum(row["simulated_profiles"] for row in report["cohort_results"]), 10_000)
         self.assertIn("hook_clarity", report["weakest_evidence_dimensions"][0]["dimension"])
@@ -60,6 +64,21 @@ class SyntheticAudienceTests(unittest.TestCase):
         evidence = audience_qa.collect_evidence(concept, build, quality)
         self.assertEqual(evidence["scores"]["hook_clarity"], 2.4)  # valid readiness fallback
         self.assertEqual(evidence["scores"]["payoff"], 4.0)
+
+    def test_missing_visual_dimension_blocks_audience_qa_completion(self):
+        concept, build, quality = fixture()
+        build["technical"]["rendered_frame_visual_qa"]["scores"].pop("metadata_text_cleanliness")
+        report = audience_qa.generate_simulated_audience_report("reel_partial", concept, build, quality)
+        self.assertEqual(report["status"], "blocked_incomplete_evidence")
+        self.assertIn("frame_metadata_text_cleanliness", report["missing_evidence_dimensions"])
+        self.assertEqual(report["simulated_review_count"], 10_000)
+
+    def test_failed_objective_gate_blocks_audience_qa_completion(self):
+        concept, build, quality = fixture()
+        build["technical"]["rendered_frame_visual_qa"]["metadata_ocr_qa"]["status"] = "not_completed"
+        report = audience_qa.generate_simulated_audience_report("reel_ocr", concept, build, quality)
+        self.assertEqual(report["status"], "blocked_incomplete_evidence")
+        self.assertIn("metadata_ocr_passed", report["failed_technical_gates"])
 
     def test_no_evidence_does_not_fabricate_audience_reactions(self):
         report = audience_qa.generate_simulated_audience_report(
