@@ -1315,10 +1315,10 @@ def _poll_and_finalize_impl() -> int:
             publish_kit = reel_dir / 'publish.txt'
             with publish_kit.open('a', encoding='utf-8') as handle:
                 handle.write(
-                    '\\n\\nSYNTHETIC AUDIENCE SIMULATION — NOT REAL PEOPLE / NOT A VIEW PREDICTION\\n'
+                    '\n\nSYNTHETIC AUDIENCE SIMULATION — NOT REAL PEOPLE / NOT A VIEW PREDICTION\n'
                     + json.dumps(audience_report, ensure_ascii=False, indent=2)
-                    + '\\n\\nREAL HUMAN REVIEW: separate allowlisted Telegram reviewers, if configured. '
-                    + 'Owner full-playback approval remains mandatory.\\n'
+                    + '\n\nREAL HUMAN REVIEW: separate allowlisted Telegram reviewers, if configured. '
+                    + 'Owner full-playback approval remains mandatory.\n'
                 )
             ensure_reel_qa_passed(build)
             image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
