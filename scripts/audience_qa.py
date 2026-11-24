@@ -241,7 +241,8 @@ def generate_simulated_audience_report(
         "requested_sample_size": sample_size,
         "seed_sha256": hashlib.sha256(seed_material.encode("utf-8")).hexdigest(),
         "evidence": evidence,
-        "modeled_audience_fit_score_0_to_100": round(score_mean * 20, 1),
+        "modeled_audience_fit_score_0_to_100": round(score_mean * 20, 1)
+        if not missing_evidence and not failed_gates else None,
         "modeled_score_stddev_1_to_5": round(math.sqrt(variance), 3),
         "modeled_intent_percent": {
             key: round(value / sample_size * 100, 1) for key, value in outcomes.items()
