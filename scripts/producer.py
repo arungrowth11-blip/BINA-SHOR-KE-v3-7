@@ -3357,10 +3357,19 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             topic["owner_rejection_reason"] = values["reason"][:500]
 
     qualification_created = False
+    fallback_human_qa_passed = (
+        topic.get("human_review_fallback_required") is True
+        and topic.get("human_review_qa_passed") is True
+    )
+    visual_status = topic.get("visual_qa_status")
+    visual_review_qualified = (
+        visual_status == "reviewed"
+        or (visual_status == "local_pass_human_review" and fallback_human_qa_passed)
+    )
     if (
         approved
         and topic.get("qa_passed") is True
-        and topic.get("visual_qa_status") == "reviewed"
+        and visual_review_qualified
         and topic.get("motion_diagnostics_status") == "passed"
         and topic.get("metadata_ocr_status") == "passed"
         and topic.get("telegram_delivered") is True
@@ -3373,7 +3382,9 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             "job_id": str(topic.get("job_id") or ""),
             "title": str(topic.get("title", title)),
             "qa_passed": True,
-            "visual_qa_status": "reviewed",
+            "visual_qa_status": visual_status,
+            "human_review_fallback_required": topic.get("human_review_fallback_required") is True,
+            "human_review_qa_passed": topic.get("human_review_qa_passed") is True,
             "motion_diagnostics_status": "passed",
             "metadata_ocr_status": "passed",
             "telegram_delivered": True,
