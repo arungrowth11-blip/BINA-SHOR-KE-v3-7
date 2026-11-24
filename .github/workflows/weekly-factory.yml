@@ -53,10 +53,6 @@ jobs:
       MISTRAL_TEXT_MODEL: ministral-8b-latest
       CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      BSK_HUMAN_REVIEWER_CHAT_IDS: ${{ secrets.BSK_HUMAN_REVIEWER_CHAT_IDS }}
-      BSK_REVIEWER_HASH_SALT: ${{ secrets.BSK_REVIEWER_HASH_SALT }}
-      BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}
-      BSK_HUMAN_REVIEW_MIN_RESPONSES: "3"
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
       KAGGLE_KERNEL_SLUG: ${{ vars.KAGGLE_KERNEL_SLUG }}
@@ -66,7 +62,7 @@ jobs:
       TTS_MIN_INTERVAL_SECONDS: "21"
     steps:
       - name: Checkout private repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -90,7 +86,7 @@ jobs:
           fi
 
       - name: Restore previously measured voice WAVs
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/tts_cache
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -98,7 +94,7 @@ jobs:
             bsk-tts-${{ runner.os }}-
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
 
@@ -147,7 +143,7 @@ jobs:
 
       - name: Upload live TTS samples for human listening review
         if: always() && env.RUN_MODE == 'live-tts-smoke'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bina-shor-ke-live-tts-${{ github.run_number }}
           path: artifacts/tts-smoke/
@@ -171,7 +167,7 @@ jobs:
 
       - name: Upload non-secret diagnostics
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bsk-director-${{ github.run_number }}
           path: |
@@ -195,7 +191,7 @@ jobs:
 
       - name: Save measured speaker WAV cache for the separate GPU finalizer workflow
         if: always() && steps.voice_cache_changed.outputs.changed == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/tts_cache
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -207,7 +203,6 @@ jobs:
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
           git add data/history.json data/telegram_state.json data/pending_gpu_job.json data/characters/registry.json
-          if [ -f data/human_reviews.enc ]; then git add data/human_reviews.enc; fi
           if [ -d data/job_archive ]; then
             git add data/job_archive/
           fi
