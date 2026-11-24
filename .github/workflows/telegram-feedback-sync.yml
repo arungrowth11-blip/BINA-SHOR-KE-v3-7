@@ -19,6 +19,9 @@ jobs:
     timeout-minutes: 10
     env:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      BSK_HUMAN_REVIEWER_CHAT_IDS: ${{ secrets.BSK_HUMAN_REVIEWER_CHAT_IDS }}
+      BSK_REVIEWER_HASH_SALT: ${{ secrets.BSK_REVIEWER_HASH_SALT }}
+      BSK_HUMAN_REVIEW_MIN_RESPONSES: "3"
     steps:
       - name: Checkout private repository
         uses: actions/checkout@v4
@@ -46,6 +49,7 @@ jobs:
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
           git add data/telegram_state.json data/history.json data/performance_log.csv
+          if [ -f data/human_reviews.json ]; then git add data/human_reviews.json; fi
           if ! git diff --cached --quiet; then
             git commit -m "Sync private Telegram owner feedback [skip ci]"
             git push
