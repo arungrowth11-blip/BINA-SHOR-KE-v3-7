@@ -103,9 +103,9 @@ class HumanReviewIntegrationTests(unittest.TestCase):
                 sent_chats.append(data["chat_id"])
                 return {"ok": True}
             with patch.dict(os.environ, {
-                "BSK_HUMAN_REVIEWER_CHAT_IDS": "12345,67890,24680,not-an-id,12345",
+                "BSK_HUMAN_REVIEWER_CHAT_IDS": "12345,67890,24680,99999,not-an-id,12345",
                 "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
-            }), patch.object(producer, "telegram_post", side_effect=fake_post):
+            }), patch.object(producer, "telegram_chat_id", return_value="99999"), patch.object(producer, "telegram_post", side_effect=fake_post):
                 first = producer.dispatch_human_review_panel("reel_001", "शीर्षक", video)
                 second = producer.dispatch_human_review_panel(
                     "reel_001", "शीर्षक", video,
@@ -116,6 +116,22 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         self.assertEqual(first["sent_count"], 3)
         self.assertEqual(second["sent_count"], 3)
         self.assertEqual(second["pending_count"], 0)
+
+    def test_owner_cannot_be_counted_as_independent_reviewer(self):
+        with patch.dict(os.environ, {
+            "BSK_HUMAN_REVIEWER_CHAT_IDS": "99999,12345,67890",
+            "BSK_HUMAN_REVIEW_MIN_RESPONSES": "2",
+            "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
+        }), patch.object(producer, "telegram_chat_id", return_value="99999"):
+            with tempfile.TemporaryDirectory() as folder:
+                video = Path(folder) / "reel.mp4"
+                video.write_bytes(b"video")
+                sent = []
+                with patch.object(producer, "telegram_post", side_effect=lambda method, data=None, files=None, timeout=180: sent.append(data["chat_id"]) or {"ok": True}):
+                    result = producer.dispatch_human_review_panel("reel_001", "शीर्षक", video)
+        self.assertEqual(sent, ["12345", "67890"])
+        self.assertEqual(result["configured_count"], 2)
+        self.assertEqual(result["sent_count"], 2)
 
     def test_reviewer_hash_salt_must_be_stable_and_at_least_32_characters(self):
         with patch.dict(os.environ, {"BSK_REVIEWER_HASH_SALT": "short"}):
