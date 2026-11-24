@@ -207,6 +207,7 @@ jobs:
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
           git add data/history.json data/telegram_state.json data/pending_gpu_job.json data/characters/registry.json
+          if [ -f data/human_reviews.enc ]; then git add data/human_reviews.enc; fi
           if [ -d data/job_archive ]; then
             git add data/job_archive/
           fi
