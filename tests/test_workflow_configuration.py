@@ -232,9 +232,13 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_human_review_store_is_encrypted_and_only_ciphertext_is_persisted(self):
         poll = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
         sync = (ROOT / ".github" / "workflows" / "telegram-feedback-sync.yml").read_text(encoding="utf-8")
+        weekly = (ROOT / ".github" / "workflows" / "weekly-factory.yml").read_text(encoding="utf-8")
         producer = (ROOT / "scripts" / "producer.py").read_text(encoding="utf-8")
         self.assertIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}", poll)
         self.assertIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}", sync)
+        self.assertIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}", weekly)
+        self.assertIn("BSK_HUMAN_REVIEWER_CHAT_IDS: ${{ secrets.BSK_HUMAN_REVIEWER_CHAT_IDS }}", weekly)
+        self.assertIn("BSK_REVIEWER_HASH_SALT: ${{ secrets.BSK_REVIEWER_HASH_SALT }}", weekly)
         self.assertIn("cryptography>=42.0.0,<47.0.0", sync)
         self.assertIn("git add data/human_reviews.enc", sync)
         self.assertNotIn("git add data/human_reviews.json", sync)
