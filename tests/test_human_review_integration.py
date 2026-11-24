@@ -153,6 +153,44 @@ class HumanReviewIntegrationTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError, "independent responses are required"):
                     producer.dispatch_human_review_panel("reel_001", "शीर्षक", video)
 
+    def test_human_review_store_is_authenticated_encrypted_at_rest(self):
+        from cryptography.fernet import Fernet
+        key = Fernet.generate_key().decode("ascii")
+        private_note = "sensitive reviewer feedback should not be plaintext"
+        store = {"schema_version": 1, "reviews": [{
+            "reel_id": "reel_001", "reviewer_hash": "opaque-hash",
+            "notes": private_note, "verdict": "pass",
+        }]}
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "human_reviews.enc"
+            with patch.object(producer, "HUMAN_REVIEW_PATH", path), patch.dict(
+                os.environ, {"BSK_HUMAN_REVIEW_ENCRYPTION_KEY": key}
+            ):
+                producer.save_human_review_store(store)
+                ciphertext = path.read_bytes()
+                self.assertNotIn(private_note.encode("utf-8"), ciphertext)
+                self.assertNotIn(b"opaque-hash", ciphertext)
+                self.assertEqual(producer.load_human_review_store(), store)
+
+    def test_tampered_or_wrong_key_human_review_store_fails_closed(self):
+        from cryptography.fernet import Fernet
+        right_key = Fernet.generate_key().decode("ascii")
+        wrong_key = Fernet.generate_key().decode("ascii")
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "human_reviews.enc"
+            with patch.object(producer, "HUMAN_REVIEW_PATH", path), patch.dict(
+                os.environ, {"BSK_HUMAN_REVIEW_ENCRYPTION_KEY": right_key}
+            ):
+                producer.save_human_review_store({"reviews": []})
+                path.write_bytes(path.read_bytes()[:-2] + b"xx")
+                with self.assertRaisesRegex(RuntimeError, "could not be authenticated/decrypted"):
+                    producer.load_human_review_store()
+            with patch.object(producer, "HUMAN_REVIEW_PATH", path), patch.dict(
+                os.environ, {"BSK_HUMAN_REVIEW_ENCRYPTION_KEY": wrong_key}
+            ):
+                with self.assertRaisesRegex(RuntimeError, "could not be authenticated/decrypted"):
+                    producer.load_human_review_store()
+
     def test_reviewer_allowlist_is_deduplicated_and_validated(self):
         with patch.dict(os.environ, {"BSK_HUMAN_REVIEWER_CHAT_IDS": "10001, 10002;10001;bad;-10003"}):
             self.assertEqual(producer.human_reviewer_chat_ids(), ["10001", "10002"])
