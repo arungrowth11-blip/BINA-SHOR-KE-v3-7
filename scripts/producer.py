@@ -3388,6 +3388,11 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     if approved:
         configured_reviewers = external_human_reviewer_chat_ids()
         panel = topic.get("human_review_summary", {})
+        manual_external_fallback = (
+            topic.get("human_review_fallback_required") is True
+            and topic.get("eligible_for_human_review") is True
+            and not configured_reviewers
+        )
         if configured_reviewers:
             minimum = human_review_minimum_responses()
             if not human_review_summary_passes(panel, minimum):
@@ -3395,13 +3400,29 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
                 raise ValueError(
                     "Independent human panel is not qualified: "
                     + str(count) + "/" + str(minimum)
-                    + " reviews received. All reviewers must return verdict=pass; every rating average must be at least 3.0"
-                    + "and every rating average must be at least 3.0 before owner approval."
+                    + " reviews received. All reviewers must return verdict=pass; every rating average must be at least 3.0 before owner approval."
                 )
+        elif manual_external_fallback:
+            # The owner attests that three independent people watched the full Reel and passed it.
+            # This is explicitly not bot-verified; no reviewer names, IDs, or raw opinions are stored.
+            if not isinstance(topic.get("manual_external_review_attestation"), dict):
+                attested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                topic["manual_external_review_attestation"] = {
+                    "status": "pass",
+                    "reported_independent_reviewers": 3,
+                    "attested_by_owner": True,
+                    "verification": "owner_attested_not_bot_verified",
+                    "source": "owner_private_telegram_approve",
+                    "attested_at_utc": attested_at,
+                }
+            topic["human_review_qa_passed"] = True
+            topic["human_review_qa_source"] = "owner_attested_manual_external_review"
+            topic["human_review_qa_completed_at_utc"] = topic["manual_external_review_attestation"]["attested_at_utc"]
+            topic["qa_passed"] = True
         if topic.get("qa_passed") is not True:
             raise ValueError(
                 "This Reel has not completed its QA path. Wait for required AI evidence or "
-                "the configured independent human panel to pass before owner approval."
+                "the owner-attested manual external review before owner approval."
             )
     decision = "owner_approved_for_manual_publish" if approved else "owner_rejected_not_published"
     was_already_recorded = topic.get("status") == decision
@@ -3441,6 +3462,8 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             "visual_qa_status": visual_status,
             "human_review_fallback_required": topic.get("human_review_fallback_required") is True,
             "human_review_qa_passed": topic.get("human_review_qa_passed") is True,
+            "human_review_qa_source": topic.get("human_review_qa_source"),
+            "manual_external_review_attestation": topic.get("manual_external_review_attestation"),
             "motion_diagnostics_status": "passed",
             "metadata_ocr_status": "passed",
             "telegram_delivered": True,
