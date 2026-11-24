@@ -60,6 +60,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
             "status": "ready_for_manual_publish_not_confirmed_published",
             "qa_passed": False, "eligible_for_human_review": True,
             "human_review_fallback_required": True, "human_review_qa_passed": False,
+            "manual_external_review_required": True, "manual_external_reviewers_required": 3,
             "technical_checks_passed": True, "visual_qa_status": "local_pass_human_review",
             "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
             "telegram_delivered": True,
@@ -95,9 +96,34 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         self.assertTrue(qualification["human_review_fallback_required"])
         self.assertTrue(qualification["human_review_qa_passed"])
 
+    def test_owner_approval_requires_manual_three_person_pass_even_when_ai_review_completed(self):
+        history = {"topics": [{
+            "title": "AI-reviewed Reel", "reel_id": "reel_ai_reviewed",
+            "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": True, "visual_qa_status": "reviewed",
+            "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
+            "telegram_delivered": True, "manual_external_review_required": True,
+            "manual_external_reviewers_required": 3,
+        }]}
+        with patch.object(producer, "external_human_reviewer_chat_ids", return_value=[]):
+            approved = producer._parse_review_message(
+                "/approve title=AI-reviewed Reel", history, approved=True
+            )
+        self.assertTrue(approved["weekly_qualification_created"])
+        qualification = history["one_reel_qualification"]
+        self.assertTrue(qualification["manual_external_review_required"])
+        self.assertTrue(qualification["manual_external_review_passed"])
+        attestation = qualification["manual_external_review_attestation"]
+        self.assertEqual(attestation["reported_independent_reviewers"], 3)
+        self.assertTrue(attestation["attested_by_owner"])
+        self.assertEqual(attestation["verification"], "owner_attested_not_bot_verified")
+        lock = {"gpu_benchmark": {"qualified": True, "estimated_3_reel_hours": 5.0}}
+        studio_pipeline.require_weekly_qualification(history, lock)
+
     def test_owner_approval_waits_for_configured_independent_panel(self):
         history = {"topics": [{
             "title": "एक कहानी", "reel_id": "reel_001",
+            "manual_external_review_required": True, "manual_external_reviewers_required": 3,
             "status": "ready_for_manual_publish_not_confirmed_published",
             "qa_passed": True, "visual_qa_status": "reviewed",
             "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
@@ -121,6 +147,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
     def test_panel_reject_or_revise_votes_block_owner_approval(self):
         history = {"topics": [{
             "title": "एक कहानी", "reel_id": "reel_001",
+            "manual_external_review_required": True, "manual_external_reviewers_required": 3,
             "status": "ready_for_manual_publish_not_confirmed_published",
             "qa_passed": True, "visual_qa_status": "reviewed",
             "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
@@ -201,6 +228,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
             "status": "ready_for_manual_publish_not_confirmed_published",
             "qa_passed": False, "eligible_for_human_review": True,
             "human_review_fallback_required": True, "human_review_qa_passed": False,
+            "manual_external_review_required": True, "manual_external_reviewers_required": 3,
             "technical_checks_passed": True, "visual_qa_status": "local_pass_human_review",
             "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
             "telegram_delivered": True,
@@ -230,6 +258,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         history = {"one_reel_qualification": {
             "status": "qualified", "qa_passed": True, "visual_qa_status": "local_pass_human_review",
             "human_review_fallback_required": True, "human_review_qa_passed": False,
+            "manual_external_review_required": True, "manual_external_reviewers_required": 3,
             "telegram_delivered": True, "owner_approved": True,
             "reel_id": "reel_fallback", "approved_at_ist": "2026-11-24T10:00:00+05:30",
         }}
