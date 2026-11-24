@@ -269,7 +269,7 @@ HunyuanVideo-1.5 is worth a future isolated comparison because its repository de
 ## 16. v3.6 continuous Telegram feedback sync
 
 - An independent scheduled workflow drains the pinned private owner chat every six hours even when no GPU batch is active.
-- It persists approval/rejection decisions, manual publication records, actual performance observations, and the Telegram update cursor to the private repository.
+- It persists approval/rejection decisions, manual publication records, actual performance observations, and the encrypted Telegram update cursor to the existing public source repository; private identifiers stay in ciphertext.
 - This avoids waiting until the next weekly plan to consume commands; Telegram retains pending updates for no longer than 24 hours. Scheduled workflow delays remain possible, so manual `Run workflow` is available for immediate sync.
 - `getUpdates` and webhooks are mutually exclusive. Use a fresh BotFather bot without a webhook for this workflow.
 
