@@ -3145,23 +3145,79 @@ def render_carousel(carousel: dict[str, Any], slot: datetime) -> dict[str, Any]:
     return {"out_dir": out_dir, "slide_paths": slide_paths, "kit_path": kit_path, "caption": caption}
 
 
+def _telegram_state_fernet():
+    """Derive a domain-separated Fernet key from the existing Actions-only bot token."""
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is required to encrypt or decrypt the Telegram owner binding.")
+    from cryptography.fernet import Fernet
+
+    key_material = hashlib.sha256(
+        b"BINA_SHOR_KE_TELEGRAM_STATE_V2\\0" + TELEGRAM_BOT_TOKEN.encode("utf-8")
+    ).digest()
+    return Fernet(base64.urlsafe_b64encode(key_material))
+
+
 def load_telegram_state() -> dict[str, Any]:
+    """Load the persistent cursor and decrypt v2 owner state; accept legacy v1 for migration."""
     defaults: dict[str, Any] = {"owner_chat_id": None, "last_update_id": 0}
     if not TELEGRAM_STATE_PATH.exists():
         return defaults.copy()
     try:
-        state = json.loads(TELEGRAM_STATE_PATH.read_text(encoding="utf-8"))
-        return {**defaults, **state}
-    except (json.JSONDecodeError, OSError):
+        stored = json.loads(TELEGRAM_STATE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(stored, dict):
+            raise ValueError("Telegram state root must be a JSON object.")
+    except (json.JSONDecodeError, OSError, ValueError):
         log("WARNING: telegram_state.json invalid; refusing to guess the private chat. Re-enrol by repairing this state file.")
         return defaults.copy()
 
+    state = {**defaults, **stored}
+    encrypted_owner = state.pop("owner_chat_id_encrypted", None)
+    if encrypted_owner:
+        from cryptography.fernet import InvalidToken
+
+        try:
+            owner_chat_id = _telegram_state_fernet().decrypt(str(encrypted_owner).encode("ascii")).decode("utf-8")
+        except InvalidToken as exc:
+            raise RuntimeError(
+                "Telegram owner state could not be decrypted; preserve the state file. "
+                "The Telegram bot token may have been rotated or the state may be corrupt."
+            ) from exc
+        except (UnicodeError, ValueError) as exc:
+            raise RuntimeError("Telegram owner state could not be decrypted; preserve the state file.") from exc
+        if not owner_chat_id:
+            raise RuntimeError("Telegram owner state decrypted to an empty chat ID; preserve the state file.")
+        state["owner_chat_id"] = owner_chat_id
+        state["_telegram_owner_cipher_cache"] = {
+            "ciphertext": str(encrypted_owner),
+            "owner_chat_id": owner_chat_id,
+        }
+    return state
+
 
 def save_telegram_state(state: dict[str, Any]) -> None:
-    """Atomically persist the Telegram update cursor to avoid reprocessing/losing updates."""
+    """Atomically persist the cursor and only ciphertext for the private Telegram owner."""
+    payload = {
+        key: value
+        for key, value in state.items()
+        if key not in {"owner_chat_id", "owner_chat_id_encrypted", "_telegram_owner_cipher_cache"}
+    }
+    payload["state_schema_version"] = 2
+    owner_chat_id = str(state.get("owner_chat_id") or "").strip()
+    if owner_chat_id:
+        cached = state.get("_telegram_owner_cipher_cache")
+        if isinstance(cached, dict) and cached.get("owner_chat_id") == owner_chat_id and cached.get("ciphertext"):
+            encrypted_owner = str(cached["ciphertext"])
+        else:
+            encrypted_owner = _telegram_state_fernet().encrypt(owner_chat_id.encode("utf-8")).decode("ascii")
+        payload["owner_chat_id_encrypted"] = encrypted_owner
+        state["_telegram_owner_cipher_cache"] = {
+            "ciphertext": encrypted_owner,
+            "owner_chat_id": owner_chat_id,
+        }
+
     TELEGRAM_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary = TELEGRAM_STATE_PATH.with_suffix(TELEGRAM_STATE_PATH.suffix + ".tmp")
-    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(TELEGRAM_STATE_PATH)
 
 
