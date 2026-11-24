@@ -27,7 +27,7 @@ def fixture():
             "metadata_ocr_qa": {"status": "passed"},
         },
     }}
-    quality = {"director_10k_readiness": {"dimensions": scores}}
+    quality = {"director_10k_readiness": {"dimensions": dict(scores)}}
     return concept, build, quality
 
 
