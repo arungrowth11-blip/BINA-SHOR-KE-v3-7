@@ -219,19 +219,46 @@ def build_kaggle_kernel(manifest: dict):
     return kernel_dir
 
 
-def ensure_reel_qa_passed(build: dict) -> None:
+def ensure_reel_qa_passed(build: dict) -> str:
+    """Return the review path; incomplete AI semantics may only be routed to real humans."""
     technical = build.get('technical', {}) if isinstance(build, dict) else {}
     if not isinstance(technical, dict) or technical.get('technical_checks_passed') is not True:
         raise RuntimeError('Final Reel technical QA did not pass; refusing Telegram delivery and weekly qualification.')
     visual = technical.get('rendered_frame_visual_qa')
-    if not isinstance(visual, dict) or visual.get('status') != 'reviewed':
-        status = visual.get('status', 'missing') if isinstance(visual, dict) else 'missing'
+    if not isinstance(visual, dict):
+        raise RuntimeError('Rendered-frame QA result is missing; refusing delivery.')
+    visual_status = visual.get('status')
+    if visual_status == 'reviewed':
+        if visual.get('critical_issue') is not False or visual.get('missing_required_scores'):
+            raise RuntimeError('Rendered-frame visual QA is missing required scores or reports a critical issue.')
+        review_path = 'ai_reviewed'
+    elif visual_status == 'local_pass_human_review':
+        local = visual.get('local_visual_diagnostics')
+        if (
+            visual.get('review_mode') != 'deterministic_local_fallback'
+            or visual.get('human_review_required') is not True
+            or not isinstance(local, dict)
+            or local.get('engine') != 'bsk_local_frame_qa_v1'
+            or local.get('status') != 'passed'
+            or int(local.get('frames_scanned', 0) or 0) < 2
+            or local.get('hard_failures')
+        ):
+            raise RuntimeError(
+                'Local visual fallback did not pass its deterministic frame-integrity checks; no human override is allowed.'
+            )
+        reviewers = producer.external_human_reviewer_chat_ids()
+        minimum = producer.human_review_minimum_responses()
+        if len(reviewers) < minimum:
+            raise RuntimeError(
+                'AI visual review is incomplete. Technical local checks passed, but at least '
+                + str(minimum) + ' allowlisted independent Telegram reviewers are required before the Reel can be handed off.'
+            )
+        review_path = 'human_review_fallback'
+    else:
         raise RuntimeError(
-            f'Rendered-frame visual QA is {status}; only a completed reviewed result can pass. '
-            'A QA outage or incomplete scorecard is not a pass.'
+            f'Rendered-frame visual QA is {visual_status}; a technical or AI review outage is not a pass. '
+            'A deterministic local pass plus an allowlisted independent human panel is required for fallback.'
         )
-    if visual.get('critical_issue') is not False or visual.get('missing_required_scores'):
-        raise RuntimeError('Rendered-frame visual QA is missing required scores or reports a critical issue.')
     motion = visual.get('full_video_motion_diagnostics')
     if not isinstance(motion, dict) or motion.get('status') != 'passed' or motion.get('full_video_scanned') is not True:
         status = motion.get('status', 'missing') if isinstance(motion, dict) else 'missing'
@@ -244,13 +271,14 @@ def ensure_reel_qa_passed(build: dict) -> None:
         raise RuntimeError(
             f'On-screen metadata OCR is {status}; OCR must complete with zero forbidden prompt labels.'
         )
+    return review_path
 
 def ensure_complete_telegram_delivery(steps: dict) -> None:
     required = ('video', 'cover', 'message', 'publish_kit')
     if not isinstance(steps, dict) or not all(steps.get(step) is True for step in required):
         missing = [step for step in required if not isinstance(steps, dict) or steps.get(step) is not True]
         raise RuntimeError('Telegram delivery is incomplete; missing successful step(s): ' + ', '.join(missing))
-    configured_reviewers = producer.human_reviewer_chat_ids()
+    configured_reviewers = producer.external_human_reviewer_chat_ids()
     if configured_reviewers:
         panel = steps.get('human_review_panel')
         if not isinstance(panel, dict) or panel.get('status') != 'sent' or int(panel.get('pending_count', 1) or 0) != 0:
