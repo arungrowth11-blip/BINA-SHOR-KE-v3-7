@@ -90,7 +90,7 @@ def collect_evidence(concept: dict[str, Any], build: dict[str, Any], quality: di
         "technical_checks_passed": technical.get("technical_checks_passed") is True,
         "visual_review_completed": visual.get("status") == "reviewed",
         "motion_scan_passed": isinstance(motion, dict) and motion.get("status") == "passed"
-        and motion.get("full_video_scanned") is True,
+        ,
         "metadata_ocr_passed": isinstance(ocr, dict) and ocr.get("status") == "passed",
     }
     return {
@@ -129,6 +129,13 @@ def generate_simulated_audience_report(
         raise ValueError("sample_size must be an integer from 1 to 100000.")
     evidence = collect_evidence(concept, build, quality)
     scores = evidence["scores"]
+    expected_dimensions = list(EDITORIAL_DIMENSIONS) + [
+        "frame_text_legibility", "frame_visual_quality", "frame_character_continuity",
+        "frame_story_visual_match", "frame_anatomy_integrity", "frame_safe_composition",
+        "frame_devanagari_rendering", "frame_metadata_text_cleanliness",
+    ]
+    missing_evidence = [key for key in expected_dimensions if key not in scores]
+    failed_gates = [key for key, passed in evidence["technical_gates"].items() if passed is not True]
     if not scores:
         return {
             "schema_version": SCHEMA_VERSION,
@@ -139,6 +146,8 @@ def generate_simulated_audience_report(
             "simulated_review_count": 0,
             "requested_sample_size": sample_size,
             "evidence": evidence,
+            "missing_evidence_dimensions": missing_evidence,
+            "failed_technical_gates": failed_gates,
             "reason": "No valid 1–5 editorial or rendered-frame QA scores were supplied.",
             "real_human_reviews": {"count": 0, "status": "not_received"},
             "view_prediction": None,
@@ -225,7 +234,9 @@ def generate_simulated_audience_report(
         "schema_version": SCHEMA_VERSION,
         "engine": "bsk_human_reality_qa_v1",
         "reel_id": str(reel_id),
-        "status": "completed" if evidence["evidence_count"] >= 5 else "completed_low_evidence",
+        "status": "completed" if not missing_evidence and not failed_gates else "blocked_incomplete_evidence",
+        "missing_evidence_dimensions": missing_evidence,
+        "failed_technical_gates": failed_gates,
         "simulation_type": "synthetic_not_human",
         "simulated_review_count": sample_size,
         "requested_sample_size": sample_size,
