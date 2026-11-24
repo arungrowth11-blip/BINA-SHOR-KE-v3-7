@@ -3334,7 +3334,7 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
         configured_reviewers.discard(str(telegram_chat_id()))
         panel = topic.get("human_review_summary", {})
         if configured_reviewers:
-            minimum = int(os.getenv("BSK_HUMAN_REVIEW_MIN_RESPONSES", "3"))
+            minimum = human_review_minimum_responses()
             verdicts = panel.get("verdict_counts", {}) if isinstance(panel, dict) else {}
             averages = panel.get("dimension_averages_1_to_5", {}) if isinstance(panel, dict) else {}
             panel_ready = (
@@ -3415,6 +3415,27 @@ def human_reviewer_chat_ids() -> list[str]:
     return accepted
 
 
+def human_review_minimum_responses() -> int:
+    raw = os.getenv("BSK_HUMAN_REVIEW_MIN_RESPONSES", "3").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("BSK_HUMAN_REVIEW_MIN_RESPONSES must be a positive integer.") from exc
+    if value < 1 or value > 100:
+        raise RuntimeError("BSK_HUMAN_REVIEW_MIN_RESPONSES must be between 1 and 100.")
+    return value
+
+
+def human_reviewer_hash_salt() -> str:
+    salt = os.getenv("BSK_REVIEWER_HASH_SALT", "").strip()
+    if len(salt) < 32:
+        raise RuntimeError(
+            "Set BSK_REVIEWER_HASH_SALT to a stable random secret of at least 32 characters "
+            "before enabling the human reviewer panel."
+        )
+    return salt
+
+
 def load_human_review_store() -> dict[str, Any]:
     if not HUMAN_REVIEW_PATH.exists():
         return {"schema_version": 1, "reviews": []}
@@ -3475,8 +3496,9 @@ def _parse_human_review_message(
         verdict=verdict,
         notes=values.get("notes", ""),
         update_id=update_id,
+        hash_salt=human_reviewer_hash_salt(),
     )
-    minimum = int(os.getenv("BSK_HUMAN_REVIEW_MIN_RESPONSES", "3"))
+    minimum = human_review_minimum_responses()
     summary = audience_qa.summarize_human_reviews(store, reel_id, minimum)
     topic["human_review_summary"] = summary
     result.update({"reel_id": reel_id, "title": topic.get("title", ""), "summary": summary})
@@ -3493,7 +3515,13 @@ def dispatch_human_review_panel(
         return {"status": "not_configured", "configured_count": 0, "sent_count": 0, "sent_reviewer_hashes": []}
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", str(reel_id)):
         raise ValueError("Unsafe Reel ID for human review distribution.")
-    salt = os.getenv("BSK_REVIEWER_HASH_SALT", "bsk-human-review-v1")
+    minimum = human_review_minimum_responses()
+    if len(reviewer_ids) < minimum:
+        raise RuntimeError(
+            "Human reviewer allowlist has " + str(len(reviewer_ids))
+            + " IDs, but " + str(minimum) + " independent responses are required."
+        )
+    salt = human_reviewer_hash_salt()
     sent_hashes = set(already_sent_hashes or [])
     failed = 0
     for reviewer_id in reviewer_ids:
@@ -3558,6 +3586,14 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
     state = load_telegram_state()
     reviewer_ids = set(human_reviewer_chat_ids())
     reviewer_ids.discard(str(chat_id))  # Owner approval is tracked separately from panel votes.
+    if reviewer_ids:
+        minimum = human_review_minimum_responses()
+        if len(reviewer_ids) < minimum:
+            raise RuntimeError(
+                "Configured reviewer allowlist has " + str(len(reviewer_ids))
+                + " IDs but requires at least " + str(minimum) + "."
+            )
+        human_reviewer_hash_salt()
     human_review_store = load_human_review_store()
     offset = int(state.get("last_update_id", 0)) + 1
     updates = telegram_get_updates(offset=offset)
