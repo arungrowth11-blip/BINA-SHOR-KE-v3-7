@@ -466,14 +466,59 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertIn("कहानी काल्पनिक है।", producer.safe_caption(story))
         self.assertNotIn("कहानी काल्पनिक है।", producer.safe_caption(lifestyle))
 
-    def test_telegram_state_save_is_atomic_and_round_trips(self):
+    def test_telegram_state_save_is_atomic_encrypted_and_round_trips(self):
         old_path = producer.TELEGRAM_STATE_PATH
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder, patch.object(producer, "TELEGRAM_BOT_TOKEN", "test-telegram-bot-token"):
             producer.TELEGRAM_STATE_PATH = Path(folder) / 'telegram_state.json'
             try:
                 producer.save_telegram_state({'owner_chat_id': '123', 'last_update_id': 55})
-                self.assertEqual(producer.load_telegram_state()['last_update_id'], 55)
+                raw = producer.TELEGRAM_STATE_PATH.read_text(encoding="utf-8")
+                stored = json.loads(raw)
+                self.assertNotIn("owner_chat_id", stored)
+                self.assertIn("owner_chat_id_encrypted", stored)
+                self.assertNotIn('"123"', raw)
+                loaded = producer.load_telegram_state()
+                self.assertEqual(loaded['owner_chat_id'], '123')
+                self.assertEqual(loaded['last_update_id'], 55)
                 self.assertFalse(producer.TELEGRAM_STATE_PATH.with_suffix('.json.tmp').exists())
+            finally:
+                producer.TELEGRAM_STATE_PATH = old_path
+
+    def test_legacy_plaintext_telegram_owner_state_migrates_without_cursor_loss(self):
+        old_path = producer.TELEGRAM_STATE_PATH
+        with tempfile.TemporaryDirectory() as folder, patch.object(producer, "TELEGRAM_BOT_TOKEN", "test-telegram-bot-token"):
+            producer.TELEGRAM_STATE_PATH = Path(folder) / "telegram_state.json"
+            try:
+                producer.TELEGRAM_STATE_PATH.write_text(
+                    json.dumps({"owner_chat_id": "legacy-owner-id", "last_update_id": 674097690}),
+                    encoding="utf-8",
+                )
+                state = producer.load_telegram_state()
+                self.assertEqual(state["owner_chat_id"], "legacy-owner-id")
+                self.assertEqual(state["last_update_id"], 674097690)
+                producer.save_telegram_state(state)
+                persisted = json.loads(producer.TELEGRAM_STATE_PATH.read_text(encoding="utf-8"))
+                self.assertNotIn("owner_chat_id", persisted)
+                self.assertNotIn("legacy-owner-id", json.dumps(persisted))
+                self.assertEqual(persisted["last_update_id"], 674097690)
+                reloaded = producer.load_telegram_state()
+                self.assertEqual(reloaded["owner_chat_id"], "legacy-owner-id")
+                self.assertEqual(reloaded["last_update_id"], 674097690)
+            finally:
+                producer.TELEGRAM_STATE_PATH = old_path
+
+    def test_wrong_telegram_bot_token_fails_closed_without_overwriting_state(self):
+        old_path = producer.TELEGRAM_STATE_PATH
+        with tempfile.TemporaryDirectory() as folder:
+            producer.TELEGRAM_STATE_PATH = Path(folder) / "telegram_state.json"
+            try:
+                with patch.object(producer, "TELEGRAM_BOT_TOKEN", "original-bot-token"):
+                    producer.save_telegram_state({"owner_chat_id": "owner-id", "last_update_id": 91})
+                original_bytes = producer.TELEGRAM_STATE_PATH.read_bytes()
+                with patch.object(producer, "TELEGRAM_BOT_TOKEN", "rotated-bot-token"):
+                    with self.assertRaisesRegex(RuntimeError, "could not be decrypted"):
+                        producer.load_telegram_state()
+                self.assertEqual(producer.TELEGRAM_STATE_PATH.read_bytes(), original_bytes)
             finally:
                 producer.TELEGRAM_STATE_PATH = old_path
 
