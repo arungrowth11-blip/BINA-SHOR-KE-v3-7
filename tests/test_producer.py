@@ -201,6 +201,63 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertNotIn("params", mocked.call_args.kwargs)
         self.assertNotIn("test-gemini-key", mocked.call_args.args[0])
 
+    def test_gemini_visual_qa_retries_transient_503(self):
+        busy = Mock()
+        busy.status_code = 503
+        busy.headers = {"Retry-After": "2"}
+        error = producer.requests.HTTPError("Gemini HTTP 503: unavailable", response=busy)
+        success = Mock()
+        success.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"scores": {"visual_quality": 4}}'}]}}]
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            frame = Path(folder) / "frame.jpg"
+            frame.write_bytes(b"frame-bytes")
+            with patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), \
+                 patch.object(producer.requests, "post", side_effect=[error, success]) as mocked, \
+                 patch.object(producer.time, "sleep") as sleep:
+                result = producer.gemini_json_with_images("system", "prompt", [frame])
+        self.assertEqual(result["scores"]["visual_quality"], 4)
+        self.assertEqual(mocked.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_local_visual_qa_passes_valid_portrait_and_flags_black_frames(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            valid = Path(folder) / "valid.jpg"
+            black = Path(folder) / "black.jpg"
+            Image.new("RGB", (540, 960), (80, 90, 100)).save(valid, quality=90)
+            Image.new("RGB", (540, 960), (0, 0, 0)).save(black, quality=90)
+            passed = producer.deterministic_local_visual_qa([valid, valid])
+            failed = producer.deterministic_local_visual_qa([valid, black])
+        self.assertEqual(passed["status"], "passed")
+        self.assertEqual(passed["engine"], "bsk_local_frame_qa_v1")
+        self.assertEqual(failed["status"], "warning")
+        self.assertTrue(any(item["check"] == "near_black_frame" for item in failed["hard_failures"]))
+
+    def test_gemini_outage_falls_back_to_local_human_review_without_fake_ai_pass(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            def fake_extract(command, timeout=60):
+                output = Path(command[-1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(output, format="JPEG", quality=90)
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), \
+                 patch.object(producer, "gemini_json_with_images", side_effect=RuntimeError("Gemini HTTP 503: unavailable")), \
+                 patch.object(producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}):
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 4.0,
+                    segment_durations=[2.0, 2.0],
+                )
+        self.assertEqual(result["status"], "local_pass_human_review")
+        self.assertEqual(result["review_mode"], "deterministic_local_fallback")
+        self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+        self.assertEqual(result["local_visual_diagnostics"]["status"], "passed")
+        self.assertTrue(result["human_review_required"])
+        result["full_video_motion_diagnostics"] = {"status": "passed", "full_video_scanned": True}
+        producer.enforce_visual_qa(result)
+
     def test_second_draft_prompt_includes_previous_structural_feedback(self):
         concept = self.sample_concept()
         feedback = "Beat 1 narration has 18 words; use 7-12 words."
@@ -762,9 +819,29 @@ class FactoryLogicTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "critical visual defect"):
             producer.enforce_visual_qa({"status": "warning", "critical_issue": True})
 
-    def test_visual_qa_outage_blocks_delivery_until_review_completes(self):
+    def test_visual_qa_outage_never_fabricates_an_ai_review(self):
         with self.assertRaisesRegex(RuntimeError, "did not complete successfully"):
             producer.enforce_visual_qa({"status": "not_completed", "human_review_required": True})
+
+        local_fallback = {
+            "status": "local_pass_human_review",
+            "critical_issue": False,
+            "review_mode": "deterministic_local_fallback",
+            "human_review_required": True,
+            "local_visual_diagnostics": {
+                "status": "passed",
+                "engine": "bsk_local_frame_qa_v1",
+                "frames_scanned": 4,
+                "hard_failures": [],
+            },
+            "metadata_ocr_qa": {"status": "passed", "forbidden_terms_detected": []},
+            "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+        }
+        producer.enforce_visual_qa(local_fallback)
+
+        local_fallback["local_visual_diagnostics"]["status"] = "warning"
+        with self.assertRaisesRegex(RuntimeError, "Local visual QA did not pass"):
+            producer.enforce_visual_qa(local_fallback)
 
     def test_visual_qa_requires_ocr_and_full_video_motion_to_pass(self):
         base = {
