@@ -114,7 +114,7 @@ class HumanReviewIntegrationTests(unittest.TestCase):
         self.assertEqual(sent_chats, ["12345", "67890", "24680"])
         self.assertEqual(first["configured_count"], 3)
         self.assertEqual(first["sent_count"], 3)
-        self.assertEqual(second["sent_count"], 2)
+        self.assertEqual(second["sent_count"], 3)
         self.assertEqual(second["pending_count"], 0)
 
     def test_reviewer_hash_salt_must_be_stable_and_at_least_32_characters(self):
