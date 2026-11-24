@@ -196,8 +196,8 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('resolve-dispatch-running', body)
         self.assertIn('resolve-dispatch-not-started', body)
         self.assertIn('REQUIRE_AI_VIDEO: "1"', body)
-        self.assertIn('actions/cache/restore@v4', body)
-        self.assertIn('actions/cache/save@v4', body)
+        self.assertIn('actions/cache/restore@v6', body)
+        self.assertIn('actions/cache/save@v6', body)
         self.assertIn('Quick remote Kaggle status check (minimal CLI only)', body)
         self.assertIn("if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'poll'", body)
         self.assertIn("if: steps.work.outputs.finalize == 'true'", body)
@@ -233,22 +233,33 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('fc-match "Noto Sans Devanagari"', setup)
 
 
-    def test_human_review_store_is_encrypted_and_only_ciphertext_is_persisted(self):
+    def test_manual_external_human_review_needs_no_reviewer_ids_or_extra_secrets(self):
         poll = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
         sync = (ROOT / ".github" / "workflows" / "telegram-feedback-sync.yml").read_text(encoding="utf-8")
         weekly = (ROOT / ".github" / "workflows" / "weekly-factory.yml").read_text(encoding="utf-8")
         producer = (ROOT / "scripts" / "producer.py").read_text(encoding="utf-8")
-        self.assertIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}", poll)
-        self.assertIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}", sync)
-        self.assertIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}", weekly)
-        self.assertIn("BSK_HUMAN_REVIEWER_CHAT_IDS: ${{ secrets.BSK_HUMAN_REVIEWER_CHAT_IDS }}", weekly)
-        self.assertIn("BSK_REVIEWER_HASH_SALT: ${{ secrets.BSK_REVIEWER_HASH_SALT }}", weekly)
+        for body in (poll, sync, weekly):
+            self.assertNotIn("BSK_HUMAN_REVIEWER_CHAT_IDS", body)
+            self.assertNotIn("BSK_REVIEWER_HASH_SALT", body)
+            self.assertNotIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY", body)
         self.assertIn("cryptography>=42.0.0,<47.0.0", sync)
-        self.assertIn("git add data/human_reviews.enc", sync)
-        self.assertNotIn("git add data/human_reviews.json", sync)
-        self.assertIn('HUMAN_REVIEW_PATH = ROOT / "data" / "human_reviews.enc"', producer)
-        self.assertIn("Fernet(human_review_encryption_key()).encrypt", producer)
-        self.assertIn("Fernet(human_review_encryption_key()).decrypt", producer)
+        self.assertIn("def save_telegram_state", producer)
+        self.assertIn("_telegram_state_fernet().encrypt", producer)
+        self.assertIn("manual_external_review_attestation", producer)
+        self.assertIn("reported_independent_reviewers", producer)
+        self.assertIn("owner_attested_not_bot_verified", producer)
+        self.assertNotIn("git add data/human_reviews.enc", sync)
+
+    def test_workflows_use_node24_compatible_current_action_majors(self):
+        workflow_dir = ROOT / ".github" / "workflows"
+        for path in workflow_dir.glob("*.yml"):
+            body = path.read_text(encoding="utf-8")
+            self.assertNotIn("actions/checkout@v4", body, path.name)
+            self.assertNotIn("actions/setup-python@v5", body, path.name)
+            self.assertNotIn("actions/cache/restore@v4", body, path.name)
+            self.assertNotIn("actions/cache/save@v4", body, path.name)
+            self.assertNotIn("actions/cache@v4", body, path.name)
+            self.assertNotIn("actions/upload-artifact@v4", body, path.name)
 
     def test_gpu_finalizer_prerequisite_shell_block_is_valid_bash(self):
         body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
