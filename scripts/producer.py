@@ -3573,6 +3573,13 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
         if chat.get("type") != "private":
             continue
         text_value = str(message.get("text", "")).strip()
+        if text_value.lower().startswith("/reviewer_id") and incoming_chat_id != str(chat_id):
+            telegram_post("sendMessage", data={
+                "chat_id": incoming_chat_id,
+                "text": "Your Telegram private chat ID is: " + incoming_chat_id
+                + "\\nShare this ID with the BINA SHOR KE owner only if you agree to receive private Reel review requests.",
+            }, timeout=25)
+            continue
         if incoming_chat_id in reviewer_ids:
             if text_value == "/start" or text_value.startswith("/start "):
                 telegram_post("sendMessage", data={
