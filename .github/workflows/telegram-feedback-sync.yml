@@ -21,6 +21,7 @@ jobs:
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
       BSK_HUMAN_REVIEWER_CHAT_IDS: ${{ secrets.BSK_HUMAN_REVIEWER_CHAT_IDS }}
       BSK_REVIEWER_HASH_SALT: ${{ secrets.BSK_REVIEWER_HASH_SALT }}
+      BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}
       BSK_HUMAN_REVIEW_MIN_RESPONSES: "3"
     steps:
       - name: Checkout private repository
@@ -36,7 +37,7 @@ jobs:
 
       - name: Install only Telegram sync dependencies
         if: env.TELEGRAM_BOT_TOKEN != ''
-        run: python -m pip install --disable-pip-version-check 'requests>=2.32.0,<3.0.0' 'Pillow>=10.0.0,<14.0.0'
+        run: python -m pip install --disable-pip-version-check 'requests>=2.32.0,<3.0.0' 'Pillow>=10.0.0,<14.0.0' 'cryptography>=42.0.0,<47.0.0'
 
       - name: Drain pinned owner's Telegram commands
         if: env.TELEGRAM_BOT_TOKEN != ''
@@ -49,7 +50,7 @@ jobs:
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
           git add data/telegram_state.json data/history.json data/performance_log.csv
-          if [ -f data/human_reviews.json ]; then git add data/human_reviews.json; fi
+          if [ -f data/human_reviews.enc ]; then git add data/human_reviews.enc; fi
           if ! git diff --cached --quiet; then
             git commit -m "Sync private Telegram owner feedback [skip ci]"
             git push
