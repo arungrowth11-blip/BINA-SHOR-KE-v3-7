@@ -1619,7 +1619,10 @@ def run_cmd(args: list[str], timeout: int = 240) -> None:
 
 
 def gemini_json_with_images(system: str, user_prompt: str, image_paths: list[Path], temperature: float = 0.2) -> dict[str, Any]:
-    """Send a few rendered frames to Gemini for a soft visual QA pass."""
+    """Send rendered frames to Gemini with bounded retries for transient failures."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Gemini visual QA is not configured (GEMINI_API_KEY is absent).")
+
     parts: list[dict[str, Any]] = [{"text": user_prompt}]
     for image_path in image_paths:
         raw = image_path.read_bytes()
@@ -1630,11 +1633,168 @@ def gemini_json_with_images(system: str, user_prompt: str, image_paths: list[Pat
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": temperature},
     }
-    response = requests.post(url, headers={"x-goog-api-key": GEMINI_API_KEY}, json=payload, timeout=150)
-    response.raise_for_status()
-    body = response.json()
-    output_text = body["candidates"][0]["content"]["parts"][0]["text"]
-    return extract_json(output_text)
+
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers={"x-goog-api-key": GEMINI_API_KEY}, json=payload, timeout=150)
+            response.raise_for_status()
+            body = response.json()
+            candidates = body.get("candidates") or []
+            if not candidates:
+                raise RuntimeError(f"Gemini visual QA returned no candidates: {str(body)[:300]}")
+            response_parts = (candidates[0].get("content") or {}).get("parts") or []
+            output_text = next(
+                (part.get("text") for part in response_parts if isinstance(part, dict) and part.get("text")),
+                "",
+            )
+            if not output_text:
+                raise RuntimeError("Gemini visual QA returned no text part.")
+            return extract_json(output_text)
+        except Exception as exc:
+            last_error = exc
+            error_response = getattr(exc, "response", None)
+            status_code = getattr(error_response, "status_code", None)
+            transient_http = status_code in {408, 429, 500, 502, 503, 504}
+            transient_network = isinstance(exc, (requests.Timeout, requests.ConnectionError))
+            malformed_response = isinstance(exc, (json.JSONDecodeError, KeyError, IndexError, ValueError, RuntimeError))
+            if attempt >= 2 or not (transient_http or transient_network or malformed_response):
+                break
+
+            retry_after = 0
+            if error_response is not None:
+                try:
+                    retry_after = int(float(error_response.headers.get("Retry-After", "0")))
+                except (AttributeError, TypeError, ValueError):
+                    retry_after = 0
+            delay = min(retry_after, 45) if retry_after > 0 else min(5 * (2 ** attempt), 20)
+            log(
+                f"Gemini visual QA transient/response failure "
+                f"(attempt {attempt + 1}/3): {str(exc)[:220]}; retrying in {delay}s."
+            )
+            time.sleep(delay)
+
+    raise RuntimeError(f"Gemini visual QA failed after bounded retries: {last_error}") from last_error
+
+
+def deterministic_local_visual_qa(frame_paths: list[Path]) -> dict[str, Any]:
+    """Run dependency-light, deterministic checks on every sampled frame.
+
+    This verifies frame integrity and gross technical defects only. It deliberately does
+    not claim to understand story meaning, anatomy, character identity or artistic quality.
+    """
+    from PIL import ImageFilter, ImageStat
+
+    if len(frame_paths) < 2:
+        return {
+            "status": "not_completed",
+            "engine": "bsk_local_frame_qa_v1",
+            "frames_scanned": len(frame_paths),
+            "hard_failures": ["At least two rendered frames are required."],
+            "human_review_required": True,
+        }
+
+    hard_failures: list[dict[str, Any]] = []
+    observations: list[dict[str, Any]] = []
+    review_notes: list[dict[str, Any]] = []
+
+    for frame_path in frame_paths:
+        try:
+            with Image.open(frame_path) as opened:
+                image = opened.convert("RGB")
+                image.load()
+        except Exception as exc:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "image_integrity",
+                "detail": str(exc)[:180],
+            })
+            continue
+
+        width, height = image.size
+        if width < 320 or height < 568:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "minimum_resolution",
+                "detail": f"Frame is only {width}x{height}; minimum is 320x568.",
+            })
+        ratio = width / max(height, 1)
+        if not 0.52 <= ratio <= 0.61:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "portrait_aspect_ratio",
+                "detail": f"Expected a 9:16 portrait frame; received {width}x{height}.",
+            })
+
+        gray = image.convert("L")
+        histogram = gray.histogram()
+        pixel_count = max(width * height, 1)
+        near_black_fraction = sum(histogram[:9]) / pixel_count
+        luminance = ImageStat.Stat(gray)
+        mean_luma = float(luminance.mean[0])
+        luma_stddev = float(luminance.stddev[0])
+        edge_stddev = float(ImageStat.Stat(gray.filter(ImageFilter.FIND_EDGES)).stddev[0])
+
+        if near_black_fraction >= 0.995:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "near_black_frame",
+                "detail": f"{near_black_fraction:.3%} of pixels are near black.",
+            })
+        elif luma_stddev < 1.5 or edge_stddev < 0.8:
+            review_notes.append({
+                "frame": frame_path.name,
+                "check": "low_visual_information",
+                "detail": "Frame has very little tonal or edge variation; inspect manually.",
+            })
+
+        observations.append({
+            "frame": frame_path.name,
+            "width": width,
+            "height": height,
+            "mean_luminance": round(mean_luma, 2),
+            "luminance_stddev": round(luma_stddev, 2),
+            "edge_stddev": round(edge_stddev, 2),
+            "near_black_fraction": round(near_black_fraction, 5),
+        })
+
+    return {
+        "status": "warning" if hard_failures else "passed",
+        "engine": "bsk_local_frame_qa_v1",
+        "frames_scanned": len(observations),
+        "hard_failures": hard_failures,
+        "review_notes": review_notes,
+        "observations": observations,
+        "checks": ["image_integrity", "minimum_resolution", "portrait_aspect_ratio", "near_black_frame"],
+        "not_assessed": [
+            "story_visual_match",
+            "anatomy_integrity",
+            "character_continuity",
+            "Hindi subtitle correctness and safe-area placement",
+            "subjective visual quality and emotional impact",
+        ],
+        "human_review_required": True,
+    }
+
+
+def local_visual_review_fallback(reason: str, local_report: dict[str, Any]) -> dict[str, Any]:
+    """Create an honest human-review state; never fabricate an AI score or an AI pass."""
+    return {
+        "status": "local_pass_human_review",
+        "critical_issue": False,
+        "review_mode": "deterministic_local_fallback",
+        "visual_ai_review": {
+            "status": "not_completed",
+            "reason": str(reason)[:500],
+        },
+        "local_visual_diagnostics": local_report,
+        "scores": {},
+        "notes": [
+            "Local frame-integrity checks passed; AI semantic review was unavailable.",
+            "A human must inspect story match, anatomy, character continuity, subtitle placement and overall visual quality before approval.",
+        ],
+        "human_review_required": True,
+    }
 
 
 def normalize_transcript_for_comparison(text_value: str) -> str:
@@ -1815,7 +1975,7 @@ def metadata_ocr_qa(video_path: Path, reel_dir: Path, duration: float) -> dict[s
 
 
 def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_durations: list[float] | None = None) -> dict[str, Any]:
-    """Sample two frames per beat plus cover the timeline; separately scan the complete video."""
+    """Sample the whole Reel, run local diagnostics, then use Gemini as an optional critic."""
     frames_dir = reel_dir / "qa_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     timestamps = []
@@ -1836,45 +1996,65 @@ def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_duratio
             frame_paths.append(frame)
     if len(frame_paths) < 2:
         return {"status": "not_completed", "reason": "Could not extract enough frames for automated visual QA.", "human_review_required": True}
-    try:
-        result = gemini_json_with_images(
-            "You are a visual quality-control editor for a premium Hindi vertical Reel. Evaluate only the supplied rendered frames; do not infer unseen frames. Return JSON only.",
-            "These ordered samples cover the full 9:16 Hindi Reel (two frames per narrative beat). Inspect EVERY supplied frame for malformed faces/hands, duplicated limbs, broken object geometry, visual mismatch to the beat's narrative_role and state_change, subtitle glyph errors, clipping, contrast and UI-safe margins. Compare recurring characters across all frames: same face shape, apparent age, hair, clothing, clothing colour and distinguishing props; report visible identity or wardrobe drift under character_continuity. Treat the first clear appearance of each recurring character as its visual anchor. Check visible text for internal production labels or prompt metadata, especially KEYWORD, STEP, CONTRAST, PROMPT, SCENE, HOOK or raw JSON fragments; score this under metadata_text_cleanliness. Do not infer movement or anything between sampled frames. Return JSON: {\"scores\":{\"text_legibility\":1,\"devanagari_rendering\":1,\"anatomy_integrity\":1,\"story_visual_match\":1,\"safe_composition\":1,\"visual_quality\":1,\"character_continuity\":1,\"metadata_text_cleanliness\":1},\"critical_issue\":false,\"notes\":[\"short note\"],\"confidence\":\"low|medium|high\"}. Scores 1-5. Set character_continuity or metadata_text_cleanliness to 1–2 for a clear defect; set critical_issue=true for obvious malformed anatomy, severe continuity mismatch, leaked internal labels, broken text or clipping. Do not auto-reject subjective style preference.",
-            frame_paths,
-        )
-        scores = result.get("scores", {}) if isinstance(result, dict) else {}
-        required_scores = (
-            "text_legibility", "devanagari_rendering", "anatomy_integrity",
-            "story_visual_match", "safe_composition", "visual_quality",
-            "character_continuity", "metadata_text_cleanliness",
-        )
 
-        def valid_visual_score(value: Any) -> bool:
-            # bool is a subclass of int in Python; explicitly reject it. A model
-            # response outside the documented 1–5 scale must never count as QA.
-            return (
-                isinstance(value, (int, float))
-                and not isinstance(value, bool)
-                and math.isfinite(float(value))
-                and 1.0 <= float(value) <= 5.0
+    local_report = deterministic_local_visual_qa(frame_paths)
+    if local_report.get("status") != "passed":
+        result: dict[str, Any] = {
+            "status": "warning" if local_report.get("status") == "warning" else "not_completed",
+            "critical_issue": bool(local_report.get("hard_failures")),
+            "review_mode": "local_precheck_blocked",
+            "local_visual_diagnostics": local_report,
+            "human_review_required": True,
+            "notes": ["Local frame-integrity checks did not pass; AI review cannot override a technical defect."],
+        }
+    else:
+        try:
+            result = gemini_json_with_images(
+                "You are a visual quality-control editor for a premium Hindi vertical Reel. Evaluate only the supplied rendered frames; do not infer unseen frames. Return JSON only.",
+                "These ordered samples cover the full 9:16 Hindi Reel (two frames per narrative beat). Inspect EVERY supplied frame for malformed faces/hands, duplicated limbs, broken object geometry, visual mismatch to the beat's narrative_role and state_change, subtitle glyph errors, clipping, contrast and UI-safe margins. Compare recurring characters across all frames: same face shape, apparent age, hair, clothing, clothing colour and distinguishing props; report visible identity or wardrobe drift under character_continuity. Treat the first clear appearance of each recurring character as its visual anchor. Check visible text for internal production labels or prompt metadata, especially KEYWORD, STEP, CONTRAST, PROMPT, SCENE, HOOK or raw JSON fragments; score this under metadata_text_cleanliness. Do not infer movement or anything between sampled frames. Return JSON: {\"scores\":{\"text_legibility\":1,\"devanagari_rendering\":1,\"anatomy_integrity\":1,\"story_visual_match\":1,\"safe_composition\":1,\"visual_quality\":1,\"character_continuity\":1,\"metadata_text_cleanliness\":1},\"critical_issue\":false,\"notes\":[\"short note\"],\"confidence\":\"low|medium|high\"}. Scores 1-5. Set character_continuity or metadata_text_cleanliness to 1–2 for a clear defect; set critical_issue=true for obvious malformed anatomy, severe continuity mismatch, leaked internal labels, broken text or clipping. Do not auto-reject subjective style preference.",
+                frame_paths,
+            )
+            scores = result.get("scores", {}) if isinstance(result, dict) else {}
+            required_scores = (
+                "text_legibility", "devanagari_rendering", "anatomy_integrity",
+                "story_visual_match", "safe_composition", "visual_quality",
+                "character_continuity", "metadata_text_cleanliness",
             )
 
-        missing_scores = [key for key in required_scores if not valid_visual_score(scores.get(key))]
-        numeric = [float(scores[key]) for key in required_scores if valid_visual_score(scores.get(key))]
-        critical_issue_valid = isinstance(result.get("critical_issue"), bool)
-        result["average_score"] = round(sum(numeric) / len(numeric), 2) if numeric else None
-        result["missing_required_scores"] = missing_scores
-        result["missing_required_fields"] = [] if critical_issue_valid else ["critical_issue"]
-        if missing_scores or not critical_issue_valid:
-            result["status"] = "not_completed"
-        elif result["critical_issue"] is True or min(numeric) <= 2:
-            result["status"] = "warning"
-        else:
-            result["status"] = "reviewed"
-        result["human_review_required"] = True
-    except Exception as exc:
-        log(f"Visual QA did not complete; continuing with human review required: {exc}")
-        result = {"status": "not_completed", "reason": str(exc)[:500], "human_review_required": True}
+            def valid_visual_score(value: Any) -> bool:
+                # bool is a subclass of int in Python; explicitly reject it. A model
+                # response outside the documented 1–5 scale must never count as QA.
+                return (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and math.isfinite(float(value))
+                    and 1.0 <= float(value) <= 5.0
+                )
+
+            missing_scores = [key for key in required_scores if not valid_visual_score(scores.get(key))]
+            numeric = [float(scores[key]) for key in required_scores if valid_visual_score(scores.get(key))]
+            critical_issue_valid = isinstance(result.get("critical_issue"), bool)
+            result["average_score"] = round(sum(numeric) / len(numeric), 2) if numeric else None
+            result["missing_required_scores"] = missing_scores
+            result["missing_required_fields"] = [] if critical_issue_valid else ["critical_issue"]
+            if missing_scores or not critical_issue_valid:
+                result["status"] = "not_completed"
+            elif result["critical_issue"] is True or min(numeric) <= 2:
+                result["status"] = "warning"
+            else:
+                result["status"] = "reviewed"
+
+            result["review_mode"] = "ai_assisted"
+            result["local_visual_diagnostics"] = local_report
+            result["human_review_required"] = True
+            if result["status"] == "not_completed":
+                result = local_visual_review_fallback(
+                    "Gemini returned an incomplete visual scorecard; semantic review is still required.",
+                    local_report,
+                )
+        except Exception as exc:
+            log(f"Visual AI review unavailable; retaining local QA result for human review: {exc}")
+            result = local_visual_review_fallback(str(exc), local_report)
 
     ocr_report = metadata_ocr_qa(video_path, reel_dir, duration)
     result["metadata_ocr_qa"] = ocr_report
@@ -1887,24 +2067,38 @@ def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_duratio
 
 
 def enforce_visual_qa(review: dict[str, Any]) -> None:
-    """Require complete VLM, OCR and full-video motion diagnostics before delivery."""
-    if review.get("status") == "warning" or review.get("critical_issue") is True:
+    """Require objective local checks, OCR and full-video motion checks before human review."""
+    status = review.get("status")
+    if status == "warning" or review.get("critical_issue") is True:
         raise RuntimeError(
             "Rendered-frame QA detected a potentially critical visual defect; "
             "the Reel was not added to the publish kit. Check QA frames and rerun."
         )
-    if review.get("status") != "reviewed":
+
+    if status == "local_pass_human_review":
+        local = review.get("local_visual_diagnostics")
+        if (
+            review.get("review_mode") != "deterministic_local_fallback"
+            or review.get("human_review_required") is not True
+            or not isinstance(local, dict)
+            or local.get("engine") != "bsk_local_frame_qa_v1"
+            or local.get("status") != "passed"
+            or int(local.get("frames_scanned", 0) or 0) < 2
+            or local.get("hard_failures")
+        ):
+            raise RuntimeError("Local visual QA did not pass its required checks; refusing human-review handoff.")
+    elif status != "reviewed":
         raise RuntimeError(
             "Rendered-frame QA did not complete successfully; the Reel was not added to the publish kit. "
             "Review the QA outage/scorecard and rerun."
         )
+
     ocr = review.get("metadata_ocr_qa")
     if not isinstance(ocr, dict) or ocr.get("status") != "passed" or ocr.get("forbidden_terms_detected"):
         raise RuntimeError("Metadata OCR did not pass; refusing to deliver a Reel with unknown or leaked production labels.")
     motion = review.get("full_video_motion_diagnostics")
     if not isinstance(motion, dict) or motion.get("status") != "passed" or motion.get("full_video_scanned") is not True:
         raise RuntimeError("Full-video black/freeze diagnostics did not pass; refusing to deliver a Reel with incomplete motion QA.")
-
 
 
 def create_original_sound_bed(destination: Path, duration: float, pillar: str) -> None:
