@@ -3866,9 +3866,9 @@ def send_to_telegram(
         audience_report = build.get("audience_qa", {})
         audience_score = audience_report.get("modeled_audience_fit_score_0_to_100") if isinstance(audience_report, dict) else None
         audience_line = (
-            "🧪 Synthetic 10K audience fit: " + str(audience_score) + "/100 (simulated profiles, not real people or a view prediction)\\n"
+            "🧪 Synthetic 10K audience fit: " + str(audience_score) + "/100 (simulated profiles, not real people or a view prediction)\n"
             if audience_score is not None
-            else "🧪 Synthetic audience panel: insufficient evidence; human review is still required.\\n"
+            else "🧪 Synthetic audience panel: insufficient evidence; human review is still required.\n"
         )
         caption_message = (
             f"📌 CAPTION — copy/paste\n\n{safe_caption(concept)}\n\n"
