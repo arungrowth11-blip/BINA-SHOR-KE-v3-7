@@ -504,6 +504,9 @@ class FactoryLogicTests(unittest.TestCase):
                 reloaded = producer.load_telegram_state()
                 self.assertEqual(reloaded["owner_chat_id"], "legacy-owner-id")
                 self.assertEqual(reloaded["last_update_id"], 674097690)
+                encrypted_snapshot = producer.TELEGRAM_STATE_PATH.read_bytes()
+                producer.save_telegram_state(reloaded)
+                self.assertEqual(producer.TELEGRAM_STATE_PATH.read_bytes(), encrypted_snapshot)
             finally:
                 producer.TELEGRAM_STATE_PATH = old_path
 
