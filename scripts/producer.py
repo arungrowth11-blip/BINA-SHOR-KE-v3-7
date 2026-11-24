@@ -3577,7 +3577,7 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
             telegram_post("sendMessage", data={
                 "chat_id": incoming_chat_id,
                 "text": "Your Telegram private chat ID is: " + incoming_chat_id
-                + "\\nShare this ID with the BINA SHOR KE owner only if you agree to receive private Reel review requests.",
+                + "\nShare this ID with the BINA SHOR KE owner only if you agree to receive private Reel review requests.",
             }, timeout=25)
             continue
         if incoming_chat_id in reviewer_ids:
@@ -3863,6 +3863,13 @@ def send_to_telegram(
         checkpoint("cover")
 
     if not steps.get("message"):
+        audience_report = build.get("audience_qa", {})
+        audience_score = audience_report.get("modeled_audience_fit_score_0_to_100") if isinstance(audience_report, dict) else None
+        audience_line = (
+            "🧪 Synthetic 10K audience fit: " + str(audience_score) + "/100 (simulated profiles, not real people or a view prediction)\\n"
+            if audience_score is not None
+            else "🧪 Synthetic audience panel: insufficient evidence; human review is still required.\\n"
+        )
         caption_message = (
             f"📌 CAPTION — copy/paste\n\n{safe_caption(concept)}\n\n"
             f"🕒 Proposed test slot: {slot.strftime('%A %d %B, %I:%M %p IST')}\n"
@@ -3871,7 +3878,8 @@ def send_to_telegram(
             f"🗣 Hindi ASR check: {build['technical'].get('local_hindi_asr_transcript_qa', {}).get('status', 'not available')} | "
             f"CER: {build['technical'].get('local_hindi_asr_transcript_qa', {}).get('character_error_rate', 'n/a')}\n"
             f"🎞 Full-video scan: {build['technical'].get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status', 'not available')}\n"
-            "🧾 Visual credits: open publish.txt; paste the suggested Pexels creator credit in the first comment where practical.\n"
+            + audience_line
+            + "🧾 Visual credits: open publish.txt; paste the suggested Pexels creator credit in the first comment where practical.\n"
             "🔎 Final check: watch once. If it passes, send /approve title=Exact Title; if not, send /reject title=Exact Title. No editing is expected unless the QA report flags a real defect.\n"
             "📤 After approval, upload manually to Facebook. The factory does not auto-publish.\n"
             "🤖 If Meta's current upload flow asks for AI disclosure for realistic synthetic media, disclose it accurately.\n"
