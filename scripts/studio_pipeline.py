@@ -250,6 +250,13 @@ def ensure_complete_telegram_delivery(steps: dict) -> None:
     if not isinstance(steps, dict) or not all(steps.get(step) is True for step in required):
         missing = [step for step in required if not isinstance(steps, dict) or steps.get(step) is not True]
         raise RuntimeError('Telegram delivery is incomplete; missing successful step(s): ' + ', '.join(missing))
+    configured_reviewers = producer.human_reviewer_chat_ids()
+    if configured_reviewers:
+        panel = steps.get('human_review_panel')
+        if not isinstance(panel, dict) or panel.get('status') != 'sent' or int(panel.get('pending_count', 1) or 0) != 0:
+            raise RuntimeError(
+                'Configured human review panel delivery is incomplete; the finalizer will retry only the unsent reviewers.'
+            )
 
 def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
     """Require an actually delivered, QA-passed, owner-approved one-Reel pilot."""
@@ -1310,6 +1317,7 @@ def _poll_and_finalize_impl() -> int:
                 sample_size=simulated_sample_size,
             )
             quality['audience_qa'] = audience_report
+            build['audience_qa'] = audience_report
             write_json(reel_dir / 'audience_qa.json', audience_report)
             write_json(reel_dir / 'quality_report.json', quality)
             publish_kit = reel_dir / 'publish.txt'
