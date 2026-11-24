@@ -89,8 +89,7 @@ def collect_evidence(concept: dict[str, Any], build: dict[str, Any], quality: di
     technical_gates = {
         "technical_checks_passed": technical.get("technical_checks_passed") is True,
         "visual_review_completed": visual.get("status") == "reviewed",
-        "motion_scan_passed": isinstance(motion, dict) and motion.get("status") == "passed"
-        ,
+        "motion_scan_passed": isinstance(motion, dict) and motion.get("status") == "passed",
         "metadata_ocr_passed": isinstance(ocr, dict) and ocr.get("status") == "passed",
     }
     return {
