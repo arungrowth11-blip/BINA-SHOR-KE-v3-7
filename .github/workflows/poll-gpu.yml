@@ -57,10 +57,6 @@ jobs:
       MISTRAL_TEXT_MODEL: ministral-8b-latest
       CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"
       TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-      BSK_HUMAN_REVIEWER_CHAT_IDS: ${{ secrets.BSK_HUMAN_REVIEWER_CHAT_IDS }}
-      BSK_REVIEWER_HASH_SALT: ${{ secrets.BSK_REVIEWER_HASH_SALT }}
-      BSK_HUMAN_REVIEW_ENCRYPTION_KEY: ${{ secrets.BSK_HUMAN_REVIEW_ENCRYPTION_KEY }}
-      BSK_HUMAN_REVIEW_MIN_RESPONSES: "3"
       BSK_SIMULATED_REVIEWERS: "10000"
       KAGGLE_USERNAME: ${{ secrets.KAGGLE_USERNAME }}
       KAGGLE_KEY: ${{ secrets.KAGGLE_KEY }}
@@ -74,7 +70,7 @@ jobs:
       HF_HOME: ~/.cache/huggingface
     steps:
       - name: Checkout private repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -272,7 +268,7 @@ jobs:
 
       - name: Set up Python
         if: steps.pending.outputs.active == 'true'
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.11"
           cache: pip
@@ -323,7 +319,7 @@ jobs:
 
       - name: Restore verified narration WAV cache from earlier runs
         if: steps.work.outputs.finalize == 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/tts_cache
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -378,7 +374,7 @@ jobs:
 
       - name: Restore local Hindi narration ASR model cache
         if: steps.work.outputs.finalize == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface/hub
           key: bsk-whisper-large-v3-turbo-${{ runner.os }}-v1
@@ -441,7 +437,7 @@ jobs:
 
       - name: Upload the ready-for-human-review publish kit
         if: always() && steps.work.outputs.required == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: bsk-publish-kit-${{ github.run_number }}
           path: |
@@ -471,7 +467,7 @@ jobs:
 
       - name: Save verified narration WAV cache for retries
         if: always() && steps.work.outputs.finalize == 'true' && steps.tts_cache_changed.outputs.changed == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/tts_cache
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
