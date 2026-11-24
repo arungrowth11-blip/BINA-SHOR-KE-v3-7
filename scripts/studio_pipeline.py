@@ -1319,6 +1319,7 @@ def _poll_and_finalize_impl() -> int:
             quality['audience_qa'] = audience_report
             build['audience_qa'] = audience_report
             write_json(reel_dir / 'audience_qa.json', audience_report)
+            write_json(reel_dir / 'quality_report.json', quality)
             if audience_report.get('status') != 'completed':
                 missing_dimensions = audience_report.get('missing_evidence_dimensions', [])
                 failed_gates = audience_report.get('failed_technical_gates', [])
