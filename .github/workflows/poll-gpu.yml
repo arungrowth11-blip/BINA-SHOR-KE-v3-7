@@ -271,7 +271,7 @@ jobs:
 
       - name: Restore verified narration WAV cache from earlier runs
         if: steps.work.outputs.finalize == 'true'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: data/tts_cache
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
@@ -287,7 +287,7 @@ jobs:
 
       - name: Restore local Hindi narration ASR model cache
         if: steps.work.outputs.finalize == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: ~/.cache/huggingface/hub
           key: bsk-whisper-large-v3-turbo-${{ runner.os }}-v1
@@ -380,7 +380,7 @@ jobs:
 
       - name: Save verified narration WAV cache for retries
         if: always() && steps.work.outputs.finalize == 'true' && steps.tts_cache_changed.outputs.changed == 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: data/tts_cache
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
