@@ -32,7 +32,7 @@ Real human review is a separate Telegram workflow. To enable an independent revi
 
 1. Ask each trusted reviewer to open the connected Telegram bot privately and send `/start`.
 2. Each reviewer sends `/reviewer_id` and shares the returned private chat ID with the project owner.
-3. In the private GitHub repository, add Actions secret `BSK_HUMAN_REVIEWER_CHAT_IDS` containing comma-separated numeric IDs (for example `123456789,234567890`). Add `BSK_REVIEWER_HASH_SALT` as a random long secret used to pseudonymize reviewer IDs in saved records.
+3. In the private GitHub repository, add Actions secret `BSK_HUMAN_REVIEWER_CHAT_IDS` containing comma-separated numeric IDs (for example `123456789,234567890`). Add `BSK_REVIEWER_HASH_SALT` as a stable random secret of at least 32 characters, used to pseudonymize reviewer IDs in saved records. Keep it unchanged across runs; rotating it changes reviewer hashes and breaks duplicate detection for earlier reviews.
 4. Each configured reviewer receives the full Reel privately. They must watch it and send one `/bskreview` response with eight ratings (hook, story, emotion, visual, audio, ending, clarity and share value), plus `verdict=pass|revise|reject`. Each reviewer gets one vote per Reel; duplicate votes are ignored.
 5. With an external panel configured, owner `/approve` is blocked until at least three independent reviews arrive, every verdict is `pass`, and every rating average is at least 3/5. The owner must still watch the full Reel and approve it. The system never publishes automatically.
 
