@@ -3865,10 +3865,16 @@ def send_to_telegram(
     if not steps.get("message"):
         audience_report = build.get("audience_qa", {})
         audience_score = audience_report.get("modeled_audience_fit_score_0_to_100") if isinstance(audience_report, dict) else None
+        strongest = audience_report.get("strongest_evidence_dimensions", []) if isinstance(audience_report, dict) else []
+        weakest = audience_report.get("weakest_evidence_dimensions", []) if isinstance(audience_report, dict) else []
+        strength_names = ", ".join(str(item.get("dimension", "")) for item in strongest[:2] if isinstance(item, dict))
+        weakness_names = ", ".join(str(item.get("dimension", "")) for item in weakest[:2] if isinstance(item, dict))
         audience_line = (
-            "🧪 Synthetic 10K audience fit: " + str(audience_score) + "/100 (simulated profiles, not real people or a view prediction)\n"
+            "🧪 Synthetic 10K profile fit: " + str(audience_score) + "/100 (not real people or a view prediction)\\n"
+            + "Strongest evidence: " + (strength_names or "not available") + "\\n"
+            + "Weakest evidence to inspect: " + (weakness_names or "not available") + "\\n"
             if audience_score is not None
-            else "🧪 Synthetic audience panel: insufficient evidence; human review is still required.\n"
+            else "🧪 Synthetic audience panel: insufficient evidence; human review is still required.\\n"
         )
         caption_message = (
             f"📌 CAPTION — copy/paste\n\n{safe_caption(concept)}\n\n"
