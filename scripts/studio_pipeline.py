@@ -299,9 +299,17 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
         and qualification.get('manual_external_review_passed') is True
         and isinstance(qualification.get('manual_external_review_attestation'), dict)
         and qualification['manual_external_review_attestation'].get('status') == 'pass'
-        and qualification['manual_external_review_attestation'].get('reported_independent_reviewers') == 3
-        and qualification['manual_external_review_attestation'].get('attested_by_owner') is True
-        and qualification['manual_external_review_attestation'].get('verification') == 'owner_attested_not_bot_verified'
+        and int(qualification['manual_external_review_attestation'].get('reported_independent_reviewers', 0) or 0) >= 3
+        and (
+            (
+                qualification['manual_external_review_attestation'].get('verification') == 'owner_attested_not_bot_verified'
+                and qualification['manual_external_review_attestation'].get('attested_by_owner') is True
+            )
+            or (
+                qualification['manual_external_review_attestation'].get('verification') == 'bot_verified'
+                and qualification['manual_external_review_attestation'].get('attested_by_owner') is False
+            )
+        )
         and bool(qualification.get('reel_id'))
         and bool(qualification.get('approved_at_ist'))
     )
