@@ -37,12 +37,14 @@ from PIL import Image, ImageDraw, ImageFont
 import voice_first
 import story_engine
 import motion_comic
+import audience_qa
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output"
 HISTORY_PATH = ROOT / "data" / "history.json"
 PERFORMANCE_PATH = ROOT / "data" / "performance_log.csv"
 TELEGRAM_STATE_PATH = ROOT / "data" / "telegram_state.json"
+HUMAN_REVIEW_PATH = ROOT / "data" / "human_reviews.json"
 # Restored/saved by GitHub Actions cache between finalization retries; never committed to Git.
 TTS_CACHE_DIR = Path(os.getenv("BSK_TTS_CACHE_DIR", str(ROOT / "data" / "tts_cache")))
 TZ = ZoneInfo("Asia/Kolkata")
@@ -3376,6 +3378,144 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     }
 
 
+
+def human_reviewer_chat_ids() -> list[str]:
+    """Return only explicitly allowlisted private Telegram chat IDs."""
+    raw = os.getenv("BSK_HUMAN_REVIEWER_CHAT_IDS", "")
+    accepted: list[str] = []
+    for token in re.split(r"[,;\s]+", raw.strip()):
+        value = token.strip()
+        if re.fullmatch(r"[1-9][0-9]{4,19}", value) and value not in accepted:
+            accepted.append(value)
+    return accepted
+
+
+def load_human_review_store() -> dict[str, Any]:
+    if not HUMAN_REVIEW_PATH.exists():
+        return {"schema_version": 1, "reviews": []}
+    payload = json.loads(HUMAN_REVIEW_PATH.read_text(encoding="utf-8"))
+    if not isinstance(payload, dict) or not isinstance(payload.get("reviews"), list):
+        raise RuntimeError("Human review store is malformed; refusing to overwrite or reset it.")
+    return payload
+
+
+def save_human_review_store(store: dict[str, Any]) -> None:
+    HUMAN_REVIEW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = HUMAN_REVIEW_PATH.with_suffix(".json.tmp")
+    temporary.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.replace(HUMAN_REVIEW_PATH)
+
+
+def _parse_human_review_message(
+    message_text: str, history: dict[str, Any], store: dict[str, Any],
+    reviewer_id: str, update_id: int,
+) -> dict[str, Any] | None:
+    """Parse a single allowlisted person's eight ratings and explicit verdict."""
+    if not message_text.strip().lower().startswith("/bskreview"):
+        return None
+    payload = message_text.strip()[len("/bskreview"):].strip()
+    pairs = re.findall(r"([a-zA-Z_]+)\\s*=\\s*([^;|\\n]+)", payload)
+    values = {key.lower().strip(): value.strip() for key, value in pairs}
+    reel_id = values.get("reel_id", "").strip()
+    if not reel_id:
+        raise ValueError("reel_id is required. Copy it from the review request.")
+    topic = next(
+        (item for item in reversed(history.get("topics", []))
+         if str(item.get("reel_id", "")) == reel_id),
+        None,
+    )
+    if topic is None:
+        raise ValueError("This Reel ID is not present in the factory history.")
+    if topic.get("qa_passed") is not True:
+        raise ValueError("This Reel has not passed technical/visual QA and is not eligible for audience review.")
+    ratings: dict[str, float] = {}
+    missing = []
+    for key in audience_qa.HUMAN_DIMENSIONS:
+        raw = values.get(key)
+        if raw is None:
+            missing.append(key)
+            continue
+        try:
+            ratings[key] = float(raw)
+        except ValueError as exc:
+            raise ValueError(key + " must be a number from 1 to 5.") from exc
+    if missing:
+        raise ValueError("Missing ratings: " + ", ".join(missing))
+    verdict = values.get("verdict", "").lower()
+    result = audience_qa.record_human_review(
+        store=store,
+        reel_id=reel_id,
+        reviewer_id=reviewer_id,
+        ratings=ratings,
+        verdict=verdict,
+        notes=values.get("notes", ""),
+        update_id=update_id,
+    )
+    minimum = int(os.getenv("BSK_HUMAN_REVIEW_MIN_RESPONSES", "3"))
+    summary = audience_qa.summarize_human_reviews(store, reel_id, minimum)
+    topic["human_review_summary"] = summary
+    result.update({"reel_id": reel_id, "title": topic.get("title", ""), "summary": summary})
+    return result
+
+
+def dispatch_human_review_panel(
+    reel_id: str, title: str, video_path: Path,
+    already_sent_hashes: list[str] | None = None,
+) -> dict[str, Any]:
+    """Send the Reel only to operator-configured, allowlisted private reviewers."""
+    reviewer_ids = human_reviewer_chat_ids()
+    if not reviewer_ids:
+        return {"status": "not_configured", "configured_count": 0, "sent_count": 0, "sent_reviewer_hashes": []}
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", str(reel_id)):
+        raise ValueError("Unsafe Reel ID for human review distribution.")
+    salt = os.getenv("BSK_REVIEWER_HASH_SALT", "bsk-human-review-v1")
+    sent_hashes = set(already_sent_hashes or [])
+    failed = 0
+    for reviewer_id in reviewer_ids:
+        reviewer_hash = hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+        if reviewer_hash in sent_hashes:
+            continue
+        instructions = (
+            "BINA SHOR KE — INDEPENDENT HUMAN REVIEW (NOT A PUBLISH REQUEST)\\n"
+            + "Reel: " + title[:100] + "\\nID: " + reel_id + "\\n\\n"
+            + "Please watch the FULL Reel once, then reply with all ratings from 1 to 5 "
+            "(1=poor, 5=excellent):\\n"
+            + "/bskreview reel_id=" + reel_id
+            + "; hook=1-5; story=1-5; emotion=1-5; visual=1-5; audio=1-5; ending=1-5; "
+            + "clarity=1-5; share_value=1-5; verdict=pass|revise|reject; notes=optional\\n\\n"
+            + "One independent review per person and Reel. Your response is recorded separately "
+            + "from AI simulation. Do not share private or identifying information."
+        )
+        try:
+            with video_path.open("rb") as handle:
+                telegram_post(
+                    "sendVideo",
+                    data={"chat_id": reviewer_id, "supports_streaming": "true", "caption": instructions[:1024]},
+                    files={"video": (video_path.name, handle, "video/mp4")},
+                    timeout=240,
+                )
+            sent_hashes.add(reviewer_hash)
+        except Exception as exc:
+            failed += 1
+            log("Human review delivery failed for an allowlisted reviewer: " + str(exc)[:250])
+    pending = len(reviewer_ids) - len(sent_hashes.intersection({
+        hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+        for reviewer_id in reviewer_ids
+    }))
+    return {
+        "status": "sent" if failed == 0 and pending == 0 else "partial",
+        "configured_count": len(reviewer_ids),
+        "sent_count": len(sent_hashes.intersection({
+            hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+            for reviewer_id in reviewer_ids
+        })),
+        "pending_count": pending,
+        "sent_reviewer_hashes": sorted(sent_hashes),
+        "failed_delivery_attempts": failed,
+        "real_human_reviews_received": 0,
+    }
+
+
 def append_performance_csv(record: dict[str, Any]) -> None:
     PERFORMANCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     fields = ["observed_at_ist", "title", "pillar", "views_24h", "reach", "average_watch_time_seconds", "completion_rate_percent", "shares", "saves", "comments", "profile_visits", "new_follows", "new_follows_per_1000_views", "source"]
@@ -3391,6 +3531,9 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
     """Read only the pinned owner's private /insights and /published messages."""
     chat_id = telegram_chat_id()
     state = load_telegram_state()
+    reviewer_ids = set(human_reviewer_chat_ids())
+    reviewer_ids.discard(str(chat_id))  # Owner approval is tracked separately from panel votes.
+    human_review_store = load_human_review_store()
     offset = int(state.get("last_update_id", 0)) + 1
     updates = telegram_get_updates(offset=offset)
     highest = int(state.get("last_update_id", 0))
@@ -3401,9 +3544,45 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
         highest = max(highest, update_id)
         message = update.get("message", {})
         chat = message.get("chat", {})
-        if str(chat.get("id", "")) != str(chat_id) or chat.get("type") != "private":
+        incoming_chat_id = str(chat.get("id", ""))
+        if chat.get("type") != "private":
             continue
         text_value = str(message.get("text", "")).strip()
+        if incoming_chat_id in reviewer_ids:
+            if text_value == "/start" or text_value.startswith("/start "):
+                telegram_post("sendMessage", data={
+                    "chat_id": incoming_chat_id,
+                    "text": "You are an allowlisted BINA SHOR KE reviewer. Watch the full Reel sent to you and reply once using the /bskreview format in its caption. Ratings are stored as an independent human review; this bot never publishes.",
+                }, timeout=25)
+                continue
+            if text_value.lower().startswith("/bskreview"):
+                try:
+                    record = _parse_human_review_message(
+                        text_value, history, human_review_store, incoming_chat_id, update_id
+                    )
+                    if record:
+                        if record.get("saved"):
+                            save_human_review_store(human_review_store)
+                            history_changed = True
+                            summary = record["summary"]
+                            reply = (
+                                "✅ Your human review is saved for " + record["title"] + ". "
+                                + "Independent reviews: " + str(summary["count"]) + "/"
+                                + str(summary["minimum_responses"]) + " required. "
+                                + "Verdict totals: " + json.dumps(summary["verdict_counts"])
+                            )
+                        else:
+                            reply = "ℹ️ Your review for this Reel was already recorded; duplicate votes are not counted."
+                        telegram_post("sendMessage", data={"chat_id": incoming_chat_id, "text": reply}, timeout=25)
+                except Exception as exc:
+                    telegram_post("sendMessage", data={
+                        "chat_id": incoming_chat_id,
+                        "text": "⚠️ Human review not saved: " + str(exc)[:700],
+                    }, timeout=25)
+                continue
+            continue
+        if incoming_chat_id != str(chat_id):
+            continue
         if text_value == "/start" or text_value.startswith("/start "):
             telegram_post("sendMessage", data={"chat_id": chat_id, "text": "BINA SHOR KE Studio linked. After the final Reel review use /approve title=Exact Title or /reject title=Exact Title; after a Facebook upload use /published title=Exact Title; after about 24h use /insights. Approval only marks your review decision; it never publishes automatically."}, timeout=25)
             continue
@@ -3624,6 +3803,7 @@ def write_pack(concept: dict[str, Any], build: dict[str, Any], reel_dir: Path, s
 def send_to_telegram(
     concept: dict[str, Any], build: dict[str, Any], reel_dir: Path, slot: datetime,
     ordinal: int, total: int, progress: dict[str, Any] | None = None, on_progress=None,
+    review_id: str | None = None,
 ) -> dict[str, Any]:
     """Deliver one Reel to the owner's pinned private chat, checkpointing each successful step."""
     chat_id = telegram_chat_id()
@@ -3673,6 +3853,18 @@ def send_to_telegram(
         with kit.open("rb") as handle:
             telegram_post("sendDocument", data={"chat_id": chat_id, "caption": "Caption, QA report and visual credits."}, files={"document": (kit.name, handle, "text/plain; charset=utf-8")}, timeout=90)
         checkpoint("publish_kit")
+
+    if review_id:
+        panel = dispatch_human_review_panel(
+            review_id, title, video_path,
+            already_sent_hashes=steps.get("human_review_sent_reviewer_hashes", []),
+        )
+        steps["human_review_panel"] = {
+            key: value for key, value in panel.items() if key != "sent_reviewer_hashes"
+        }
+        steps["human_review_sent_reviewer_hashes"] = panel.get("sent_reviewer_hashes", [])
+        if callable(on_progress):
+            on_progress(dict(steps))
     return steps
 
 
