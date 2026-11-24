@@ -44,7 +44,7 @@ OUT = ROOT / "output"
 HISTORY_PATH = ROOT / "data" / "history.json"
 PERFORMANCE_PATH = ROOT / "data" / "performance_log.csv"
 TELEGRAM_STATE_PATH = ROOT / "data" / "telegram_state.json"
-HUMAN_REVIEW_PATH = ROOT / "data" / "human_reviews.json"
+HUMAN_REVIEW_PATH = ROOT / "data" / "human_reviews.enc"
 # Restored/saved by GitHub Actions cache between finalization retries; never committed to Git.
 TTS_CACHE_DIR = Path(os.getenv("BSK_TTS_CACHE_DIR", str(ROOT / "data" / "tts_cache")))
 TZ = ZoneInfo("Asia/Kolkata")
@@ -3436,19 +3436,46 @@ def human_reviewer_hash_salt() -> str:
     return salt
 
 
+def human_review_encryption_key() -> bytes:
+    key = os.getenv("BSK_HUMAN_REVIEW_ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "Set BSK_HUMAN_REVIEW_ENCRYPTION_KEY to a Fernet key before enabling or reading the human review store."
+        )
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(key.encode("ascii"))
+    except Exception as exc:
+        raise RuntimeError(
+            "BSK_HUMAN_REVIEW_ENCRYPTION_KEY is invalid. Generate a Fernet key and keep it stable; do not rotate it."
+        ) from exc
+    return key.encode("ascii")
+
+
 def load_human_review_store() -> dict[str, Any]:
     if not HUMAN_REVIEW_PATH.exists():
         return {"schema_version": 1, "reviews": []}
-    payload = json.loads(HUMAN_REVIEW_PATH.read_text(encoding="utf-8"))
+    from cryptography.fernet import Fernet, InvalidToken
+    try:
+        plaintext = Fernet(human_review_encryption_key()).decrypt(HUMAN_REVIEW_PATH.read_bytes())
+        payload = json.loads(plaintext.decode("utf-8"))
+    except (InvalidToken, UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError(
+            "Encrypted human review store could not be authenticated/decrypted; refusing to reset or overwrite it."
+        ) from exc
     if not isinstance(payload, dict) or not isinstance(payload.get("reviews"), list):
-        raise RuntimeError("Human review store is malformed; refusing to overwrite or reset it.")
+        raise RuntimeError("Decrypted human review store is malformed; refusing to overwrite or reset it.")
     return payload
 
 
 def save_human_review_store(store: dict[str, Any]) -> None:
+    from cryptography.fernet import Fernet
+    token = Fernet(human_review_encryption_key()).encrypt(
+        json.dumps(store, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
     HUMAN_REVIEW_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = HUMAN_REVIEW_PATH.with_suffix(".json.tmp")
-    temporary.write_text(json.dumps(store, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary = HUMAN_REVIEW_PATH.with_suffix(".enc.tmp")
+    temporary.write_bytes(token)
     temporary.replace(HUMAN_REVIEW_PATH)
 
 
@@ -3598,6 +3625,7 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
                 + " IDs but requires at least " + str(minimum) + "."
             )
         human_reviewer_hash_salt()
+        human_review_encryption_key()
     human_review_store = load_human_review_store()
     offset = int(state.get("last_update_id", 0)) + 1
     updates = telegram_get_updates(offset=offset)
