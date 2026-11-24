@@ -11,6 +11,7 @@ A public GitHub source repository with GitHub Actions + Kaggle GPU automation fo
 - **Legacy renderer:** Wan2.2 TI2V-5B Q4_K_M GGUF remains available for already-created legacy jobs and older manifests; it is not the default generation route.
 - **Qualification status:** image-first workflow has offline code/tests but still requires a real Kaggle one-Reel render, model/runtime lock, measured GPU benchmark, output inspection and human visual approval before weekly batch qualification.
 - **Post:** FFmpeg/Pillow, custom typography, subtitles, overlays, cover and locally synthesized ambience.
+- **Final AAC audio QA:** after the final encode, FFmpeg measures integrated loudness and true peak on the actual output file. Accepted range is -18 to -14 LUFS with a -1 dBTP ceiling. At most one 48 kHz AAC remaster is allowed (target -16 LUFS / -2.5 dBTP); the encoded result is measured again. If measurement is unavailable or the remaster remains outside limits, delivery fails closed.
 - **Delivery/learning:** private Telegram; `/approve` or `/reject` records the final owner decision; manual publishing; `/published` and `/insights` feed measured history.
 
 ## Voice-first dialogue and 3D pilot
