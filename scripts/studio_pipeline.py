@@ -1442,13 +1442,19 @@ def _poll_and_finalize_impl() -> int:
                 'generated_at': pending['created_at_ist'], 'planned_publish_at': reel['planned_publish_at'],
                 'status': 'ready_for_manual_publish_not_confirmed_published',
                 'reel_id': reel['reel_id'], 'job_id': pending.get('job_id'),
-                # render_reel returns only after its hard technical and visual QA gates pass.
+                # Incomplete AI evidence is never marked passed; an explicit human fallback stays pending until reviewers pass.
                 'qa_passed': bool(
-                    build.get('technical', {}).get('technical_checks_passed') is True
+                    not quality.get('human_review_fallback_required', False)
+                    and quality.get('audience_qa', {}).get('status') == 'completed'
+                    and build.get('technical', {}).get('technical_checks_passed') is True
                     and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status') == 'reviewed'
                     and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status') == 'passed'
                     and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status') == 'passed'
                 ),
+                'eligible_for_human_review': bool(quality.get('human_review_fallback_required', False)),
+                'human_review_fallback_required': bool(quality.get('human_review_fallback_required', False)),
+                'human_review_qa_passed': False,
+                'technical_checks_passed': build.get('technical', {}).get('technical_checks_passed') is True,
                 'visual_qa_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status'),
                 'motion_diagnostics_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status'),
                 'metadata_ocr_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status'),
