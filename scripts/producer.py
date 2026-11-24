@@ -3330,30 +3330,23 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     if topic.get("status") == "published_manual_confirmed":
         raise ValueError("This Reel is already marked published; its publication record cannot be overwritten by review status.")
     if approved:
-        configured_reviewers = set(human_reviewer_chat_ids())
-        configured_reviewers.discard(str(telegram_chat_id()))
+        configured_reviewers = external_human_reviewer_chat_ids()
         panel = topic.get("human_review_summary", {})
         if configured_reviewers:
             minimum = human_review_minimum_responses()
-            verdicts = panel.get("verdict_counts", {}) if isinstance(panel, dict) else {}
-            averages = panel.get("dimension_averages_1_to_5", {}) if isinstance(panel, dict) else {}
-            panel_ready = (
-                isinstance(panel, dict)
-                and panel.get("status") == "sufficient"
-                and int(panel.get("count", 0) or 0) >= minimum
-                and int(verdicts.get("revise", 0) or 0) == 0
-                and int(verdicts.get("reject", 0) or 0) == 0
-                and len(averages) == len(audience_qa.HUMAN_DIMENSIONS)
-                and all(float(value) >= 3.0 for value in averages.values())
-            )
-            if not panel_ready:
+            if not human_review_summary_passes(panel, minimum):
                 count = int(panel.get("count", 0) or 0) if isinstance(panel, dict) else 0
                 raise ValueError(
                     "Independent human panel is not qualified: "
                     + str(count) + "/" + str(minimum)
-                    + " reviews received. All reviewers must return verdict=pass "
+                    + " reviews received. Every recorded verdict must be pass "
                     + "and every rating average must be at least 3.0 before owner approval."
                 )
+        if topic.get("qa_passed") is not True:
+            raise ValueError(
+                "This Reel has not completed its QA path. Wait for required AI evidence or "
+                "the configured independent human panel to pass before owner approval."
+            )
     decision = "owner_approved_for_manual_publish" if approved else "owner_rejected_not_published"
     was_already_recorded = topic.get("status") == decision
     if not was_already_recorded:
@@ -3413,6 +3406,39 @@ def human_reviewer_chat_ids() -> list[str]:
         if re.fullmatch(r"[1-9][0-9]{4,19}", value) and value not in accepted:
             accepted.append(value)
     return accepted
+
+
+def external_human_reviewer_chat_ids() -> list[str]:
+    """Allowlist minus the pinned owner; only these IDs can count as independent reviewers."""
+    configured = human_reviewer_chat_ids()
+    if not configured:
+        return []
+    owner_id = str(telegram_chat_id())
+    return [reviewer_id for reviewer_id in configured if reviewer_id != owner_id]
+
+
+def human_review_summary_passes(summary: dict[str, Any], minimum: int | None = None) -> bool:
+    required = human_review_minimum_responses() if minimum is None else minimum
+    if not isinstance(summary, dict) or summary.get("status") != "sufficient":
+        return False
+    verdicts = summary.get("verdict_counts", {})
+    averages = summary.get("dimension_averages_1_to_5", {})
+    return (
+        int(summary.get("count", 0) or 0) >= required
+        and isinstance(verdicts, dict)
+        and int(verdicts.get("revise", 0) or 0) == 0
+        and int(verdicts.get("reject", 0) or 0) == 0
+        and int(verdicts.get("pass", 0) or 0) >= required
+        and isinstance(averages, dict)
+        and len(averages) == len(audience_qa.HUMAN_DIMENSIONS)
+        and all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) >= 3.0
+            for value in averages.values()
+        )
+    )
 
 
 def human_review_minimum_responses() -> int:
@@ -3499,8 +3525,14 @@ def _parse_human_review_message(
     )
     if topic is None:
         raise ValueError("This Reel ID is not present in the factory history.")
-    if topic.get("qa_passed") is not True:
-        raise ValueError("This Reel has not passed technical/visual QA and is not eligible for audience review.")
+    human_fallback_eligible = (
+        topic.get("eligible_for_human_review") is True
+        and topic.get("motion_diagnostics_status") == "passed"
+        and topic.get("metadata_ocr_status") == "passed"
+        and topic.get("technical_checks_passed") is True
+    )
+    if topic.get("qa_passed") is not True and not human_fallback_eligible:
+        raise ValueError("This Reel has not passed technical QA or been explicitly routed to the human-review fallback.")
     ratings: dict[str, float] = {}
     missing = []
     for key in audience_qa.HUMAN_DIMENSIONS:
@@ -3528,6 +3560,13 @@ def _parse_human_review_message(
     minimum = human_review_minimum_responses()
     summary = audience_qa.summarize_human_reviews(store, reel_id, minimum)
     topic["human_review_summary"] = summary
+    if topic.get("eligible_for_human_review") is True and topic.get("qa_passed") is not True:
+        fallback_passed = human_review_summary_passes(summary, minimum)
+        topic["human_review_qa_passed"] = fallback_passed
+        topic["qa_passed"] = fallback_passed
+        topic["human_review_qa_completed_at_utc"] = (
+            datetime.now(timezone.utc).isoformat(timespec="seconds") if fallback_passed else None
+        )
     result.update({"reel_id": reel_id, "title": topic.get("title", ""), "summary": summary})
     return result
 
@@ -3541,8 +3580,7 @@ def dispatch_human_review_panel(
     configured_ids = human_reviewer_chat_ids()
     if not configured_ids:
         return {"status": "not_configured", "configured_count": 0, "sent_count": 0, "sent_reviewer_hashes": []}
-    owner_id = str(telegram_chat_id())
-    reviewer_ids = [reviewer_id for reviewer_id in configured_ids if reviewer_id != owner_id]
+    reviewer_ids = external_human_reviewer_chat_ids()
     if not reviewer_ids:
         raise RuntimeError("The allowlist contains no external reviewers; the owner cannot count as an independent audience reviewer.")
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", str(reel_id)):
