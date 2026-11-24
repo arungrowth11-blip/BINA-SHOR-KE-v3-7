@@ -3329,6 +3329,31 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     topic = matches[-1]
     if topic.get("status") == "published_manual_confirmed":
         raise ValueError("This Reel is already marked published; its publication record cannot be overwritten by review status.")
+    if approved:
+        configured_reviewers = set(human_reviewer_chat_ids())
+        configured_reviewers.discard(str(telegram_chat_id()))
+        panel = topic.get("human_review_summary", {})
+        if configured_reviewers:
+            minimum = int(os.getenv("BSK_HUMAN_REVIEW_MIN_RESPONSES", "3"))
+            verdicts = panel.get("verdict_counts", {}) if isinstance(panel, dict) else {}
+            averages = panel.get("dimension_averages_1_to_5", {}) if isinstance(panel, dict) else {}
+            panel_ready = (
+                isinstance(panel, dict)
+                and panel.get("status") == "sufficient"
+                and int(panel.get("count", 0) or 0) >= minimum
+                and int(verdicts.get("revise", 0) or 0) == 0
+                and int(verdicts.get("reject", 0) or 0) == 0
+                and len(averages) == len(audience_qa.HUMAN_DIMENSIONS)
+                and all(float(value) >= 3.0 for value in averages.values())
+            )
+            if not panel_ready:
+                count = int(panel.get("count", 0) or 0) if isinstance(panel, dict) else 0
+                raise ValueError(
+                    "Independent human panel is not qualified: "
+                    + str(count) + "/" + str(minimum)
+                    + " reviews received. All reviewers must return verdict=pass "
+                    + "and every rating average must be at least 3.0 before owner approval."
+                )
     decision = "owner_approved_for_manual_publish" if approved else "owner_rejected_not_published"
     was_already_recorded = topic.get("status") == decision
     if not was_already_recorded:
@@ -3414,7 +3439,7 @@ def _parse_human_review_message(
     if not message_text.strip().lower().startswith("/bskreview"):
         return None
     payload = message_text.strip()[len("/bskreview"):].strip()
-    pairs = re.findall(r"([a-zA-Z_]+)\\s*=\\s*([^;|\\n]+)", payload)
+    pairs = re.findall(r"([a-zA-Z_]+)\s*=\s*([^;|\n]+)", payload)
     values = {key.lower().strip(): value.strip() for key, value in pairs}
     reel_id = values.get("reel_id", "").strip()
     if not reel_id:
@@ -3476,13 +3501,13 @@ def dispatch_human_review_panel(
         if reviewer_hash in sent_hashes:
             continue
         instructions = (
-            "BINA SHOR KE — INDEPENDENT HUMAN REVIEW (NOT A PUBLISH REQUEST)\\n"
-            + "Reel: " + title[:100] + "\\nID: " + reel_id + "\\n\\n"
+            "BINA SHOR KE — INDEPENDENT HUMAN REVIEW (NOT A PUBLISH REQUEST)\n"
+            + "Reel: " + title[:100] + "\nID: " + reel_id + "\n\n"
             + "Please watch the FULL Reel once, then reply with all ratings from 1 to 5 "
-            "(1=poor, 5=excellent):\\n"
+            "(1=poor, 5=excellent):\n"
             + "/bskreview reel_id=" + reel_id
             + "; hook=1-5; story=1-5; emotion=1-5; visual=1-5; audio=1-5; ending=1-5; "
-            + "clarity=1-5; share_value=1-5; verdict=pass|revise|reject; notes=optional\\n\\n"
+            + "clarity=1-5; share_value=1-5; verdict=pass|revise|reject; notes=optional\n\n"
             + "One independent review per person and Reel. Your response is recorded separately "
             + "from AI simulation. Do not share private or identifying information."
         )
