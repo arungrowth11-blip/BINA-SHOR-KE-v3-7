@@ -53,6 +53,47 @@ class HumanReviewIntegrationTests(unittest.TestCase):
                 history, {"reviews": []}, "10001", 1,
             )
 
+    def test_incomplete_ai_review_can_pass_only_after_real_human_fallback(self):
+        history = {"topics": [{
+            "title": "AI fallback story", "reel_id": "reel_fallback",
+            "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": False, "eligible_for_human_review": True,
+            "human_review_fallback_required": True, "human_review_qa_passed": False,
+            "technical_checks_passed": True, "visual_qa_status": "local_pass_human_review",
+            "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
+            "telegram_delivered": True,
+        }]}
+        store = {"reviews": []}
+        command = (
+            "/bskreview reel_id=reel_fallback; hook=4; story=4; emotion=4; visual=4; "
+            "audio=4; ending=4; clarity=4; share_value=4; verdict=pass"
+        )
+        with patch.dict(os.environ, {
+            "BSK_HUMAN_REVIEW_MIN_RESPONSES": "3",
+            "BSK_REVIEWER_HASH_SALT": "test-salt-0123456789-abcdefghijklmnopqrstuvwxyz",
+        }):
+            for index, reviewer_id in enumerate(("10001", "10002", "10003"), start=1):
+                record = producer._parse_human_review_message(
+                    command, history, store, reviewer_id, index
+                )
+                self.assertTrue(record["saved"])
+                history["topics"][0]["human_review_summary"] = record["summary"]
+                if index < 3:
+                    self.assertFalse(history["topics"][0]["qa_passed"])
+            self.assertTrue(history["topics"][0]["qa_passed"])
+            self.assertTrue(history["topics"][0]["human_review_qa_passed"])
+
+        with patch.object(producer, "human_reviewer_chat_ids", return_value=["10001", "10002", "10003"]), \
+             patch.object(producer, "telegram_chat_id", return_value="99999"):
+            approved = producer._parse_review_message(
+                "/approve title=AI fallback story", history, approved=True
+            )
+        self.assertTrue(approved["weekly_qualification_created"])
+        qualification = history["one_reel_qualification"]
+        self.assertEqual(qualification["visual_qa_status"], "local_pass_human_review")
+        self.assertTrue(qualification["human_review_fallback_required"])
+        self.assertTrue(qualification["human_review_qa_passed"])
+
     def test_owner_approval_waits_for_configured_independent_panel(self):
         history = {"topics": [{
             "title": "एक कहानी", "reel_id": "reel_001",
