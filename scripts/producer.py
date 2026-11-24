@@ -3579,24 +3579,25 @@ def dispatch_human_review_panel(
                     files={"video": (video_path.name, handle, "video/mp4")},
                     timeout=240,
                 )
-            sent_hashes.add(reviewer_hash)
-            if callable(on_progress):
-                sent_for_panel = len(sent_hashes.intersection({
-                    hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
-                    for reviewer_id in reviewer_ids
-                }))
-                on_progress({
-                    "configured_count": len(reviewer_ids),
-                    "sent_count": sent_for_panel,
-                    "pending_count": len(reviewer_ids) - sent_for_panel,
-                    "status": "sending",
-                    "sent_reviewer_hashes": sorted(sent_hashes),
-                    "failed_delivery_attempts": failed,
-                    "real_human_reviews_received": 0,
-                })
         except Exception as exc:
             failed += 1
             log("Human review delivery failed for an allowlisted reviewer: " + str(exc)[:250])
+            continue
+        sent_hashes.add(reviewer_hash)
+        if callable(on_progress):
+            sent_for_panel = len(sent_hashes.intersection({
+                hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+                for reviewer_id in reviewer_ids
+            }))
+            on_progress({
+                "configured_count": len(reviewer_ids),
+                "sent_count": sent_for_panel,
+                "pending_count": len(reviewer_ids) - sent_for_panel,
+                "status": "sending",
+                "sent_reviewer_hashes": sorted(sent_hashes),
+                "failed_delivery_attempts": failed,
+                "real_human_reviews_received": 0,
+            })
     pending = len(reviewer_ids) - len(sent_hashes.intersection({
         hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
         for reviewer_id in reviewer_ids
