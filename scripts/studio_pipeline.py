@@ -293,6 +293,11 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
         isinstance(qualification, dict)
         and qualification.get('status') == 'qualified'
         and qualification.get('qa_passed') is True
+        and qualification.get('visual_qa_status') in {'reviewed', 'local_pass_human_review'}
+        and (
+            qualification.get('visual_qa_status') != 'local_pass_human_review'
+            or qualification.get('human_review_qa_passed') is True
+        )
         and qualification.get('telegram_delivered') is True
         and qualification.get('owner_approved') is True
         and bool(qualification.get('reel_id'))
