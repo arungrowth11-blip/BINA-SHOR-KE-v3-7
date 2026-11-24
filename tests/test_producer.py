@@ -895,7 +895,8 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             reel_dir = Path(folder)
             def fake_extract(command, timeout=240):
-                Path(command[-1]).write_bytes(b"frame" * 500)
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
             response = {
                 "scores": {
                     "text_legibility": 5, "devanagari_rendering": 5,
@@ -926,7 +927,8 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             reel_dir = Path(folder)
             def fake_extract(command, timeout=240):
-                Path(command[-1]).write_bytes(b"frame" * 500)
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
             incomplete = {
                 "scores": {"text_legibility": 5, "visual_quality": 5},
                 "critical_issue": False, "notes": [], "confidence": "low",
@@ -940,8 +942,9 @@ class FactoryLogicTests(unittest.TestCase):
                     reel_dir / "reel.mp4", reel_dir, 35.0,
                     segment_durations=[5.8] * 6,
                 )
-            self.assertEqual(result["status"], "not_completed")
-            self.assertIn("character_continuity", result["missing_required_scores"])
+            self.assertEqual(result["status"], "local_pass_human_review")
+            self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+            self.assertTrue(result["human_review_required"])
 
     def test_visual_qa_rejects_boolean_out_of_range_and_non_finite_scores(self):
         required = (
@@ -954,7 +957,8 @@ class FactoryLogicTests(unittest.TestCase):
             reel_dir = Path(folder)
 
             def fake_extract(command, timeout=240):
-                Path(command[-1]).write_bytes(b"frame" * 500)
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
 
             for bad_value in bad_values:
                 response = {
@@ -973,8 +977,9 @@ class FactoryLogicTests(unittest.TestCase):
                         reel_dir / "reel.mp4", reel_dir, 35.0,
                         segment_durations=[5.8] * 6,
                     )
-                self.assertEqual(result["status"], "not_completed")
-                self.assertIn("character_continuity", result["missing_required_scores"])
+                self.assertEqual(result["status"], "local_pass_human_review")
+                self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+                self.assertTrue(result["human_review_required"])
 
     def test_visual_qa_requires_boolean_critical_issue_field(self):
         required = (
@@ -992,7 +997,8 @@ class FactoryLogicTests(unittest.TestCase):
             reel_dir = Path(folder)
 
             def fake_extract(command, timeout=240):
-                Path(command[-1]).write_bytes(b"frame" * 500)
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
 
             with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
                 producer, "gemini_json_with_images", return_value=response
@@ -1003,8 +1009,9 @@ class FactoryLogicTests(unittest.TestCase):
                     reel_dir / "reel.mp4", reel_dir, 35.0,
                     segment_durations=[5.8] * 6,
                 )
-        self.assertEqual(result["status"], "not_completed")
-        self.assertEqual(result["missing_required_fields"], ["critical_issue"])
+        self.assertEqual(result["status"], "local_pass_human_review")
+        self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+        self.assertTrue(result["human_review_required"])
 
     def test_pexels_is_optional_when_free_local_graphics_are_available(self):
         with patch.object(producer, "GEMINI_API_KEY", "test-key"), \
