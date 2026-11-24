@@ -3995,8 +3995,15 @@ def send_to_telegram(
             "🧪 Synthetic 10K profile fit: " + str(audience_score) + "/100 (not real people or a view prediction)\n"
             + "Strongest evidence: " + (strength_names or "not available") + "\n"
             + "Weakest evidence to inspect: " + (weakness_names or "not available") + "\n"
-            if audience_score is not None
-            else "🧪 Synthetic audience panel: insufficient evidence; human review is still required.\n"
+            if isinstance(audience_report, dict)
+            and audience_report.get("status") == "completed"
+            and audience_score is not None
+            else (
+                "⚠ AI evidence incomplete: no synthetic qualification score is issued. "
+                "This Reel is routed to the independent human panel; human pass and owner approval are still required.\n"
+                if build.get("human_review_fallback_required") is True
+                else "⚠ AI evidence incomplete: no audience pass is issued. Human review is still required.\n"
+            )
         )
         caption_message = (
             f"📌 CAPTION — copy/paste\n\n{safe_caption(concept)}\n\n"
