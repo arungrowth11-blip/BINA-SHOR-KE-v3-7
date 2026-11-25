@@ -220,7 +220,7 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn(refresh_name, body)
         self.assertLess(body.index(refresh_name), body.index(pending_name))
         refresh = body[body.index(refresh_name):body.index(pending_name)]
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/human-reality-qa-engine'", refresh)
+        self.assertIn("if: github.ref == 'refs/heads/feature/human-reality-qa-engine' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')", refresh)
         self.assertIn('git fetch --no-tags origin "$GITHUB_REF"', refresh)
         self.assertIn('git reset --hard FETCH_HEAD', refresh)
         self.assertIn('group: bina-shor-ke-studio', body)
