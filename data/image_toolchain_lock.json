@@ -1,0 +1,47 @@
+{
+  "status": "locked",
+  "generation_mode": "still_image_first",
+  "model_family": "FLUX.1-schnell-Q4_K_S-GGUF",
+  "comfyui_commit": "720e923631e685e9cb28b9e2cc7b43f82b44033f",
+  "comfyui_gguf_commit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
+  "model_revisions": {
+    "unet": "f495746ed9c5efcf4661f53ef05401dceadc17d2",
+    "clip_l": "6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5",
+    "t5xxl": "6af2a98e3f615bdfa612fbd85da93d1ed5f69ef5",
+    "vae": "b2241862a75ec4eb1bc3754b366d5fbf2822defa",
+    "depth": "5426e4f0f36572d16453bbda7a8389317b1bef99"
+  },
+  "runtime_packages": {
+    "torch": "2.11.0+cu128",
+    "torchvision": "0.26.0+cu128",
+    "torchaudio": "2.11.0+cu128",
+    "numpy": "2.1.3",
+    "Pillow": "13.0.0",
+    "safetensors": "0.8.0",
+    "gguf": "0.19.0",
+    "transformers": "5.16.1",
+    "accelerate": "1.14.0",
+    "huggingface-hub": "1.29.0",
+    "sentencepiece": "0.2.2",
+    "tokenizers": "0.23.1",
+    "einops": "0.8.2",
+    "torchsde": "0.2.6",
+    "requests": "2.34.2",
+    "opencv-python": "4.14.0.94",
+    "opencv-python-headless": "4.14.0.94"
+  },
+  "locked_at_ist": "2026-11-25T08:54:04+05:30",
+  "source_job_id": "20261123_170831",
+  "note": "Separate immutable image-first toolchain lock. Does not overwrite or reinterpret the legacy Wan toolchain.",
+  "gpu_benchmark": {
+    "qualified": true,
+    "sample_scene_count": 6,
+    "sample_scene_mean_seconds": 43.63,
+    "measured_one_reel_seconds": 469.31,
+    "estimated_3_reel_hours": 0.59,
+    "safety_factor": 1.5,
+    "note": "Measured end-to-end FLUX still + depth + checkpoint runtime from one completed Reel; repeat runs may vary."
+  },
+  "last_benchmark_job_id": "20261123_170831",
+  "last_benchmark_at_ist": "2026-11-25T08:54:04+05:30"
+}
