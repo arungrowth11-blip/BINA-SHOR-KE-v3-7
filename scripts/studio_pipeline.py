@@ -1158,12 +1158,132 @@ def verify_or_lock_image_toolchain(gpu_manifest: dict, job_id: str | None = None
     return existing
 
 
+def pending_gpu_identity_error(pending: dict) -> str | None:
+    """Reject stale/cross-kernel pending state before polling or retrying."""
+    job_id = str(pending.get('job_id', '')).strip()
+    if not job_id:
+        return 'Pending GPU state has no job_id.'
+    manifest = pending.get('manifest')
+    if not isinstance(manifest, dict):
+        return 'Pending GPU state has no embedded manifest.'
+    if str(manifest.get('job_id', '')).strip() != job_id:
+        return 'Pending job_id does not match its embedded worker manifest.'
+    recorded_kernel = str(pending.get('kaggle_kernel_id', '')).strip()
+    try:
+        configured_kernel = kaggle_kernel_id()
+    except Exception as exc:
+        return f'Configured Kaggle kernel identity is unavailable: {exc}'
+    if not recorded_kernel or recorded_kernel != configured_kernel:
+        return (
+            'Pending Kaggle kernel identity does not match the configured account/slug '
+            f'(pending={recorded_kernel or "missing"}, configured={configured_kernel}).'
+        )
+    return None
+
+
+def gpu_output_identity_error(
+    gpu_manifest: dict,
+    pending: dict,
+    *,
+    require_complete: bool = False,
+) -> str | None:
+    """Prove downloaded Kaggle output belongs to this exact job, renderer and scene set."""
+    expected_job_id = str(pending.get('job_id', '')).strip()
+    actual_job_id = str(gpu_manifest.get('job_id', '')).strip()
+    if not expected_job_id or actual_job_id != expected_job_id:
+        return (
+            'Downloaded Kaggle output job_id mismatch: '
+            f'expected {expected_job_id or "missing"}, received {actual_job_id or "missing"}.'
+        )
+
+    pending_manifest = pending.get('manifest') if isinstance(pending.get('manifest'), dict) else {}
+    expected_mode = str(pending_manifest.get('generation_mode', '')).strip()
+    actual_mode = str(gpu_manifest.get('generation_mode', '')).strip()
+    if expected_mode and actual_mode != expected_mode:
+        return (
+            'Downloaded Kaggle renderer mismatch: '
+            f'expected {expected_mode}, received {actual_mode or "missing"}.'
+        )
+    if not require_complete:
+        return None
+    if gpu_manifest.get('status') != 'complete':
+        return 'Downloaded GPU manifest is not marked complete.'
+
+    expected_pairs: list[tuple[str, int]] = []
+    reels = pending.get('reels') if isinstance(pending.get('reels'), list) else []
+    for reel in reels:
+        if not isinstance(reel, dict):
+            return 'Pending Reel inventory contains a malformed entry.'
+        reel_id = str(reel.get('reel_id', '')).strip()
+        concept = reel.get('concept') if isinstance(reel.get('concept'), dict) else {}
+        beats = concept.get('beats') if isinstance(concept.get('beats'), list) else []
+        if not reel_id or not beats:
+            return 'Pending Reel inventory is missing a Reel ID or scene beats.'
+        expected_pairs.extend((reel_id, index) for index in range(1, len(beats) + 1))
+
+    if not expected_pairs or len(set(expected_pairs)) != len(expected_pairs):
+        return 'Pending Reel inventory is empty or contains duplicate Reel/scene identities.'
+
+    rows = gpu_manifest.get('scenes')
+    if not isinstance(rows, list) or len(rows) != len(expected_pairs):
+        return (
+            'Downloaded GPU scene inventory count mismatch: '
+            f'expected {len(expected_pairs)}, received {len(rows) if isinstance(rows, list) else 0}.'
+        )
+    try:
+        actual_pairs = [
+            (str(row.get('reel_id', '')).strip(), int(row.get('scene_index', 0)))
+            for row in rows if isinstance(row, dict)
+        ]
+    except (TypeError, ValueError):
+        return 'Downloaded GPU scene inventory contains an invalid scene index.'
+    if len(actual_pairs) != len(rows) or sorted(actual_pairs) != sorted(expected_pairs):
+        return 'Downloaded GPU scene identities do not exactly match the pending Reel manifest.'
+
+    if actual_mode == 'still_image_first':
+        if any(row.get('media_type') != 'image/png' for row in rows):
+            return 'Image-first GPU output contains a non-PNG source scene.'
+        parallax_rows = gpu_manifest.get('parallax_scenes')
+        if not isinstance(parallax_rows, list) or len(parallax_rows) != len(expected_pairs):
+            return 'Image-first depth-parallax inventory is incomplete or duplicated.'
+        try:
+            parallax_pairs = [
+                (str(row.get('reel_id', '')).strip(), int(row.get('scene_index', 0)))
+                for row in parallax_rows if isinstance(row, dict)
+            ]
+        except (TypeError, ValueError):
+            return 'Image-first depth-parallax inventory contains an invalid scene index.'
+        if len(parallax_pairs) != len(parallax_rows) or sorted(parallax_pairs) != sorted(expected_pairs):
+            return 'Image-first depth-parallax identities do not exactly match the pending Reel manifest.'
+
+    return None
+
+
+def fail_gpu_output_identity(pending: dict, reason: str) -> int:
+    """Persist a terminal identity blocker; never retry-finalize or mix unrelated GPU files."""
+    message = f'GPU output identity validation failed: {reason}'
+    pending['status'] = 'gpu_failed'
+    pending['gpu_error'] = message[:5000]
+    pending['gpu_output_identity_failure_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    write_json(PENDING, pending)
+    alert_failure(
+        'BINA SHOR KE stopped safely: downloaded GPU output could not be tied to the active Reel job. '
+        'No scenes were consumed, no Telegram delivery occurred, and no paid fallback was used. '
+        + reason[:900]
+    )
+    return 1
+
+
 def _poll_and_finalize_impl() -> int:
     producer.require_env()
     pending = load_json(PENDING, {})
     if not pending or pending.get('status') not in {'gpu_running', 'gpu_complete'}:
         log(f'No active batch to poll (status={pending.get("status") if pending else "none"}).')
         return 0
+    identity_error = pending_gpu_identity_error(pending)
+    if identity_error:
+        return fail_gpu_output_identity(pending, identity_error)
+
     kernel_id = pending['kaggle_kernel_id']
     status, raw = kaggle_status(kernel_id)
     log(f'Kaggle status: {status}; {raw.strip()[:300]}')
@@ -1205,10 +1325,18 @@ def _poll_and_finalize_impl() -> int:
             return 1
         manifest_path = root / 'gpu_output_manifest.json'
         gpu_manifest = load_json(manifest_path, {}) if manifest_path.exists() else {}
+        if gpu_manifest:
+            identity_error = gpu_output_identity_error(gpu_manifest, pending)
+            if identity_error:
+                return fail_gpu_output_identity(pending, identity_error)
         if err_file and err_file.exists() or gpu_manifest.get('status') != 'complete':
             reason = load_json(err_file, {}) if err_file and err_file.exists() else gpu_manifest
             resumed = handle_gpu_failure(root, pending, json.dumps(reason, ensure_ascii=False))
             return 0 if resumed else 1
+
+        identity_error = gpu_output_identity_error(gpu_manifest, pending, require_complete=True)
+        if identity_error:
+            return fail_gpu_output_identity(pending, identity_error)
 
         expected = sum(len(r['beats']) for r in pending.get('reels', []))
         primary_image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
@@ -2213,9 +2341,16 @@ def rebuild_rejected_timing() -> int:
 
 def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
-    if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
-        raise RuntimeError(f"There is no failed or interrupted finalization to retry (status={pending.get('status', 'none')}).")
-    # A GPU output failure itself cannot be repaired by re-running the finalizer. Only retry when Kaggle completed.
+    if pending.get('status') not in {'finalize_failed', 'finalizing'}:
+        raise RuntimeError(
+            'retry-finalize is only for a failed/interrupted finalizer; '
+            f'current status={pending.get("status", "none")}. GPU failures require their guarded recovery path.'
+        )
+    identity_error = pending_gpu_identity_error(pending)
+    if identity_error:
+        raise RuntimeError('Refusing retry-finalize because pending GPU identity is invalid: ' + identity_error)
+    # A GPU output failure itself cannot be repaired by re-running the finalizer.
+    # The downloaded manifest is checked against this exact job before any scene is consumed.
     status, raw = kaggle_status(pending.get('kaggle_kernel_id', ''))
     if status != 'COMPLETE':
         raise RuntimeError(f"Kaggle kernel is not COMPLETE (status={status}). Inspect the GPU worker and use plan-week only after resolving the prior batch. {raw[-800:]}")

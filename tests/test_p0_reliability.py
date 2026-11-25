@@ -248,5 +248,69 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
         self.assertIn("if: success() && env.TELEGRAM_BOT_TOKEN != ''", persist)
 
 
+
+    def test_gpu_output_manifest_is_bound_to_exact_job_renderer_and_scene_inventory(self):
+        pending = {
+            "job_id": "job-image-first-1",
+            "kaggle_kernel_id": "owner/private-worker",
+            "manifest": {"job_id": "job-image-first-1", "generation_mode": "still_image_first"},
+            "reels": [{
+                "reel_id": "reel_01_test",
+                "concept": {"beats": [{}, {}, {}]},
+            }],
+        }
+        gpu_manifest = {
+            "job_id": "job-image-first-1",
+            "status": "complete",
+            "generation_mode": "still_image_first",
+            "scenes": [
+                {"reel_id": "reel_01_test", "scene_index": 1, "media_type": "image/png"},
+                {"reel_id": "reel_01_test", "scene_index": 2, "media_type": "image/png"},
+                {"reel_id": "reel_01_test", "scene_index": 3, "media_type": "image/png"},
+            ],
+            "parallax_scenes": [
+                {"reel_id": "reel_01_test", "scene_index": 1},
+                {"reel_id": "reel_01_test", "scene_index": 2},
+                {"reel_id": "reel_01_test", "scene_index": 3},
+            ],
+        }
+        with patch.object(studio_pipeline, "kaggle_kernel_id", return_value="owner/private-worker"):
+            self.assertIsNone(studio_pipeline.pending_gpu_identity_error(pending))
+        self.assertIsNone(
+            studio_pipeline.gpu_output_identity_error(gpu_manifest, pending, require_complete=True)
+        )
+
+        stale = json.loads(json.dumps(gpu_manifest))
+        stale["job_id"] = "older-kaggle-job"
+        self.assertIn("job_id mismatch", studio_pipeline.gpu_output_identity_error(stale, pending))
+
+        wrong_renderer = json.loads(json.dumps(gpu_manifest))
+        wrong_renderer["generation_mode"] = "wan_video_first_legacy"
+        self.assertIn("renderer mismatch", studio_pipeline.gpu_output_identity_error(wrong_renderer, pending))
+
+        missing_scene = json.loads(json.dumps(gpu_manifest))
+        missing_scene["scenes"].pop()
+        self.assertIn("scene inventory count mismatch", studio_pipeline.gpu_output_identity_error(
+            missing_scene, pending, require_complete=True
+        ))
+
+        missing_parallax = json.loads(json.dumps(gpu_manifest))
+        missing_parallax["parallax_scenes"].pop()
+        self.assertIn("depth-parallax inventory", studio_pipeline.gpu_output_identity_error(
+            missing_parallax, pending, require_complete=True
+        ))
+
+    def test_pending_job_identity_rejects_wrong_kernel_and_embedded_manifest(self):
+        pending = {
+            "job_id": "expected-job",
+            "kaggle_kernel_id": "owner/wrong-worker",
+            "manifest": {"job_id": "expected-job", "generation_mode": "still_image_first"},
+        }
+        with patch.object(studio_pipeline, "kaggle_kernel_id", return_value="owner/private-worker"):
+            self.assertIn("kernel identity", studio_pipeline.pending_gpu_identity_error(pending))
+            pending["kaggle_kernel_id"] = "owner/private-worker"
+            pending["manifest"]["job_id"] = "different-job"
+            self.assertIn("embedded worker manifest", studio_pipeline.pending_gpu_identity_error(pending))
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

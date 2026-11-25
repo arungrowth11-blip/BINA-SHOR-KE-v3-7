@@ -11,7 +11,7 @@ class WorkflowConfigTests(unittest.TestCase):
         body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
         workflow = yaml.load(body, Loader=yaml.BaseLoader)
         push = workflow["on"]["push"]
-        self.assertEqual(push["branches"], ["feature/voice-first-3d-foundation"])
+        self.assertEqual(push["branches"], ["feature/human-reality-qa-engine"])
         self.assertEqual(
             push["paths"],
             [
@@ -26,11 +26,11 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_one_shot_plan_one_push_trigger_is_branch_and_path_scoped(self):
         body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
         self.assertIn('branches:', body)
-        self.assertIn('- feature/voice-first-3d-foundation', body)
+        self.assertIn('- feature/human-reality-qa-engine', body)
         self.assertIn('".github/dispatch/plan-one.once"', body)
         self.assertIn("contains(github.event.head_commit.message, 'PLAN_ONE_ONLY')", body)
         self.assertIn("contains(github.event.head_commit.message, 'PLAN_ONE_ONLY')", body)
-        self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"', body)
+        self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/human-reality-qa-engine"', body)
         self.assertIn('git log -1 --format=%B | grep -qx "PLAN_ONE_ONLY_FREE_TIER_CONFIRMED"', body)
         self.assertIn('grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once', body)
         self.assertIn('grep -qx "FREE_TIER_ONLY_CONFIRMED" .github/dispatch/plan-one.once', body)
@@ -61,6 +61,8 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_gpu_workflow_has_guarded_same_reel_retry_action(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         self.assertIn('retry-gpu', body)
+        self.assertIn('[bsk-retry-finalize]', body)
+        self.assertIn('feature/human-reality-qa-engine', body)
         self.assertIn('repair-rhythm', body)
         self.assertIn('Repair borderline narration rhythm using the same AI scenes', body)
         self.assertIn("[ \"$POLL_ACTION\" = 'repair-rhythm' ]", body)
@@ -164,7 +166,8 @@ class WorkflowConfigTests(unittest.TestCase):
 
     def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
-        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+        self.assertIn('retry_states = {"finalize_failed", "finalizing"}', body)
+        self.assertNotIn('"gpu_failed"}', body[body.index('retry_states ='):body.index('qa_reason =')])
         self.assertIn('active = state.get("status") in allowed', body)
         self.assertNotIn('"delivered"', body[body.index('retry_states ='):body.index('qa_reason =')])
 
@@ -217,12 +220,12 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn(refresh_name, body)
         self.assertLess(body.index(refresh_name), body.index(pending_name))
         refresh = body[body.index(refresh_name):body.index(pending_name)]
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/voice-first-3d-foundation'", refresh)
+        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/human-reality-qa-engine'", refresh)
         self.assertIn('git fetch --no-tags origin "$GITHUB_REF"', refresh)
         self.assertIn('git reset --hard FETCH_HEAD', refresh)
         self.assertIn('group: bina-shor-ke-studio', body)
         self.assertIn('cancel-in-progress: false', body)
-        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+        self.assertIn('retry_states = {"finalize_failed", "finalizing"}', body)
 
 
     def test_director_installs_only_required_ffmpeg_and_devanagari_fonts(self):
@@ -276,6 +279,29 @@ class WorkflowConfigTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+
+    def test_image_first_lock_and_review_evidence_are_persisted(self):
+        body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
+        self.assertIn("data/image_toolchain_lock.json", body)
+        persist = body.split("- name: Persist delivery and performance state", 1)[1]
+        self.assertNotIn("continue-on-error: true", persist)
+        self.assertIn('git add -- data/image_toolchain_lock.json', persist)
+        self.assertIn("output/**/audience_qa.json", body)
+        self.assertIn("output/**/qa_frames/**", body)
+        self.assertIn("output/**/metadata_ocr_report.json", body)
+
+    def test_feature_branch_retry_marker_is_scoped_and_refreshes_latest_state(self):
+        body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
+        workflow = yaml.load(body, Loader=yaml.BaseLoader)
+        self.assertEqual(workflow["on"]["push"]["branches"], ["feature/human-reality-qa-engine"])
+        self.assertEqual(workflow["on"]["push"]["paths"], [".github/workflows/poll-gpu.yml"])
+        self.assertIn("'retry-finalize'", body[body.index("POLL_ACTION:"):body.index("GEMINI_API_KEY:")])
+        self.assertIn("[bsk-retry-finalize]", body)
+        refresh = body.split("Refresh queued feature-branch dispatch to latest state", 1)[1].split(
+            "Check whether a GPU batch actually needs polling", 1
+        )[0]
+        self.assertIn("github.event_name == 'push'", refresh)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)
