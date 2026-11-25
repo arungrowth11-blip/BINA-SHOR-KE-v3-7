@@ -22,7 +22,7 @@ on:
           - "resolve-dispatch-not-started"
   # Scheduled runs execute from the default branch after promotion. Until then, the
   # active human-reality branch can request one guarded state transition by updating
-  # this workflow file. Ordinary commits only poll; explicit markers select bounded retries.
+  # this workflow file. Ordinary commits only poll; [bsk-retry-finalize] retries the same GPU output once.
   push:
     branches:
       - feature/human-reality-qa-engine
