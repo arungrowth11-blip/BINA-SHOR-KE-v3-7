@@ -1230,3 +1230,54 @@ class StudioPipelineTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+
+    def test_legacy_voice_preflight_accepts_exact_verified_director_cache(self):
+        with tempfile.TemporaryDirectory() as folder:
+            old_cache = studio_pipeline.producer.TTS_CACHE_DIR
+            studio_pipeline.producer.TTS_CACHE_DIR = Path(folder) / "tts_cache"
+            try:
+                text = "किचन की चुप्पी में घड़ी टिकती रही"
+                segment = {
+                    "segment_id": "beat_01_line_01", "speaker_id": "risha", "text": text,
+                    "emotion": "शांत लेकिन तनावभरी",
+                    "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                    "gemini_voice": "Aoede", "duration_seconds": 3.0,
+                }
+                direction = studio_pipeline.voice_first.segment_voice_direction(segment)
+                fingerprint = studio_pipeline.producer.tts_cache_fingerprint(text, direction, "Aoede")
+                cache = studio_pipeline.producer.TTS_CACHE_DIR
+                cache.mkdir(parents=True)
+                wav_path = cache / f"{fingerprint}.wav"
+                with wave.open(str(wav_path), "wb") as output:
+                    output.setnchannels(1)
+                    output.setsampwidth(2)
+                    output.setframerate(24000)
+                    output.writeframes(b"\\x00\\x00" * (24000 * 3))
+                (cache / f"{fingerprint}.wav.sha256").write_text(fingerprint, encoding="ascii")
+                pending = {"reels": [{"reel_id": "reel_test", "concept": {
+                    "voice_first_plan": {"status": "voice_measured_before_video", "cache_key_version": 2},
+                    "beats": [{"speech_segments": [segment]}],
+                }}]}
+                self.assertEqual(studio_pipeline.verify_finalization_voice_assets(pending), 1)
+            finally:
+                studio_pipeline.producer.TTS_CACHE_DIR = old_cache
+
+    def test_legacy_voice_preflight_stops_if_exact_cache_is_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            old_cache = studio_pipeline.producer.TTS_CACHE_DIR
+            studio_pipeline.producer.TTS_CACHE_DIR = Path(folder) / "empty"
+            try:
+                pending = {"reels": [{"reel_id": "reel_test", "concept": {
+                    "voice_first_plan": {"status": "voice_measured_before_video", "cache_key_version": 2},
+                    "beats": [{"speech_segments": [{
+                        "segment_id": "beat_01_line_01", "text": "मूल आवाज़।",
+                        "emotion": "natural", "voice_direction": "Adult feminine Hindi voice.",
+                        "gemini_voice": "Aoede", "duration_seconds": 2.0,
+                    }]}],
+                }}]}
+                with self.assertRaisesRegex(RuntimeError, "Exact Director-run voice cache is missing"):
+                    studio_pipeline.verify_finalization_voice_assets(pending)
+            finally:
+                studio_pipeline.producer.TTS_CACHE_DIR = old_cache

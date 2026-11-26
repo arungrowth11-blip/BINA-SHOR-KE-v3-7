@@ -1875,6 +1875,8 @@
   "dispatched_at_ist": "2026-11-23T17:13:13+05:30",
   "dispatch_output": "Kernel version 6 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
   "active_finalizing_reel_id": "reel_01_170831",
-  "finalize_error": "RuntimeError: Rendered-frame QA did not complete successfully; the Reel was not added to the publish kit. Review the QA outage/scorecard and rerun.",
-  "finalize_failed_at_ist": "2026-11-24T00:39:15+05:30"
+  "finalize_failed_at_ist": "2026-11-25T08:54:07+05:30",
+  "retry_finalization_count": 1,
+  "retry_requested_at_ist": "2026-11-25T08:53:57+05:30",
+  "finalize_error": "RuntimeError: Voice cache mismatch for beat_01_line_01: planned 3.280s, finalizer has 3.560s. Refusing to render out of sync."
 }

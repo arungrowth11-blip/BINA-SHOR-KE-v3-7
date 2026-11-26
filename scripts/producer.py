@@ -26,7 +26,7 @@ import unicodedata
 import sys
 import time
 import wave
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -37,12 +37,14 @@ from PIL import Image, ImageDraw, ImageFont
 import voice_first
 import story_engine
 import motion_comic
+import audience_qa
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output"
 HISTORY_PATH = ROOT / "data" / "history.json"
 PERFORMANCE_PATH = ROOT / "data" / "performance_log.csv"
 TELEGRAM_STATE_PATH = ROOT / "data" / "telegram_state.json"
+HUMAN_REVIEW_PATH = ROOT / "data" / "human_reviews.enc"
 # Restored/saved by GitHub Actions cache between finalization retries; never committed to Git.
 TTS_CACHE_DIR = Path(os.getenv("BSK_TTS_CACHE_DIR", str(ROOT / "data" / "tts_cache")))
 TZ = ZoneInfo("Asia/Kolkata")
@@ -1530,11 +1532,57 @@ def _valid_tts_wav(path: Path) -> bool:
     return _tts_wav_validation_error(path) is None
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def tts_cache_fingerprint(text: str, voice_direction: str | None = None, voice_name: str | None = None) -> str:
+    """Versioned cache identity for the exact TTS generation contract."""
+    material = {
+        "schema": "bsk-tts-cache-v4", "provider": "google-gemini",
+        "model": GEMINI_TTS_MODEL, "voice": str(voice_name or TTS_VOICE).strip(),
+        "voice_direction": str(voice_direction or ""), "text": str(text),
+        "response_format": {"mime_type": "audio/l16", "sample_rate": 24000, "channels": 1, "sample_width_bytes": 2},
+    }
+    canonical = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_locked_voice_asset(segment: dict[str, Any]) -> Path:
+    """Resolve and verify the immutable planning WAV; never silently regenerate it."""
+    asset = segment.get("voice_asset")
+    if not isinstance(asset, dict) or asset.get("schema_version") != 1:
+        raise RuntimeError(f"Voice-first segment {segment.get('segment_id', '<unknown>')} has no immutable voice asset; re-plan the voice timeline before finalization.")
+    relative = Path(str(asset.get("path") or ""))
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError("Locked voice asset path is unsafe; refusing finalization.")
+    root = ROOT.resolve()
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise RuntimeError(f"Locked voice asset is missing or outside the repository: {relative}")
+    expected_sha = str(asset.get("sha256") or "")
+    if len(expected_sha) != 64 or file_sha256(path) != expected_sha:
+        raise RuntimeError(f"Locked voice asset SHA-256 mismatch for {segment.get('segment_id', '<unknown>')}.")
+    validation_error = _tts_wav_validation_error(path)
+    if validation_error:
+        raise RuntimeError(f"Locked voice asset is invalid: {validation_error}")
+    measured = voice_first.wav_duration(path)
+    expected_duration = float(asset.get("duration_seconds", 0) or 0)
+    if expected_duration <= 0 or abs(measured - expected_duration) > 0.01:
+        raise RuntimeError(f"Locked voice asset duration mismatch for {segment.get('segment_id', '<unknown>')}: manifest {expected_duration:.4f}s, file {measured:.4f}s.")
+    return path
+
 def ensure_tts_wav(
     text: str,
     destination: Path,
     voice_direction: str | None = None,
     voice_name: str | None = None,
+    *,
+    allow_generation: bool = True,
 ) -> str:
     """Reuse only a validated WAV whose SHA-256 sidecar matches this exact narration text.
 
@@ -1542,8 +1590,7 @@ def ensure_tts_wav(
     retries do not regenerate identical voice lines and burn additional free-tier quota.
     """
     selected_voice = str(voice_name or TTS_VOICE).strip()
-    cache_material = text + "\n[voice_direction=" + (voice_direction or "") + "]\n[gemini_voice=" + selected_voice + "]"
-    digest = hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
+    digest = tts_cache_fingerprint(text, voice_direction, selected_voice)
     sidecar_suffix = ".wav.sha256"
     cached_audio = TTS_CACHE_DIR / f"{digest}.wav"
     cached_sidecar = TTS_CACHE_DIR / f"{digest}{sidecar_suffix}"
@@ -1571,6 +1618,11 @@ def ensure_tts_wav(
             log(f"Reusing validated local TTS cache: {destination.name}")
             return "cached"
 
+    if not allow_generation:
+        raise RuntimeError(
+            "Verified TTS cache miss during finalization; refusing to regenerate a measured voice line. "
+            "Restore the exact Director-run cache or immutable voice-asset artifact first."
+        )
     destination.unlink(missing_ok=True)
     local_sidecar.unlink(missing_ok=True)
     tts_wav(text, destination, voice_direction=voice_direction, voice_name=selected_voice)
@@ -2141,12 +2193,113 @@ def create_original_sound_bed(destination: Path, duration: float, pillar: str) -
 
 
 def final_audio_mix_filter() -> str:
-    """Mix the restrained original ambience, then master the complete Reel audio."""
+    """Mix ambience, leave AAC true-peak headroom, and disable limiter makeup gain."""
     return (
         "[1:a]volume=0.22[bed];"
         "[0:a][bed]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
-        "loudnorm=I=-16:TP=-1.5:LRA=11,alimiter=limit=0.84[a]"
+        "loudnorm=I=-16:TP=-2.5:LRA=11,alimiter=limit=0.84:level=false[a]"
     )
+
+
+def measure_audio_loudness(path: Path, timeout: int = 180) -> dict[str, float]:
+    """Measure the encoded file's integrated loudness and true peak with FFmpeg."""
+    if not path.is_file() or path.stat().st_size <= 0:
+        raise RuntimeError("Final audio QA cannot measure a missing or empty media file.")
+    command = [
+        "ffmpeg", "-hide_banner", "-i", str(path), "-vn",
+        "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json",
+        "-f", "null", "-",
+    ]
+    result = subprocess.run(
+        command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        timeout=timeout,
+    )
+    diagnostics = (result.stderr or "") + "\n" + (result.stdout or "")
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Final encoded-audio loudness measurement failed: "
+            + diagnostics[-1800:]
+        )
+    matches = re.findall(r'\{\s*"input_i"\s*:.*?\}', diagnostics, flags=re.DOTALL)
+    if not matches:
+        raise RuntimeError("FFmpeg loudnorm did not return a parseable final-audio measurement.")
+    try:
+        report = json.loads(matches[-1])
+        integrated = float(report["input_i"])
+        true_peak = float(report["input_tp"])
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise RuntimeError("Final encoded-audio measurement is incomplete or invalid.") from exc
+    if not math.isfinite(integrated) or not math.isfinite(true_peak):
+        raise RuntimeError("Final encoded-audio measurement is non-finite; refusing delivery.")
+    return {
+        "integrated_loudness_lufs": round(integrated, 2),
+        "true_peak_dbtp": round(true_peak, 2),
+    }
+
+
+def enforce_final_audio_qa(video_path: Path) -> dict[str, Any]:
+    """Verify final AAC; perform at most one measured remaster, then fail closed."""
+    max_true_peak_dbtp = -1.0
+    min_integrated_lufs = -18.0
+    max_integrated_lufs = -14.0
+
+    def within_limits(measurement: dict[str, float]) -> bool:
+        integrated = measurement.get("integrated_loudness_lufs")
+        true_peak = measurement.get("true_peak_dbtp")
+        return (
+            isinstance(integrated, (int, float))
+            and isinstance(true_peak, (int, float))
+            and math.isfinite(float(integrated))
+            and math.isfinite(float(true_peak))
+            and min_integrated_lufs <= float(integrated) <= max_integrated_lufs
+            and float(true_peak) <= max_true_peak_dbtp
+        )
+
+    before = measure_audio_loudness(video_path)
+    if within_limits(before):
+        return {
+            "status": "passed",
+            "remastered": False,
+            "measured": before,
+            "limits": {
+                "integrated_loudness_lufs": [min_integrated_lufs, max_integrated_lufs],
+                "maximum_true_peak_dbtp": max_true_peak_dbtp,
+            },
+        }
+
+    temporary = video_path.with_name(video_path.stem + ".audio-remaster.tmp.mp4")
+    try:
+        temporary.unlink(missing_ok=True)
+        run_cmd([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(video_path), "-map", "0:v:0", "-map", "0:a:0",
+            "-c:v", "copy",
+            "-af", "loudnorm=I=-16:TP=-2.5:LRA=11,alimiter=limit=0.84:level=false",
+            "-ar", "48000", "-c:a", "aac", "-b:a", "160k",
+            "-movflags", "+faststart", str(temporary),
+        ], timeout=360)
+        if not temporary.is_file() or temporary.stat().st_size < 100_000:
+            raise RuntimeError("The one permitted final-audio remaster did not produce a valid media file.")
+        after = measure_audio_loudness(temporary)
+        if not within_limits(after):
+            raise RuntimeError(
+                "Final AAC remains outside the loudness/true-peak limits after one remaster: "
+                + json.dumps(after, ensure_ascii=False)
+            )
+        temporary.replace(video_path)
+        return {
+            "status": "passed",
+            "remastered": True,
+            "before": before,
+            "measured": after,
+            "limits": {
+                "integrated_loudness_lufs": [min_integrated_lufs, max_integrated_lufs],
+                "maximum_true_peak_dbtp": max_true_peak_dbtp,
+                "remaster_true_peak_target_dbtp": -2.5,
+            },
+        }
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def probe_duration(path: Path) -> float:
@@ -2649,11 +2802,18 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                     str(line.get("voice_direction") or "Natural Hindi dialogue.")
                     + " Performance emotion: " + str(line.get("emotion") or "natural, restrained")
                 )
-                ensure_tts_wav(
-                    str(line["text"]), line_path,
-                    voice_direction=voice_direction,
-                    voice_name=str(line.get("gemini_voice") or TTS_VOICE),
-                )
+                if concept.get("voice_first_plan", {}).get("status") == "voice_measured_before_video":
+                    # Exact planning bytes are authoritative; no TTS regeneration in finalization.
+                    locked_asset = validate_locked_voice_asset(line)
+                    shutil.copy2(locked_asset, line_path)
+                else:
+                    # Compatibility path is restricted to legacy manifests without a measured voice plan.
+                    ensure_tts_wav(
+                        str(line["text"]), line_path,
+                        voice_direction=voice_direction,
+                        voice_name=str(line.get("gemini_voice") or TTS_VOICE),
+                        allow_generation=False,
+                    )
                 measured = voice_first.wav_duration(line_path)
                 expected = line.get("duration_seconds")
                 if expected is not None and abs(measured - float(expected)) > 0.15:
@@ -2676,7 +2836,11 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             total_voice_seconds += spoken_seconds
         else:
             # Backward compatibility for an older pending manifest or a hand-authored test concept.
-            ensure_tts_wav(beat["voiceover"], audio_path, voice_direction=beat.get("voice_direction"))
+            ensure_tts_wav(
+                beat["voiceover"], audio_path,
+                voice_direction=beat.get("voice_direction"),
+                allow_generation=False,
+            )
             audio_duration = probe_duration(audio_path)
             total_voice_seconds += audio_duration
         voice_audio_paths.append(audio_path)
@@ -2848,11 +3012,13 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     run_cmd([
         "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", str(video_path), "-i", str(bed_path),
         "-filter_complex", final_audio_mix_filter(),
-        "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", str(mixed_path),
+        "-map", "0:v:0", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+        "-ar", "48000", "-movflags", "+faststart", str(mixed_path),
     ], timeout=300)
     if not mixed_path.exists() or mixed_path.stat().st_size < 100_000:
         raise RuntimeError("Original sound design mix failed technical validation.")
     mixed_path.replace(video_path)
+    audio_loudness_qa = enforce_final_audio_qa(video_path)
     final_duration = probe_duration(video_path)
     media_info = probe_media(video_path, expected_fps=target_fps)
     duration_policy = story_engine.policy_for(concept.get("story_type", "emotional"))
@@ -2893,6 +3059,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         "visual_style_profile": concept.get("visual_style_profile", {}),
         "primary_visual_pipeline": story_engine.PRIMARY_25D_PIPELINE,
         "ffprobe_media_info": media_info, "file_size_mb": round(video_path.stat().st_size / 1024 / 1024, 2),
+        "audio_loudness_qa": audio_loudness_qa,
         "voice_segments": len(concept["beats"]), "editorial_shots": int((concept.get("editorial_shot_plan") or {}).get("editorial_shot_count", len(concept["beats"]))), "stock_video_segments": stock_scenes,
         "original_custom_graphic_scenes": original_graphic_scenes,
         "ai_source_video_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").exists()),
@@ -3143,23 +3310,79 @@ def render_carousel(carousel: dict[str, Any], slot: datetime) -> dict[str, Any]:
     return {"out_dir": out_dir, "slide_paths": slide_paths, "kit_path": kit_path, "caption": caption}
 
 
+def _telegram_state_fernet():
+    """Derive a domain-separated Fernet key from the existing Actions-only bot token."""
+    if not TELEGRAM_BOT_TOKEN:
+        raise RuntimeError("TELEGRAM_BOT_TOKEN is required to encrypt or decrypt the Telegram owner binding.")
+    from cryptography.fernet import Fernet
+
+    key_material = hashlib.sha256(
+        b"BINA_SHOR_KE_TELEGRAM_STATE_V2\\0" + TELEGRAM_BOT_TOKEN.encode("utf-8")
+    ).digest()
+    return Fernet(base64.urlsafe_b64encode(key_material))
+
+
 def load_telegram_state() -> dict[str, Any]:
+    """Load the persistent cursor and decrypt v2 owner state; accept legacy v1 for migration."""
     defaults: dict[str, Any] = {"owner_chat_id": None, "last_update_id": 0}
     if not TELEGRAM_STATE_PATH.exists():
         return defaults.copy()
     try:
-        state = json.loads(TELEGRAM_STATE_PATH.read_text(encoding="utf-8"))
-        return {**defaults, **state}
-    except (json.JSONDecodeError, OSError):
+        stored = json.loads(TELEGRAM_STATE_PATH.read_text(encoding="utf-8"))
+        if not isinstance(stored, dict):
+            raise ValueError("Telegram state root must be a JSON object.")
+    except (json.JSONDecodeError, OSError, ValueError):
         log("WARNING: telegram_state.json invalid; refusing to guess the private chat. Re-enrol by repairing this state file.")
         return defaults.copy()
 
+    state = {**defaults, **stored}
+    encrypted_owner = state.pop("owner_chat_id_encrypted", None)
+    if encrypted_owner:
+        from cryptography.fernet import InvalidToken
+
+        try:
+            owner_chat_id = _telegram_state_fernet().decrypt(str(encrypted_owner).encode("ascii")).decode("utf-8")
+        except InvalidToken as exc:
+            raise RuntimeError(
+                "Telegram owner state could not be decrypted; preserve the state file. "
+                "The Telegram bot token may have been rotated or the state may be corrupt."
+            ) from exc
+        except (UnicodeError, ValueError) as exc:
+            raise RuntimeError("Telegram owner state could not be decrypted; preserve the state file.") from exc
+        if not owner_chat_id:
+            raise RuntimeError("Telegram owner state decrypted to an empty chat ID; preserve the state file.")
+        state["owner_chat_id"] = owner_chat_id
+        state["_telegram_owner_cipher_cache"] = {
+            "ciphertext": str(encrypted_owner),
+            "owner_chat_id": owner_chat_id,
+        }
+    return state
+
 
 def save_telegram_state(state: dict[str, Any]) -> None:
-    """Atomically persist the Telegram update cursor to avoid reprocessing/losing updates."""
+    """Atomically persist the cursor and only ciphertext for the private Telegram owner."""
+    payload = {
+        key: value
+        for key, value in state.items()
+        if key not in {"owner_chat_id", "owner_chat_id_encrypted", "_telegram_owner_cipher_cache"}
+    }
+    payload["state_schema_version"] = 2
+    owner_chat_id = str(state.get("owner_chat_id") or "").strip()
+    if owner_chat_id:
+        cached = state.get("_telegram_owner_cipher_cache")
+        if isinstance(cached, dict) and cached.get("owner_chat_id") == owner_chat_id and cached.get("ciphertext"):
+            encrypted_owner = str(cached["ciphertext"])
+        else:
+            encrypted_owner = _telegram_state_fernet().encrypt(owner_chat_id.encode("utf-8")).decode("ascii")
+        payload["owner_chat_id_encrypted"] = encrypted_owner
+        state["_telegram_owner_cipher_cache"] = {
+            "ciphertext": encrypted_owner,
+            "owner_chat_id": owner_chat_id,
+        }
+
     TELEGRAM_STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
     temporary = TELEGRAM_STATE_PATH.with_suffix(TELEGRAM_STATE_PATH.suffix + ".tmp")
-    temporary.write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
     temporary.replace(TELEGRAM_STATE_PATH)
 
 
@@ -3327,6 +3550,59 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     topic = matches[-1]
     if topic.get("status") == "published_manual_confirmed":
         raise ValueError("This Reel is already marked published; its publication record cannot be overwritten by review status.")
+    if approved:
+        configured_reviewers = external_human_reviewer_chat_ids()
+        panel = topic.get("human_review_summary", {})
+        manual_external_review_required = (
+            topic.get("manual_external_review_required") is True
+            and not configured_reviewers
+        )
+        if configured_reviewers:
+            minimum = human_review_minimum_responses()
+            if not human_review_summary_passes(panel, minimum):
+                count = int(panel.get("count", 0) or 0) if isinstance(panel, dict) else 0
+                raise ValueError(
+                    "Independent human panel is not qualified: "
+                    + str(count) + "/" + str(minimum)
+                    + " reviews received. All reviewers must return verdict=pass; every rating average must be at least 3.0 before owner approval."
+                )
+            if topic.get("manual_external_review_required") is True:
+                topic["manual_external_review_passed"] = True
+                topic["manual_external_review_attestation"] = {
+                    "status": "pass",
+                    "reported_independent_reviewers": int(panel.get("count", minimum) or minimum),
+                    "attested_by_owner": False,
+                    "verification": "bot_verified",
+                    "source": "allowlisted_telegram_review_panel",
+                    "attested_at_utc": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                }
+        elif manual_external_review_required:
+            # /approve is the owner's attestation that three independent people watched the full Reel and all passed.
+            # No reviewer names, IDs, scores, or raw opinions are stored; the software cannot verify their votes.
+            required_reviewers = int(topic.get("manual_external_reviewers_required", 3) or 0)
+            if required_reviewers != 3:
+                raise ValueError("Manual external review requires exactly three independent reviewers.")
+            if not isinstance(topic.get("manual_external_review_attestation"), dict):
+                attested_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+                topic["manual_external_review_attestation"] = {
+                    "status": "pass",
+                    "reported_independent_reviewers": required_reviewers,
+                    "attested_by_owner": True,
+                    "verification": "owner_attested_not_bot_verified",
+                    "source": "owner_private_telegram_approve",
+                    "attested_at_utc": attested_at,
+                }
+            topic["manual_external_review_passed"] = True
+            if topic.get("human_review_fallback_required") is True:
+                topic["human_review_qa_passed"] = True
+                topic["human_review_qa_source"] = "owner_attested_manual_external_review"
+                topic["human_review_qa_completed_at_utc"] = topic["manual_external_review_attestation"]["attested_at_utc"]
+                topic["qa_passed"] = True
+        if topic.get("qa_passed") is not True:
+            raise ValueError(
+                "This Reel has not completed its QA path. Wait for required AI evidence or "
+                "the owner-attested manual external review before owner approval."
+            )
     decision = "owner_approved_for_manual_publish" if approved else "owner_rejected_not_published"
     was_already_recorded = topic.get("status") == decision
     if not was_already_recorded:
@@ -3337,10 +3613,19 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             topic["owner_rejection_reason"] = values["reason"][:500]
 
     qualification_created = False
+    fallback_human_qa_passed = (
+        topic.get("human_review_fallback_required") is True
+        and topic.get("human_review_qa_passed") is True
+    )
+    visual_status = topic.get("visual_qa_status")
+    visual_review_qualified = (
+        visual_status == "reviewed"
+        or (visual_status == "local_pass_human_review" and fallback_human_qa_passed)
+    )
     if (
         approved
         and topic.get("qa_passed") is True
-        and topic.get("visual_qa_status") == "reviewed"
+        and visual_review_qualified
         and topic.get("motion_diagnostics_status") == "passed"
         and topic.get("metadata_ocr_status") == "passed"
         and topic.get("telegram_delivered") is True
@@ -3353,7 +3638,13 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             "job_id": str(topic.get("job_id") or ""),
             "title": str(topic.get("title", title)),
             "qa_passed": True,
-            "visual_qa_status": "reviewed",
+            "visual_qa_status": visual_status,
+            "human_review_fallback_required": topic.get("human_review_fallback_required") is True,
+            "human_review_qa_passed": topic.get("human_review_qa_passed") is True,
+            "human_review_qa_source": topic.get("human_review_qa_source"),
+            "manual_external_review_required": topic.get("manual_external_review_required") is True,
+            "manual_external_review_passed": topic.get("manual_external_review_passed") is True,
+            "manual_external_review_attestation": topic.get("manual_external_review_attestation"),
             "motion_diagnostics_status": "passed",
             "metadata_ocr_status": "passed",
             "telegram_delivered": True,
@@ -3376,6 +3667,264 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     }
 
 
+
+def human_reviewer_chat_ids() -> list[str]:
+    """Return only explicitly allowlisted private Telegram chat IDs."""
+    raw = os.getenv("BSK_HUMAN_REVIEWER_CHAT_IDS", "")
+    accepted: list[str] = []
+    for token in re.split(r"[,;\s]+", raw.strip()):
+        value = token.strip()
+        if re.fullmatch(r"[1-9][0-9]{4,19}", value) and value not in accepted:
+            accepted.append(value)
+    return accepted
+
+
+def external_human_reviewer_chat_ids() -> list[str]:
+    """Allowlist minus the pinned owner; only these IDs can count as independent reviewers."""
+    configured = human_reviewer_chat_ids()
+    if not configured:
+        return []
+    owner_id = str(telegram_chat_id())
+    return [reviewer_id for reviewer_id in configured if reviewer_id != owner_id]
+
+
+def human_review_summary_passes(summary: dict[str, Any], minimum: int | None = None) -> bool:
+    required = human_review_minimum_responses() if minimum is None else minimum
+    if not isinstance(summary, dict) or summary.get("status") != "sufficient":
+        return False
+    verdicts = summary.get("verdict_counts", {})
+    averages = summary.get("dimension_averages_1_to_5", {})
+    return (
+        int(summary.get("count", 0) or 0) >= required
+        and isinstance(verdicts, dict)
+        and int(verdicts.get("revise", 0) or 0) == 0
+        and int(verdicts.get("reject", 0) or 0) == 0
+        and int(verdicts.get("pass", 0) or 0) >= required
+        and isinstance(averages, dict)
+        and len(averages) == len(audience_qa.HUMAN_DIMENSIONS)
+        and all(
+            isinstance(value, (int, float))
+            and not isinstance(value, bool)
+            and math.isfinite(float(value))
+            and float(value) >= 3.0
+            for value in averages.values()
+        )
+    )
+
+
+def human_review_minimum_responses() -> int:
+    raw = os.getenv("BSK_HUMAN_REVIEW_MIN_RESPONSES", "3").strip()
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise RuntimeError("BSK_HUMAN_REVIEW_MIN_RESPONSES must be a positive integer.") from exc
+    if value < 1 or value > 100:
+        raise RuntimeError("BSK_HUMAN_REVIEW_MIN_RESPONSES must be between 1 and 100.")
+    return value
+
+
+def human_reviewer_hash_salt() -> str:
+    salt = os.getenv("BSK_REVIEWER_HASH_SALT", "").strip()
+    if len(salt) < 32:
+        raise RuntimeError(
+            "Set BSK_REVIEWER_HASH_SALT to a stable random secret of at least 32 characters "
+            "before enabling the human reviewer panel."
+        )
+    return salt
+
+
+def human_review_encryption_key() -> bytes:
+    key = os.getenv("BSK_HUMAN_REVIEW_ENCRYPTION_KEY", "").strip()
+    if not key:
+        raise RuntimeError(
+            "Set BSK_HUMAN_REVIEW_ENCRYPTION_KEY to a Fernet key before enabling or reading the human review store."
+        )
+    try:
+        from cryptography.fernet import Fernet
+        Fernet(key.encode("ascii"))
+    except Exception as exc:
+        raise RuntimeError(
+            "BSK_HUMAN_REVIEW_ENCRYPTION_KEY is invalid. Generate a Fernet key and keep it stable; do not rotate it."
+        ) from exc
+    return key.encode("ascii")
+
+
+def load_human_review_store() -> dict[str, Any]:
+    if not HUMAN_REVIEW_PATH.exists():
+        return {"schema_version": 1, "reviews": []}
+    from cryptography.fernet import Fernet, InvalidToken
+    try:
+        plaintext = Fernet(human_review_encryption_key()).decrypt(HUMAN_REVIEW_PATH.read_bytes())
+        payload = json.loads(plaintext.decode("utf-8"))
+    except (InvalidToken, UnicodeDecodeError, json.JSONDecodeError, OSError) as exc:
+        raise RuntimeError(
+            "Encrypted human review store could not be authenticated/decrypted; refusing to reset or overwrite it."
+        ) from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("reviews"), list):
+        raise RuntimeError("Decrypted human review store is malformed; refusing to overwrite or reset it.")
+    return payload
+
+
+def save_human_review_store(store: dict[str, Any]) -> None:
+    from cryptography.fernet import Fernet
+    token = Fernet(human_review_encryption_key()).encrypt(
+        json.dumps(store, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    )
+    HUMAN_REVIEW_PATH.parent.mkdir(parents=True, exist_ok=True)
+    temporary = HUMAN_REVIEW_PATH.with_suffix(".enc.tmp")
+    temporary.write_bytes(token)
+    temporary.replace(HUMAN_REVIEW_PATH)
+
+
+def _parse_human_review_message(
+    message_text: str, history: dict[str, Any], store: dict[str, Any],
+    reviewer_id: str, update_id: int,
+) -> dict[str, Any] | None:
+    """Parse a single allowlisted person's eight ratings and explicit verdict."""
+    if not message_text.strip().lower().startswith("/bskreview"):
+        return None
+    payload = message_text.strip()[len("/bskreview"):].strip()
+    pairs = re.findall(r"([a-zA-Z_]+)\s*=\s*([^;|\n]+)", payload)
+    values = {key.lower().strip(): value.strip() for key, value in pairs}
+    reel_id = values.get("reel_id", "").strip()
+    if not reel_id:
+        raise ValueError("reel_id is required. Copy it from the review request.")
+    topic = next(
+        (item for item in reversed(history.get("topics", []))
+         if str(item.get("reel_id", "")) == reel_id),
+        None,
+    )
+    if topic is None:
+        raise ValueError("This Reel ID is not present in the factory history.")
+    human_fallback_eligible = (
+        topic.get("eligible_for_human_review") is True
+        and topic.get("motion_diagnostics_status") == "passed"
+        and topic.get("metadata_ocr_status") == "passed"
+        and topic.get("technical_checks_passed") is True
+    )
+    if topic.get("qa_passed") is not True and not human_fallback_eligible:
+        raise ValueError("This Reel has not passed technical QA or been explicitly routed to the human-review fallback.")
+    ratings: dict[str, float] = {}
+    missing = []
+    for key in audience_qa.HUMAN_DIMENSIONS:
+        raw = values.get(key)
+        if raw is None:
+            missing.append(key)
+            continue
+        try:
+            ratings[key] = float(raw)
+        except ValueError as exc:
+            raise ValueError(key + " must be a number from 1 to 5.") from exc
+    if missing:
+        raise ValueError("Missing ratings: " + ", ".join(missing))
+    verdict = values.get("verdict", "").lower()
+    result = audience_qa.record_human_review(
+        store=store,
+        reel_id=reel_id,
+        reviewer_id=reviewer_id,
+        ratings=ratings,
+        verdict=verdict,
+        notes=values.get("notes", ""),
+        update_id=update_id,
+        hash_salt=human_reviewer_hash_salt(),
+    )
+    minimum = human_review_minimum_responses()
+    summary = audience_qa.summarize_human_reviews(store, reel_id, minimum)
+    topic["human_review_summary"] = summary
+    if topic.get("eligible_for_human_review") is True and topic.get("qa_passed") is not True:
+        fallback_passed = human_review_summary_passes(summary, minimum)
+        topic["human_review_qa_passed"] = fallback_passed
+        topic["qa_passed"] = fallback_passed
+        topic["human_review_qa_completed_at_utc"] = (
+            datetime.now(timezone.utc).isoformat(timespec="seconds") if fallback_passed else None
+        )
+    result.update({"reel_id": reel_id, "title": topic.get("title", ""), "summary": summary})
+    return result
+
+
+def dispatch_human_review_panel(
+    reel_id: str, title: str, video_path: Path,
+    already_sent_hashes: list[str] | None = None,
+    on_progress=None,
+) -> dict[str, Any]:
+    """Send the Reel only to operator-configured, allowlisted private reviewers."""
+    configured_ids = human_reviewer_chat_ids()
+    if not configured_ids:
+        return {"status": "not_configured", "configured_count": 0, "sent_count": 0, "sent_reviewer_hashes": []}
+    reviewer_ids = external_human_reviewer_chat_ids()
+    if not reviewer_ids:
+        raise RuntimeError("The allowlist contains no external reviewers; the owner cannot count as an independent audience reviewer.")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", str(reel_id)):
+        raise ValueError("Unsafe Reel ID for human review distribution.")
+    minimum = human_review_minimum_responses()
+    if len(reviewer_ids) < minimum:
+        raise RuntimeError(
+            "Human reviewer allowlist has " + str(len(reviewer_ids))
+            + " IDs, but " + str(minimum) + " independent responses are required."
+        )
+    salt = human_reviewer_hash_salt()
+    sent_hashes = set(already_sent_hashes or [])
+    failed = 0
+    for reviewer_id in reviewer_ids:
+        reviewer_hash = hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+        if reviewer_hash in sent_hashes:
+            continue
+        instructions = (
+            "BINA SHOR KE — INDEPENDENT HUMAN REVIEW (NOT A PUBLISH REQUEST)\n"
+            + "Reel: " + title[:100] + "\nID: " + reel_id + "\n\n"
+            + "Please watch the FULL Reel once, then reply with all ratings from 1 to 5 "
+            "(1=poor, 5=excellent):\n"
+            + "/bskreview reel_id=" + reel_id
+            + "; hook=1-5; story=1-5; emotion=1-5; visual=1-5; audio=1-5; ending=1-5; "
+            + "clarity=1-5; share_value=1-5; verdict=pass|revise|reject; notes=optional\n\n"
+            + "One independent review per person and Reel. Your response is recorded separately "
+            + "from AI simulation. Do not share private or identifying information."
+        )
+        try:
+            with video_path.open("rb") as handle:
+                telegram_post(
+                    "sendVideo",
+                    data={"chat_id": reviewer_id, "supports_streaming": "true", "caption": instructions[:1024]},
+                    files={"video": (video_path.name, handle, "video/mp4")},
+                    timeout=240,
+                )
+        except Exception as exc:
+            failed += 1
+            log("Human review delivery failed for an allowlisted reviewer: " + str(exc)[:250])
+            continue
+        sent_hashes.add(reviewer_hash)
+        if callable(on_progress):
+            sent_for_panel = len(sent_hashes.intersection({
+                hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+                for reviewer_id in reviewer_ids
+            }))
+            on_progress({
+                "configured_count": len(reviewer_ids),
+                "sent_count": sent_for_panel,
+                "pending_count": len(reviewer_ids) - sent_for_panel,
+                "status": "sending",
+                "sent_reviewer_hashes": sorted(sent_hashes),
+                "failed_delivery_attempts": failed,
+                "real_human_reviews_received": 0,
+            })
+    pending = len(reviewer_ids) - len(sent_hashes.intersection({
+        hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+        for reviewer_id in reviewer_ids
+    }))
+    return {
+        "status": "sent" if failed == 0 and pending == 0 else "partial",
+        "configured_count": len(reviewer_ids),
+        "sent_count": len(sent_hashes.intersection({
+            hashlib.sha256((salt + ":" + reviewer_id).encode("utf-8")).hexdigest()
+            for reviewer_id in reviewer_ids
+        })),
+        "pending_count": pending,
+        "sent_reviewer_hashes": sorted(sent_hashes),
+        "failed_delivery_attempts": failed,
+        "real_human_reviews_received": 0,
+    }
+
+
 def append_performance_csv(record: dict[str, Any]) -> None:
     PERFORMANCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     fields = ["observed_at_ist", "title", "pillar", "views_24h", "reach", "average_watch_time_seconds", "completion_rate_percent", "shares", "saves", "comments", "profile_visits", "new_follows", "new_follows_per_1000_views", "source"]
@@ -3391,6 +3940,18 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
     """Read only the pinned owner's private /insights and /published messages."""
     chat_id = telegram_chat_id()
     state = load_telegram_state()
+    reviewer_ids = set(human_reviewer_chat_ids())
+    reviewer_ids.discard(str(chat_id))  # Owner approval is tracked separately from panel votes.
+    if reviewer_ids:
+        minimum = human_review_minimum_responses()
+        if len(reviewer_ids) < minimum:
+            raise RuntimeError(
+                "Configured reviewer allowlist has " + str(len(reviewer_ids))
+                + " IDs but requires at least " + str(minimum) + "."
+            )
+        human_reviewer_hash_salt()
+        human_review_encryption_key()
+    human_review_store = load_human_review_store()
     offset = int(state.get("last_update_id", 0)) + 1
     updates = telegram_get_updates(offset=offset)
     highest = int(state.get("last_update_id", 0))
@@ -3401,9 +3962,52 @@ def process_telegram_feedback(history: dict[str, Any]) -> int:
         highest = max(highest, update_id)
         message = update.get("message", {})
         chat = message.get("chat", {})
-        if str(chat.get("id", "")) != str(chat_id) or chat.get("type") != "private":
+        incoming_chat_id = str(chat.get("id", ""))
+        if chat.get("type") != "private":
             continue
         text_value = str(message.get("text", "")).strip()
+        if text_value.lower().startswith("/reviewer_id") and incoming_chat_id != str(chat_id):
+            telegram_post("sendMessage", data={
+                "chat_id": incoming_chat_id,
+                "text": "Your Telegram private chat ID is: " + incoming_chat_id
+                + "\nShare this ID with the BINA SHOR KE owner only if you agree to receive private Reel review requests.",
+            }, timeout=25)
+            continue
+        if incoming_chat_id in reviewer_ids:
+            if text_value == "/start" or text_value.startswith("/start "):
+                telegram_post("sendMessage", data={
+                    "chat_id": incoming_chat_id,
+                    "text": "You are an allowlisted BINA SHOR KE reviewer. Watch the full Reel sent to you and reply once using the /bskreview format in its caption. Ratings are stored as an independent human review; this bot never publishes.",
+                }, timeout=25)
+                continue
+            if text_value.lower().startswith("/bskreview"):
+                try:
+                    record = _parse_human_review_message(
+                        text_value, history, human_review_store, incoming_chat_id, update_id
+                    )
+                    if record:
+                        if record.get("saved"):
+                            save_human_review_store(human_review_store)
+                            history_changed = True
+                            summary = record["summary"]
+                            reply = (
+                                "✅ Your human review is saved for " + record["title"] + ". "
+                                + "Independent reviews: " + str(summary["count"]) + "/"
+                                + str(summary["minimum_responses"]) + " required. "
+                                + "Verdict totals: " + json.dumps(summary["verdict_counts"])
+                            )
+                        else:
+                            reply = "ℹ️ Your review for this Reel was already recorded; duplicate votes are not counted."
+                        telegram_post("sendMessage", data={"chat_id": incoming_chat_id, "text": reply}, timeout=25)
+                except Exception as exc:
+                    telegram_post("sendMessage", data={
+                        "chat_id": incoming_chat_id,
+                        "text": "⚠️ Human review not saved: " + str(exc)[:700],
+                    }, timeout=25)
+                continue
+            continue
+        if incoming_chat_id != str(chat_id):
+            continue
         if text_value == "/start" or text_value.startswith("/start "):
             telegram_post("sendMessage", data={"chat_id": chat_id, "text": "BINA SHOR KE Studio linked. After the final Reel review use /approve title=Exact Title or /reject title=Exact Title; after a Facebook upload use /published title=Exact Title; after about 24h use /insights. Approval only marks your review decision; it never publishes automatically."}, timeout=25)
             continue
@@ -3624,6 +4228,7 @@ def write_pack(concept: dict[str, Any], build: dict[str, Any], reel_dir: Path, s
 def send_to_telegram(
     concept: dict[str, Any], build: dict[str, Any], reel_dir: Path, slot: datetime,
     ordinal: int, total: int, progress: dict[str, Any] | None = None, on_progress=None,
+    review_id: str | None = None,
 ) -> dict[str, Any]:
     """Deliver one Reel to the owner's pinned private chat, checkpointing each successful step."""
     chat_id = telegram_chat_id()
@@ -3651,6 +4256,26 @@ def send_to_telegram(
         checkpoint("cover")
 
     if not steps.get("message"):
+        audience_report = build.get("audience_qa", {})
+        audience_score = audience_report.get("modeled_audience_fit_score_0_to_100") if isinstance(audience_report, dict) else None
+        strongest = audience_report.get("strongest_evidence_dimensions", []) if isinstance(audience_report, dict) else []
+        weakest = audience_report.get("weakest_evidence_dimensions", []) if isinstance(audience_report, dict) else []
+        strength_names = ", ".join(str(item.get("dimension", "")) for item in strongest[:2] if isinstance(item, dict))
+        weakness_names = ", ".join(str(item.get("dimension", "")) for item in weakest[:2] if isinstance(item, dict))
+        audience_line = (
+            "🧪 Synthetic 10K profile fit: " + str(audience_score) + "/100 (not real people or a view prediction)\n"
+            + "Strongest evidence: " + (strength_names or "not available") + "\n"
+            + "Weakest evidence to inspect: " + (weakness_names or "not available") + "\n"
+            if isinstance(audience_report, dict)
+            and audience_report.get("status") == "completed"
+            and audience_score is not None
+            else (
+                "⚠ AI evidence incomplete: no synthetic qualification score is issued. "
+                "This Reel is routed to the independent human panel; human pass and owner approval are still required.\n"
+                if build.get("human_review_fallback_required") is True
+                else "⚠ AI evidence incomplete: no audience pass is issued. Human review is still required.\n"
+            )
+        )
         caption_message = (
             f"📌 CAPTION — copy/paste\n\n{safe_caption(concept)}\n\n"
             f"🕒 Proposed test slot: {slot.strftime('%A %d %B, %I:%M %p IST')}\n"
@@ -3659,7 +4284,8 @@ def send_to_telegram(
             f"🗣 Hindi ASR check: {build['technical'].get('local_hindi_asr_transcript_qa', {}).get('status', 'not available')} | "
             f"CER: {build['technical'].get('local_hindi_asr_transcript_qa', {}).get('character_error_rate', 'n/a')}\n"
             f"🎞 Full-video scan: {build['technical'].get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status', 'not available')}\n"
-            "🧾 Visual credits: open publish.txt; paste the suggested Pexels creator credit in the first comment where practical.\n"
+            + audience_line
+            + "🧾 Visual credits: open publish.txt; paste the suggested Pexels creator credit in the first comment where practical.\n"
             "🔎 Final check: watch once. If it passes, send /approve title=Exact Title; if not, send /reject title=Exact Title. No editing is expected unless the QA report flags a real defect.\n"
             "📤 After approval, upload manually to Facebook. The factory does not auto-publish.\n"
             "🤖 If Meta's current upload flow asks for AI disclosure for realistic synthetic media, disclose it accurately.\n"
@@ -3673,6 +4299,27 @@ def send_to_telegram(
         with kit.open("rb") as handle:
             telegram_post("sendDocument", data={"chat_id": chat_id, "caption": "Caption, QA report and visual credits."}, files={"document": (kit.name, handle, "text/plain; charset=utf-8")}, timeout=90)
         checkpoint("publish_kit")
+
+    if review_id:
+        def persist_human_panel_progress(panel_progress: dict[str, Any]) -> None:
+            steps["human_review_sent_reviewer_hashes"] = panel_progress.get("sent_reviewer_hashes", [])
+            steps["human_review_panel"] = {
+                key: value for key, value in panel_progress.items() if key != "sent_reviewer_hashes"
+            }
+            if callable(on_progress):
+                on_progress(dict(steps))
+
+        panel = dispatch_human_review_panel(
+            review_id, title, video_path,
+            already_sent_hashes=steps.get("human_review_sent_reviewer_hashes", []),
+            on_progress=persist_human_panel_progress,
+        )
+        steps["human_review_panel"] = {
+            key: value for key, value in panel.items() if key != "sent_reviewer_hashes"
+        }
+        steps["human_review_sent_reviewer_hashes"] = panel.get("sent_reviewer_hashes", [])
+        if callable(on_progress):
+            on_progress(dict(steps))
     return steps
 
 

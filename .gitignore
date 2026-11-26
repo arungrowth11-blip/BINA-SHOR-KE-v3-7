@@ -16,3 +16,8 @@ Thumbs.db
 
 # Binary character rigs, textures and rendered caches stay outside Git.
 assets/characters/
+
+# Human reviewer payloads must never be committed in plaintext.
+data/human_reviews.json
+data/human_reviews.json.tmp
+data/human_reviews.enc.tmp

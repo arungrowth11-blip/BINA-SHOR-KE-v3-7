@@ -1,6 +1,6 @@
 # BINA SHOR KE — AI Cinematic Story Factory v3.7 P0 Reliability
 
-A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels. The selected primary architecture is **image-first 2.5D motion-comic cinema**: write and approve the story, generate and measure Hindi speaker WAVs, produce one illustrated FLUX still per narrative beat, derive Depth Anything V2 maps, create deterministic 2.5D parallax clips, then assemble a 30 FPS Reel. Wan2.2 remains as a backward-compatible legacy path for older manifests only. The new image-first path is implemented in this feature branch but is **not yet live GPU-qualified**. Automated editorial, post-production, OCR/visual/audio QA, checkpoint recovery and private Telegram delivery remain in scope. **Facebook publishing stays manual.**
+A public GitHub source repository with GitHub Actions + Kaggle GPU automation for original Hindi faceless Reels. The selected primary architecture is **image-first 2.5D motion-comic cinema**: write and approve the story, generate and measure Hindi speaker WAVs, produce one illustrated FLUX still per narrative beat, derive Depth Anything V2 maps, create deterministic 2.5D parallax clips, then assemble a 30 FPS Reel. Wan2.2 remains as a backward-compatible legacy path for older manifests only. The new image-first path is implemented in this feature branch but is **not yet live GPU-qualified**. Automated editorial, post-production, OCR/visual/audio QA, checkpoint recovery and private Telegram delivery remain in scope. **Facebook publishing stays manual.**
 
 ## Architecture
 
@@ -11,6 +11,7 @@ A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels
 - **Legacy renderer:** Wan2.2 TI2V-5B Q4_K_M GGUF remains available for already-created legacy jobs and older manifests; it is not the default generation route.
 - **Qualification status:** image-first workflow has offline code/tests but still requires a real Kaggle one-Reel render, model/runtime lock, measured GPU benchmark, output inspection and human visual approval before weekly batch qualification.
 - **Post:** FFmpeg/Pillow, custom typography, subtitles, overlays, cover and locally synthesized ambience.
+- **Final AAC audio QA:** after the final encode, FFmpeg measures integrated loudness and true peak on the actual output file. Accepted range is -18 to -14 LUFS with a -1 dBTP ceiling. At most one 48 kHz AAC remaster is allowed (target -16 LUFS / -2.5 dBTP); the encoded result is measured again. If measurement is unavailable or the remaster remains outside limits, delivery fails closed.
 - **Delivery/learning:** private Telegram; `/approve` or `/reject` records the final owner decision; manual publishing; `/published` and `/insights` feed measured history.
 
 ## Voice-first dialogue and 3D pilot
@@ -24,6 +25,27 @@ A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels
 
 Twelve rotating narrative devices reduce repeated formula. Every concept requires a small lived-in human detail, a character contradiction, the cost of a choice and an emotional aftertaste. An independent critic scores human specificity, emotional resonance, dialogue naturalness, originality, payoff, story progression, visual feasibility and platform safety. Weak concepts are revised once, then rejected. The 0–100 “10K-ambition” index is an editorial readiness rubric, **not a view prediction**.
 
+## Human Reality QA and independent audience review
+
+Every finalized Reel receives a reproducible **10,000-profile synthetic audience simulation** using all 13 editorial-critic dimensions and all 8 rendered-frame VLM dimensions, plus objective technical gates. It reports strengths, weak dimensions and preference-segment reactions. The seed is stable for the same Reel/evidence, and missing evidence is not fabricated. These profiles are simulated preferences, **not real people**; intent percentages are not reach, watch-time, virality or view predictions. This is an evidence-conditioned Monte Carlo model, not 10,000 independent LLM essays or a calibrated platform-performance predictor.
+
+**Normal path:** complete AI evidence and technical QA must pass. The owner must watch the full Reel, obtain separate Pass responses from three independent external viewers, fix any reported shortcomings, and only then send /approve.
+
+**Manual external-review fallback:** if AI semantic evidence is incomplete, delivery is allowed only when deterministic local visual-integrity checks pass, technical checks pass, the full-video motion/black/freeze scan passes, and metadata OCR passes. The Reel is explicitly labelled **AI EVIDENCE INCOMPLETE**. This path is not an AI-QA pass and cannot override a failed objective gate.
+
+The owner watches the entire Reel and asks **three independent external people** to watch it separately. Ask each only for Pass/Fail and what was lacking. No name, Telegram ID, numeric score or other reviewer identity is collected by the bot or stored in the repository. If anyone says Fail, do not approve: send the shortcomings for correction and repeat the review on the corrected Reel. Only when all three pass and the owner has watched the full Reel may the owner send /approve title=Exact Reel Title.
+
+For this fallback, /approve records an explicit **owner-reported attestation** that three independent viewers passed. It is marked owner_attested_not_bot_verified; the software does not claim to have authenticated or independently received their votes. No extra reviewer secrets or Telegram panel setup are required. Facebook publishing remains manual; nothing auto-publishes.
+
+A human opinion cannot override failed technical checks, missing full-video motion diagnostics, OCR failure, corrupt frames or other hard QA failures.
+## Telegram state privacy
+
+The Telegram owner chat binding is encrypted at rest in `data/telegram_state.json` using Fernet. Its key is deterministically derived from the already-required `TELEGRAM_BOT_TOKEN` with domain separation, so no additional GitHub secret is required. The numeric update cursor remains persisted beside the ciphertext, preserving Telegram polling and duplicate-update protection. The migration keeps the existing owner binding and cursor; it does not delete or reset either value.
+
+A push that changes `scripts/producer.py` on `feature/human-reality-qa-engine` automatically runs the Telegram feedback workflow, which first migrates any legacy plaintext owner binding and commits the encrypted state before polling updates. Normal weekly/GPU/sync writes also keep the owner binding encrypted. If the bot token is rotated, state decryption fails closed rather than silently discarding the owner binding or cursor; migrate the state before rotating that token.
+
+**Historical privacy limitation:** earlier public commits may still contain the legacy plaintext Telegram chat identifier. This change protects the current state and future commits; it does not rewrite public Git history. The identifier is not a bot credential, but its historical exposure cannot be undone without a separate history rewrite and coordinated clone recovery. This change deliberately does not rewrite history, change repository visibility, or remove any tracked state.
+
 ## No-code setup
 
 See [`README_HINDI.md`](README_HINDI.md) for the Windows/GitHub Desktop walkthrough. Required Actions secrets:
@@ -35,7 +57,7 @@ See [`README_HINDI.md`](README_HINDI.md) for the Windows/GitHub Desktop walkthro
 
 Recommended optional free text keys: `GROQ_API_KEY` and `MISTRAL_API_KEY`. Cloudflare uses `CF_ACCOUNT_ID`, `CF_API_TOKEN`, and exact opt-in secret `CF_WORKERS_AI_FREE_ONLY=YES`; it is OFF by default because Workers Paid usage above the free allocation can be billable. Do not enable it unless you have confirmed the account is on Workers Free. Do not configure billing/Pay-as-you-go for Gemini, Groq or Mistral. Disable GitHub Actions paid overage.
 
-Run: `preflight` → `plan-one` → confirm the Reel is QA-passed and delivered to Telegram → send `/approve title=Exact Reel Title` → run `plan-week`. The workflow re-checks Telegram updates and requires the persistent one-Reel qualification record plus a qualified GPU benchmark before dispatching a weekly batch. The system has not yet been live-tested against your API/GPU/Telegram accounts. Free provider quotas and Kaggle GPU availability may change; the software stops rather than selecting a paid fallback.
+Run: `preflight` → `plan-one` → receive the Reel in Telegram → complete the owner full-playback and three-person Pass/Fail review → send `/approve title=Exact Reel Title` → run `plan-week`. The workflow re-checks Telegram updates and requires the persistent one-Reel qualification record plus a qualified GPU benchmark before dispatching a weekly batch. The system has not yet been live-tested against your API/GPU/Telegram accounts. Free provider quotas and Kaggle GPU availability may change; the software stops rather than selecting a paid fallback.
 
 ## Important limitations
 

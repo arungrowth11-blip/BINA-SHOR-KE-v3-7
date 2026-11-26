@@ -29,7 +29,9 @@ TZ = ZoneInfo('Asia/Kolkata')
 sys.path.insert(0, str(ROOT / 'scripts'))
 import producer  # noqa: E402
 import voice_first  # noqa: E402
+import factory_supervisor  # noqa: E402
 import character_library  # noqa: E402
+import audience_qa  # noqa: E402
 
 DEFAULT_KAGGLE_SLUG = 'bina-shor-ke-studio-video'
 
@@ -218,19 +220,41 @@ def build_kaggle_kernel(manifest: dict):
     return kernel_dir
 
 
-def ensure_reel_qa_passed(build: dict) -> None:
+def ensure_reel_qa_passed(build: dict) -> str:
+    """Return the review path; incomplete AI semantics may only be routed to real humans."""
     technical = build.get('technical', {}) if isinstance(build, dict) else {}
     if not isinstance(technical, dict) or technical.get('technical_checks_passed') is not True:
         raise RuntimeError('Final Reel technical QA did not pass; refusing Telegram delivery and weekly qualification.')
     visual = technical.get('rendered_frame_visual_qa')
-    if not isinstance(visual, dict) or visual.get('status') != 'reviewed':
-        status = visual.get('status', 'missing') if isinstance(visual, dict) else 'missing'
+    if not isinstance(visual, dict):
+        raise RuntimeError('Rendered-frame QA result is missing; refusing delivery.')
+    visual_status = visual.get('status')
+    if visual_status == 'reviewed':
+        if visual.get('critical_issue') is not False or visual.get('missing_required_scores'):
+            raise RuntimeError('Rendered-frame visual QA is missing required scores or reports a critical issue.')
+        review_path = 'ai_reviewed'
+    elif visual_status == 'local_pass_human_review':
+        local = visual.get('local_visual_diagnostics')
+        if (
+            visual.get('review_mode') != 'deterministic_local_fallback'
+            or visual.get('human_review_required') is not True
+            or not isinstance(local, dict)
+            or local.get('engine') != 'bsk_local_frame_qa_v1'
+            or local.get('status') != 'passed'
+            or int(local.get('frames_scanned', 0) or 0) < 2
+            or local.get('hard_failures')
+        ):
+            raise RuntimeError(
+                'Local visual fallback did not pass its deterministic frame-integrity checks; no human override is allowed.'
+            )
+        # The owner collects independent external opinions manually after delivery.
+        # No reviewer identity, Telegram ID or reviewer-specific secret is required.
+        review_path = 'human_review_fallback'
+    else:
         raise RuntimeError(
-            f'Rendered-frame visual QA is {status}; only a completed reviewed result can pass. '
-            'A QA outage or incomplete scorecard is not a pass.'
+            f'Rendered-frame visual QA is {visual_status}; a technical or AI review outage is not a pass. '
+            'A deterministic local pass plus owner-managed manual external human review is required for fallback.'
         )
-    if visual.get('critical_issue') is not False or visual.get('missing_required_scores'):
-        raise RuntimeError('Rendered-frame visual QA is missing required scores or reports a critical issue.')
     motion = visual.get('full_video_motion_diagnostics')
     if not isinstance(motion, dict) or motion.get('status') != 'passed' or motion.get('full_video_scanned') is not True:
         status = motion.get('status', 'missing') if isinstance(motion, dict) else 'missing'
@@ -243,12 +267,20 @@ def ensure_reel_qa_passed(build: dict) -> None:
         raise RuntimeError(
             f'On-screen metadata OCR is {status}; OCR must complete with zero forbidden prompt labels.'
         )
+    return review_path
 
 def ensure_complete_telegram_delivery(steps: dict) -> None:
     required = ('video', 'cover', 'message', 'publish_kit')
     if not isinstance(steps, dict) or not all(steps.get(step) is True for step in required):
         missing = [step for step in required if not isinstance(steps, dict) or steps.get(step) is not True]
         raise RuntimeError('Telegram delivery is incomplete; missing successful step(s): ' + ', '.join(missing))
+    configured_reviewers = producer.external_human_reviewer_chat_ids()
+    if configured_reviewers:
+        panel = steps.get('human_review_panel')
+        if not isinstance(panel, dict) or panel.get('status') != 'sent' or int(panel.get('pending_count', 1) or 0) != 0:
+            raise RuntimeError(
+                'Configured human review panel delivery is incomplete; the finalizer will retry only the unsent reviewers.'
+            )
 
 def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
     """Require an actually delivered, QA-passed, owner-approved one-Reel pilot."""
@@ -257,8 +289,28 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
         isinstance(qualification, dict)
         and qualification.get('status') == 'qualified'
         and qualification.get('qa_passed') is True
+        and qualification.get('visual_qa_status') in {'reviewed', 'local_pass_human_review'}
+        and (
+            qualification.get('visual_qa_status') != 'local_pass_human_review'
+            or qualification.get('human_review_qa_passed') is True
+        )
         and qualification.get('telegram_delivered') is True
         and qualification.get('owner_approved') is True
+        and qualification.get('manual_external_review_required') is True
+        and qualification.get('manual_external_review_passed') is True
+        and isinstance(qualification.get('manual_external_review_attestation'), dict)
+        and qualification['manual_external_review_attestation'].get('status') == 'pass'
+        and int(qualification['manual_external_review_attestation'].get('reported_independent_reviewers', 0) or 0) >= 3
+        and (
+            (
+                qualification['manual_external_review_attestation'].get('verification') == 'owner_attested_not_bot_verified'
+                and qualification['manual_external_review_attestation'].get('attested_by_owner') is True
+            )
+            or (
+                qualification['manual_external_review_attestation'].get('verification') == 'bot_verified'
+                and qualification['manual_external_review_attestation'].get('attested_by_owner') is False
+            )
+        )
         and bool(qualification.get('reel_id'))
         and bool(qualification.get('approved_at_ist'))
     )
@@ -291,43 +343,43 @@ def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
     characters = concept.get('characters', [])
     if not characters:
         raise RuntimeError('Voice-first screenplay has no cast; refusing GPU dispatch.')
-    # Character metadata is persisted only after the complete voice-first storyboard passes.
-    with tempfile.TemporaryDirectory(prefix='bsk-voice-preflight-') as temp_root:
-        temp_root = Path(temp_root)
-        for beat_index, beat in enumerate(concept['beats'], start=1):
-            segments = beat.get('speech_segments')
-            if not isinstance(segments, list):
-                raise RuntimeError(f'Beat {beat_index} has no structured speech_segments array.')
-            measured = {}
-            for line_index, segment in enumerate(segments, start=1):
-                segment_id = str(segment.get('segment_id') or f'beat_{beat_index:02d}_line_{line_index:02d}')
-                segment['segment_id'] = segment_id
-                voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
-                voice_direction = voice_first.segment_voice_direction(segment)
-                destination = temp_root / f'{reel_id}_{segment_id}_{segment.get("speaker_id", "speaker")}.wav'
-                # Cache key includes transcript, performance direction and voice identity.
-                producer.ensure_tts_wav(
-                    str(segment['text']), destination,
-                    voice_direction=voice_direction, voice_name=voice_name,
-                )
-                duration = voice_first.wav_duration(destination)
-                segment['duration_seconds'] = round(duration, 4)
-                measured[segment_id] = duration
-                log(f'[{concept.get("title", reel_id)}] Voice locked: {segment_id} / {voice_name} / {duration:.2f}s')
-            timing = voice_first.build_scene_timing_plan(segments, measured)
-            beat['voice_timing'] = timing
-            beat['target_frames'] = timing['target_frames']
-            log(
-                f'[{concept.get("title", reel_id)}] Scene {beat_index} timing locked: '
-                f'{timing["target_frames"]} frames / {timing["target_duration_seconds"]:.2f}s; '
-                f'{len(segments)} speaker turn(s), no dialogue truncation.'
-            )
+    # Persist the exact WAV bytes used for measurement; finalization verifies these bytes.
+    voice_root = ROOT / 'data' / 'voice_assets' / reel_id
+    voice_root.mkdir(parents=True, exist_ok=True)
+    asset_count = 0
+    for beat_index, beat in enumerate(concept['beats'], start=1):
+        segments = beat.get('speech_segments')
+        if not isinstance(segments, list):
+            raise RuntimeError(f'Beat {beat_index} has no structured speech_segments array.')
+        measured = {}
+        for line_index, segment in enumerate(segments, start=1):
+            segment_id = str(segment.get('segment_id') or f'beat_{beat_index:02d}_line_{line_index:02d}')
+            segment['segment_id'] = segment_id
+            voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
+            voice_direction = voice_first.segment_voice_direction(segment)
+            safe_segment = re.sub(r'[^a-zA-Z0-9_-]+', '_', segment_id)
+            safe_speaker = re.sub(r'[^a-zA-Z0-9_-]+', '_', str(segment.get('speaker_id', 'speaker')))
+            destination = voice_root / f'{safe_segment}_{safe_speaker}.wav'
+            producer.ensure_tts_wav(str(segment['text']), destination, voice_direction=voice_direction, voice_name=voice_name)
+            duration = voice_first.wav_duration(destination)
+            segment['duration_seconds'] = round(duration, 4)
+            segment['voice_asset'] = {
+                'schema_version': 1, 'path': destination.relative_to(ROOT).as_posix(),
+                'sha256': producer.file_sha256(destination), 'duration_seconds': round(duration, 4),
+                'model': producer.GEMINI_TTS_MODEL, 'voice': voice_name,
+                'cache_fingerprint': producer.tts_cache_fingerprint(str(segment['text']), voice_direction, voice_name),
+            }
+            asset_count += 1
+            measured[segment_id] = duration
+            log(f'[{concept.get("title", reel_id)}] Voice locked: {segment_id} / {voice_name} / {duration:.2f}s')
+        timing = voice_first.build_scene_timing_plan(segments, measured)
+        beat['voice_timing'] = timing
+        beat['target_frames'] = timing['target_frames']
+        log(f'[{concept.get("title", reel_id)}] Scene {beat_index} timing locked: {timing["target_frames"]} frames / {timing["target_duration_seconds"]:.2f}s; {len(segments)} speaker turn(s), no dialogue truncation.')
     concept['voice_first_plan'] = {
-        'status': 'voice_measured_before_video',
-        'audio_model': producer.GEMINI_TTS_MODEL,
-        'cache_key_version': 2,
-        'scene_count': len(concept['beats']),
-        'dialogue_truncated': False,
+        'status': 'voice_measured_before_video', 'audio_model': producer.GEMINI_TTS_MODEL,
+        'cache_key_version': 4, 'voice_asset_schema_version': 1, 'voice_asset_count': asset_count,
+        'scene_count': len(concept['beats']), 'dialogue_truncated': False,
         'video_duration_source': 'measured_voice_audio',
     }
     return concept
@@ -489,6 +541,12 @@ def plan_week(reel_count: int = 3) -> int:
     }
     write_json(PENDING, {
         'job_id': job_id, 'created_at_ist': manifest['created_at_ist'], 'status': 'dispatching',
+        'plan_workflow_run_id': str(os.getenv('GITHUB_RUN_ID', '')).strip(),
+        'plan_workflow_run_attempt': int(os.getenv('GITHUB_RUN_ATTEMPT', '1') or '1'),
+        'voice_assets_artifact_name': (
+            f"bsk-voice-assets-{str(os.getenv('GITHUB_RUN_ID', '')).strip()}"
+            if str(os.getenv('GITHUB_RUN_ID', '')).strip() else ''
+        ),
         'kaggle_kernel_id': kaggle_kernel_id(), 'manifest': manifest, 'reels': planned,
         'policy': {'paid_fallback': False, 'auto_facebook_publish': False, 'max_reels': reel_count},
     })
@@ -1107,12 +1165,257 @@ def verify_or_lock_image_toolchain(gpu_manifest: dict, job_id: str | None = None
     return existing
 
 
+def pending_gpu_identity_error(pending: dict) -> str | None:
+    """Reject stale/cross-kernel pending state before polling or retrying."""
+    job_id = str(pending.get('job_id', '')).strip()
+    if not job_id:
+        return 'Pending GPU state has no job_id.'
+    manifest = pending.get('manifest')
+    if not isinstance(manifest, dict):
+        return 'Pending GPU state has no embedded manifest.'
+    if str(manifest.get('job_id', '')).strip() != job_id:
+        return 'Pending job_id does not match its embedded worker manifest.'
+    recorded_kernel = str(pending.get('kaggle_kernel_id', '')).strip()
+    try:
+        configured_kernel = kaggle_kernel_id()
+    except Exception as exc:
+        return f'Configured Kaggle kernel identity is unavailable: {exc}'
+    if not recorded_kernel or recorded_kernel != configured_kernel:
+        return (
+            'Pending Kaggle kernel identity does not match the configured account/slug '
+            f'(pending={recorded_kernel or "missing"}, configured={configured_kernel}).'
+        )
+    return None
+
+
+def gpu_output_identity_error(
+    gpu_manifest: dict,
+    pending: dict,
+    *,
+    require_complete: bool = False,
+) -> str | None:
+    """Prove downloaded Kaggle output belongs to this exact job, renderer and scene set."""
+    expected_job_id = str(pending.get('job_id', '')).strip()
+    actual_job_id = str(gpu_manifest.get('job_id', '')).strip()
+    if not expected_job_id or actual_job_id != expected_job_id:
+        return (
+            'Downloaded Kaggle output job_id mismatch: '
+            f'expected {expected_job_id or "missing"}, received {actual_job_id or "missing"}.'
+        )
+
+    pending_manifest = pending.get('manifest') if isinstance(pending.get('manifest'), dict) else {}
+    expected_mode = str(pending_manifest.get('generation_mode', '')).strip()
+    actual_mode = str(gpu_manifest.get('generation_mode', '')).strip()
+    if expected_mode and actual_mode != expected_mode:
+        return (
+            'Downloaded Kaggle renderer mismatch: '
+            f'expected {expected_mode}, received {actual_mode or "missing"}.'
+        )
+    if not require_complete:
+        return None
+    if gpu_manifest.get('status') != 'complete':
+        return 'Downloaded GPU manifest is not marked complete.'
+
+    expected_pairs: list[tuple[str, int]] = []
+    reels = pending.get('reels') if isinstance(pending.get('reels'), list) else []
+    for reel in reels:
+        if not isinstance(reel, dict):
+            return 'Pending Reel inventory contains a malformed entry.'
+        reel_id = str(reel.get('reel_id', '')).strip()
+        concept = reel.get('concept') if isinstance(reel.get('concept'), dict) else {}
+        beats = concept.get('beats') if isinstance(concept.get('beats'), list) else []
+        if not reel_id or not beats:
+            return 'Pending Reel inventory is missing a Reel ID or scene beats.'
+        expected_pairs.extend((reel_id, index) for index in range(1, len(beats) + 1))
+
+    if not expected_pairs or len(set(expected_pairs)) != len(expected_pairs):
+        return 'Pending Reel inventory is empty or contains duplicate Reel/scene identities.'
+
+    rows = gpu_manifest.get('scenes')
+    if not isinstance(rows, list) or len(rows) != len(expected_pairs):
+        return (
+            'Downloaded GPU scene inventory count mismatch: '
+            f'expected {len(expected_pairs)}, received {len(rows) if isinstance(rows, list) else 0}.'
+        )
+    try:
+        actual_pairs = [
+            (str(row.get('reel_id', '')).strip(), int(row.get('scene_index', 0)))
+            for row in rows if isinstance(row, dict)
+        ]
+    except (TypeError, ValueError):
+        return 'Downloaded GPU scene inventory contains an invalid scene index.'
+    if len(actual_pairs) != len(rows) or sorted(actual_pairs) != sorted(expected_pairs):
+        return 'Downloaded GPU scene identities do not exactly match the pending Reel manifest.'
+
+    if actual_mode == 'still_image_first':
+        if any(row.get('media_type') != 'image/png' for row in rows):
+            return 'Image-first GPU output contains a non-PNG source scene.'
+        parallax_rows = gpu_manifest.get('parallax_scenes')
+        if not isinstance(parallax_rows, list) or len(parallax_rows) != len(expected_pairs):
+            return 'Image-first depth-parallax inventory is incomplete or duplicated.'
+        try:
+            parallax_pairs = [
+                (str(row.get('reel_id', '')).strip(), int(row.get('scene_index', 0)))
+                for row in parallax_rows if isinstance(row, dict)
+            ]
+        except (TypeError, ValueError):
+            return 'Image-first depth-parallax inventory contains an invalid scene index.'
+        if len(parallax_pairs) != len(parallax_rows) or sorted(parallax_pairs) != sorted(expected_pairs):
+            return 'Image-first depth-parallax identities do not exactly match the pending Reel manifest.'
+
+    return None
+
+
+def fail_gpu_output_identity(pending: dict, reason: str) -> int:
+    """Persist a terminal identity blocker; never retry-finalize or mix unrelated GPU files."""
+    message = f'GPU output identity validation failed: {reason}'
+    pending['status'] = 'gpu_failed'
+    pending['gpu_error'] = message[:5000]
+    pending['gpu_output_identity_failure_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    write_json(PENDING, pending)
+    alert_failure(
+        'BINA SHOR KE stopped safely: downloaded GPU output could not be tied to the active Reel job. '
+        'No scenes were consumed, no Telegram delivery occurred, and no paid fallback was used. '
+        + reason[:900]
+    )
+    return 1
+
+
+def verify_finalization_voice_assets(pending: dict | None = None) -> int:
+    """Verify original narration assets before rendering; never synthesize replacements."""
+    state = pending if isinstance(pending, dict) else (load_json(PENDING, {}) or {})
+    verified = 0
+    for reel in state.get('reels', []):
+        concept = reel.get('concept') if isinstance(reel.get('concept'), dict) else {}
+        voice_plan = concept.get('voice_first_plan') if isinstance(concept.get('voice_first_plan'), dict) else {}
+        for beat_index, beat in enumerate(concept.get('beats', []), start=1):
+            if not isinstance(beat, dict):
+                raise RuntimeError(f"Reel {reel.get('reel_id')} beat {beat_index} is malformed.")
+            segments = beat.get('speech_segments')
+            if isinstance(segments, list) and segments:
+                for line_index, segment in enumerate(segments, start=1):
+                    segment_id = str(segment.get('segment_id') or f"beat_{beat_index:02d}_line_{line_index:02d}")
+                    if isinstance(segment.get('voice_asset'), dict):
+                        producer.validate_locked_voice_asset(segment)
+                        verified += 1
+                        continue
+                    if int(voice_plan.get('voice_asset_schema_version', 0) or 0) >= 1:
+                        raise RuntimeError(
+                            f"Locked voice-first plan is missing immutable WAV metadata for {segment_id}; "
+                            "refusing broad cache fallback or TTS regeneration."
+                        )
+                    narration = str(segment.get('text') or '')
+                    if not narration.strip():
+                        raise RuntimeError(f"Voice segment {segment_id} has no narration text.")
+                    direction = voice_first.segment_voice_direction(segment)
+                    voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
+                    fingerprint = producer.tts_cache_fingerprint(narration, direction, voice_name)
+                    wav_path = producer.TTS_CACHE_DIR / f"{fingerprint}.wav"
+                    sidecar = producer.TTS_CACHE_DIR / f"{fingerprint}.wav.sha256"
+                    if (not wav_path.is_file() or not sidecar.is_file()
+                            or sidecar.read_text(encoding='ascii').strip() != fingerprint
+                            or not producer._valid_tts_wav(wav_path)):
+                        raise RuntimeError(
+                            f"Exact Director-run voice cache is missing or invalid for {segment_id}; "
+                            "finalization stopped before any TTS API request."
+                        )
+                    measured = voice_first.wav_duration(wav_path)
+                    expected = float(segment.get('duration_seconds') or 0)
+                    if expected <= 0 or abs(measured - expected) > 0.15:
+                        raise RuntimeError(
+                            f"Exact Director-run WAV duration mismatch for {segment_id}: "
+                            f"planned {expected:.3f}s, cached {measured:.3f}s; refusing regeneration."
+                        )
+                    verified += 1
+            elif beat.get('voiceover'):
+                fingerprint = producer.tts_cache_fingerprint(
+                    str(beat['voiceover']), beat.get('voice_direction'), producer.TTS_VOICE
+                )
+                wav_path = producer.TTS_CACHE_DIR / f"{fingerprint}.wav"
+                sidecar = producer.TTS_CACHE_DIR / f"{fingerprint}.wav.sha256"
+                if (not wav_path.is_file() or not sidecar.is_file()
+                        or sidecar.read_text(encoding='ascii').strip() != fingerprint
+                        or not producer._valid_tts_wav(wav_path)):
+                    raise RuntimeError(
+                        f"Exact Director-run voice cache is missing or invalid for beat_{beat_index:02d}; "
+                        "finalization stopped before any TTS API request."
+                    )
+                verified += 1
+    if verified == 0:
+        raise RuntimeError("Finalization voice preflight found no verified narration assets.")
+    log(f"Finalization voice preflight passed: {verified} original/locked voice asset(s); no TTS regeneration permitted.")
+    return verified
+
+
+def watch_existing_kaggle_job() -> int:
+    """Watch the same Kaggle job in bounded windows; never dispatch another kernel."""
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') not in {'gpu_running', 'gpu_complete'}:
+        raise RuntimeError(f"Automatic watcher requires gpu_running/gpu_complete; status={pending.get('status', 'none')}.")
+    identity_error = pending_gpu_identity_error(pending)
+    if identity_error:
+        raise RuntimeError("Automatic watcher refused invalid GPU identity: " + identity_error)
+    supervisor = pending.setdefault('supervisor', {})
+    now = datetime.now(TZ)
+    started_text = str(supervisor.get('gpu_watch_started_at_ist') or '').strip()
+    if started_text:
+        started = datetime.fromisoformat(started_text)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=TZ)
+    else:
+        started = now
+        supervisor['gpu_watch_started_at_ist'] = now.isoformat(timespec='seconds')
+    chunk_seconds = max(300, int(os.getenv('BSK_GPU_WATCH_CHUNK_SECONDS', '10800')))
+    total_seconds = max(chunk_seconds, int(os.getenv('BSK_GPU_WATCH_MAX_SECONDS', '43200')))
+    interval = max(60, int(os.getenv('BSK_GPU_POLL_INTERVAL_SECONDS', '300')))
+    chunk_started = time.monotonic()
+    while True:
+        status, _raw = kaggle_status(str(pending.get('kaggle_kernel_id') or ''))
+        observed = datetime.now(TZ)
+        pending['last_seen_gpu_status'] = status
+        pending['last_seen_gpu_status_at_ist'] = observed.isoformat(timespec='seconds')
+        supervisor['last_remote_status'] = status
+        supervisor['last_remote_status_at_ist'] = observed.isoformat(timespec='seconds')
+        supervisor['poll_count'] = int(supervisor.get('poll_count', 0) or 0) + 1
+        write_json(PENDING, pending)
+        decision = factory_supervisor.next_watch_action(
+            status,
+            chunk_elapsed_seconds=time.monotonic() - chunk_started,
+            total_elapsed_seconds=max(0.0, (observed - started).total_seconds()),
+            chunk_limit_seconds=chunk_seconds,
+            total_limit_seconds=total_seconds,
+        )
+        log(f"Factory supervisor: job={pending.get('job_id')} Kaggle={status}; decision={decision or 'continue'}.")
+        if decision == 'stop':
+            supervisor['status'] = 'owner_action_required'
+            supervisor['stop_reason'] = (
+                f"Kaggle status {status} is unknown/unmapped or the {total_seconds // 3600}h watch limit was reached. "
+                "The existing job is preserved; no duplicate GPU dispatch was attempted."
+            )
+            write_json(PENDING, pending)
+            raise RuntimeError(supervisor['stop_reason'])
+        if decision in {'watch', 'poll'}:
+            supervisor['next_action'] = decision
+            supervisor['next_action_at_ist'] = observed.isoformat(timespec='seconds')
+            write_json(PENDING, pending)
+            output_path = os.getenv('GITHUB_OUTPUT', '').strip()
+            if output_path:
+                with open(output_path, 'a', encoding='utf-8') as output:
+                    output.write(f"next_action={decision}\\n")
+            return 0
+        time.sleep(interval)
+
+
 def _poll_and_finalize_impl() -> int:
     producer.require_env()
     pending = load_json(PENDING, {})
     if not pending or pending.get('status') not in {'gpu_running', 'gpu_complete'}:
         log(f'No active batch to poll (status={pending.get("status") if pending else "none"}).')
         return 0
+    identity_error = pending_gpu_identity_error(pending)
+    if identity_error:
+        return fail_gpu_output_identity(pending, identity_error)
+
     kernel_id = pending['kaggle_kernel_id']
     status, raw = kaggle_status(kernel_id)
     log(f'Kaggle status: {status}; {raw.strip()[:300]}')
@@ -1129,6 +1432,9 @@ def _poll_and_finalize_impl() -> int:
                 write_json(PENDING, pending)
                 alert_failure(f'BINA SHOR KE GPU batch is still {status} after about {age_hours:.1f} hours. Free Kaggle queue/session limits may be involved. No duplicate job or paid fallback was started; inspect Kaggle status before retrying.')
         return 0
+
+    if status == 'COMPLETE':
+        verify_finalization_voice_assets(pending)
 
     with tempfile.TemporaryDirectory(prefix='bsk-kaggle-output-') as td:
         dest = Path(td) / 'downloaded'
@@ -1154,10 +1460,18 @@ def _poll_and_finalize_impl() -> int:
             return 1
         manifest_path = root / 'gpu_output_manifest.json'
         gpu_manifest = load_json(manifest_path, {}) if manifest_path.exists() else {}
+        if gpu_manifest:
+            identity_error = gpu_output_identity_error(gpu_manifest, pending)
+            if identity_error:
+                return fail_gpu_output_identity(pending, identity_error)
         if err_file and err_file.exists() or gpu_manifest.get('status') != 'complete':
             reason = load_json(err_file, {}) if err_file and err_file.exists() else gpu_manifest
             resumed = handle_gpu_failure(root, pending, json.dumps(reason, ensure_ascii=False))
             return 0 if resumed else 1
+
+        identity_error = gpu_output_identity_error(gpu_manifest, pending, require_complete=True)
+        if identity_error:
+            return fail_gpu_output_identity(pending, identity_error)
 
         expected = sum(len(r['beats']) for r in pending.get('reels', []))
         primary_image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
@@ -1297,7 +1611,73 @@ def _poll_and_finalize_impl() -> int:
             build = producer.render_reel(concept, reel_dir, set(), set())
             slot = datetime.fromisoformat(reel['planned_publish_at'])
             quality = producer.write_pack(concept, build, reel_dir, slot)
-            ensure_reel_qa_passed(build)
+            try:
+                simulated_sample_size = int(os.getenv('BSK_SIMULATED_REVIEWERS', '10000'))
+            except ValueError as exc:
+                raise RuntimeError('BSK_SIMULATED_REVIEWERS must be an integer between 1 and 100000.') from exc
+            audience_report = audience_qa.generate_simulated_audience_report(
+                reel_id=str(reel['reel_id']),
+                concept=concept,
+                build=build,
+                quality=quality,
+                sample_size=simulated_sample_size,
+            )
+            review_path = ensure_reel_qa_passed(build)
+            human_fallback_required = audience_report.get('status') != 'completed'
+            if human_fallback_required:
+                objective_gates = audience_report.get('evidence', {}).get('technical_gates', {})
+                objective_checks_passed = all(
+                    objective_gates.get(key) is True
+                    for key in ('technical_checks_passed', 'motion_scan_passed', 'metadata_ocr_passed')
+                )
+                if not objective_checks_passed:
+                    missing_dimensions = audience_report.get('missing_evidence_dimensions', [])
+                    failed_gates = audience_report.get('failed_technical_gates', [])
+                    raise RuntimeError(
+                        'Human Reality QA cannot override an objective technical failure. '
+                        + 'Review path: ' + review_path + '. Missing evidence dimensions: '
+                        + (', '.join(missing_dimensions) or 'none reported')
+                        + '; failed technical gates: ' + (', '.join(failed_gates) or 'none reported')
+                        + '. Technical checks, full-video motion scan and metadata OCR must all pass.'
+                    )
+                audience_report['human_review_fallback_required'] = True
+                quality['human_review_fallback_required'] = True
+                build['human_review_fallback_required'] = True
+            else:
+                audience_report['human_review_fallback_required'] = False
+                quality['human_review_fallback_required'] = False
+                build['human_review_fallback_required'] = False
+            audience_report['qualification_status'] = 'waiting_for_three_manual_external_reviews_and_owner_approval'
+            audience_report['manual_external_human_review'] = {
+                'required': True,
+                'independent_reviewers_required': 3,
+                'collection_method': 'owner_managed_manual_review',
+                'reviewer_identity_collection': 'none',
+                'accepted_response': 'pass_or_fail_with_shortcomings',
+                'fail_policy': 'any_fail_blocks_owner_approval_until_corrected_reel_is_reviewed_again',
+                'verification': 'owner_attested_not_bot_verified',
+            }
+            quality['audience_qa'] = audience_report
+            build['audience_qa'] = audience_report
+            write_json(reel_dir / 'audience_qa.json', audience_report)
+            write_json(reel_dir / 'quality_report.json', quality)
+            publish_kit = reel_dir / 'publish.txt'
+            with publish_kit.open('a', encoding='utf-8') as handle:
+                handle.write(
+                    '\n\nSYNTHETIC AUDIENCE SIMULATION — NOT REAL PEOPLE / NOT A VIEW PREDICTION\n'
+                    + json.dumps(audience_report, ensure_ascii=False, indent=2)
+                    + (
+                        '\n\nAI EVIDENCE INCOMPLETE: this Reel is NOT AI-QA-passed. '
+                        'It is delivered only because objective technical, local visual, full-video motion and OCR gates passed. '
+                        'The owner and three independent external viewers must review it; any Fail blocks approval until issues are fixed and the corrected Reel is reviewed again. '
+                        'The bot does not collect reviewer names, IDs, scores or votes.\n'
+                        if human_fallback_required else
+                        '\n\nAI EVIDENCE COMPLETE: the owner must watch the full Reel and obtain separate Pass/Fail opinions from three independent external viewers. '
+                        'Any Fail blocks /approve until shortcomings are fixed and the corrected Reel is reviewed again. '
+                        'The bot does not collect reviewer names, IDs, scores or votes.\n'
+                    )
+                    + 'No Facebook auto-publishing is enabled.\n'
+                )
             image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
             quality['video_generation'] = {
                 'model': 'FLUX.1-schnell Q4_K_S GGUF still generation + Depth Anything V2 (ComfyUI)' if image_first else 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
@@ -1332,6 +1712,7 @@ def _poll_and_finalize_impl() -> int:
             reel['delivery_steps'] = producer.send_to_telegram(
                 concept, build, reel_dir, slot, ordinal, len(pending['reels']),
                 progress=reel.get('delivery_steps', {}), on_progress=save_delivery_progress,
+                review_id=str(reel['reel_id']),
             )
             ensure_complete_telegram_delivery(reel['delivery_steps'])
             reel['delivery_status'] = 'delivered'
@@ -1347,18 +1728,28 @@ def _poll_and_finalize_impl() -> int:
                 'generated_at': pending['created_at_ist'], 'planned_publish_at': reel['planned_publish_at'],
                 'status': 'ready_for_manual_publish_not_confirmed_published',
                 'reel_id': reel['reel_id'], 'job_id': pending.get('job_id'),
-                # render_reel returns only after its hard technical and visual QA gates pass.
+                # Incomplete AI evidence is never marked passed; an explicit human fallback stays pending until reviewers pass.
                 'qa_passed': bool(
-                    build.get('technical', {}).get('technical_checks_passed') is True
+                    not quality.get('human_review_fallback_required', False)
+                    and quality.get('audience_qa', {}).get('status') == 'completed'
+                    and build.get('technical', {}).get('technical_checks_passed') is True
                     and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status') == 'reviewed'
                     and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status') == 'passed'
                     and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status') == 'passed'
                 ),
+                'eligible_for_human_review': bool(quality.get('human_review_fallback_required', False)),
+                'human_review_fallback_required': bool(quality.get('human_review_fallback_required', False)),
+                'manual_external_review_required': True,
+                'manual_external_reviewers_required': 3,
+                'human_review_qa_passed': False,
+                'technical_checks_passed': build.get('technical', {}).get('technical_checks_passed') is True,
                 'visual_qa_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status'),
                 'motion_diagnostics_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status'),
                 'metadata_ocr_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status'),
                 'telegram_delivered': all(reel['delivery_steps'].get(step) is True for step in ('video', 'cover', 'message', 'publish_kit')),
                 'qa_completed_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+                'audience_qa': quality.get('audience_qa', {}),
+                'human_review_panel_dispatch': reel.get('delivery_steps', {}).get('human_review_panel', {}),
             }
             existing_topic = next((item for item in reversed(history.setdefault('topics', [])) if item.get('reel_id') == reel['reel_id']), None)
             if existing_topic is not None:
@@ -1387,42 +1778,59 @@ def _poll_and_finalize_impl() -> int:
 
 
 def poll_and_finalize() -> int:
-    """Run a single poll/finalize attempt; persist failure and require explicit retry."""
-    try:
-        return _poll_and_finalize_impl()
-    except Exception as exc:
-        pending = load_json(PENDING, {}) or {}
-        error_text = f'{type(exc).__name__}: {exc}'[:5000]
-        if pending.get('status') in {'gpu_running', 'gpu_complete', 'finalizing'}:
-            # A hard visual/rhythm defect is not a transient API error. Mark it rejected so the owner
-            # can create a fresh concept/batch; retry-finalize would only reuse the same bad pixels.
-            if any(marker in error_text.lower() for marker in ('critical visual defect', 'excessive speed change', 'too short')):
-                pending['status'] = 'qa_rejected'
-                pending['qa_rejection_reason'] = error_text
-                pending['qa_rejected_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-                history = producer.load_history()
-                failed_reel_id = pending.get('active_finalizing_reel_id')
-                for reel in pending.get('reels', []):
-                    if reel.get('delivery_status') != 'delivered':
-                        is_failed_reel = reel.get('reel_id') == failed_reel_id
-                        history.setdefault('topics', []).append({
-                            'title': reel.get('title', ''), 'theme': reel.get('theme', ''), 'pillar': reel.get('pillar', ''),
-                            'generated_at': pending.get('created_at_ist'), 'planned_publish_at': reel.get('planned_publish_at'),
-                            'status': 'qa_rejected_not_published' if is_failed_reel else 'batch_aborted_not_rendered',
-                            'rejection_reason': error_text[:700] if is_failed_reel else 'Batch stopped before this Reel finished production.',
-                        })
-                producer.save_history(history)
+    """Finalize the same COMPLETE Kaggle job; retry only transient provider/network failures."""
+    for attempt in range(1, 4):
+        try:
+            return _poll_and_finalize_impl()
+        except Exception as exc:
+            pending = load_json(PENDING, {}) or {}
+            error_text = f'{type(exc).__name__}: {exc}'[:5000]
+            failure_class = factory_supervisor.classify_finalization_failure(error_text)
+            if pending.get('status') in {'gpu_running', 'gpu_complete', 'finalizing'}:
+                if any(marker in error_text.lower() for marker in (
+                    'critical visual defect', 'excessive speed change', 'too short',
+                    'forbidden prompt labels',
+                )):
+                    pending['status'] = 'qa_rejected'
+                    pending['qa_rejection_reason'] = error_text
+                    pending['qa_rejected_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                    history = producer.load_history()
+                    failed_reel_id = pending.get('active_finalizing_reel_id')
+                    for reel in pending.get('reels', []):
+                        if reel.get('delivery_status') != 'delivered':
+                            is_failed_reel = reel.get('reel_id') == failed_reel_id
+                            history.setdefault('topics', []).append({
+                                'title': reel.get('title', ''), 'theme': reel.get('theme', ''), 'pillar': reel.get('pillar', ''),
+                                'generated_at': pending.get('created_at_ist'), 'planned_publish_at': reel.get('planned_publish_at'),
+                                'status': 'qa_rejected_not_published' if is_failed_reel else 'batch_aborted_not_rendered',
+                                'rejection_reason': error_text[:700] if is_failed_reel else 'Batch aborted before this Reel finished production.',
+                            })
+                    producer.save_history(history)
+                else:
+                    pending['status'] = 'finalize_failed'
+                    pending['finalize_error'] = error_text
+                    pending['finalize_failed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                write_json(PENDING, pending)
+            delay = factory_supervisor.finalization_retry_delay_seconds(attempt)
+            if failure_class == 'transient_provider' and delay is not None and pending.get('status') != 'qa_rejected':
+                remote_status, _remote_output = kaggle_status(str(pending.get('kaggle_kernel_id') or ''))
+                if remote_status == 'COMPLETE' and pending_gpu_identity_error(pending) is None:
+                    pending['status'] = 'gpu_running'
+                    pending['automatic_finalize_retry_count'] = int(pending.get('automatic_finalize_retry_count', 0) or 0) + 1
+                    pending['automatic_finalize_last_error'] = error_text
+                    pending['automatic_finalize_retry_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                    write_json(PENDING, pending)
+                    log(f"Transient provider failure; retry {attempt + 1}/3 for SAME Kaggle output in {delay}s. No new GPU dispatch.")
+                    time.sleep(delay)
+                    continue
+            if pending.get('status') == 'qa_rejected':
+                instruction = "Hard visual/rhythm/OCR QA failed. Do not retry-finalize the same rejected pixels."
+            elif failure_class == 'non_retryable_integrity_or_qa':
+                instruction = "Voice/cache/asset integrity or objective QA failed. No TTS regeneration, cache substitution or QA bypass was attempted."
             else:
-                pending['status'] = 'finalize_failed'
-                pending['finalize_error'] = error_text
-                pending['finalize_failed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-            write_json(PENDING, pending)
-        if pending.get('status') == 'qa_rejected':
-            instruction = 'The reel was rejected for a hard visual/rhythm QA issue. Do NOT publish it and do NOT use retry-finalize (that would reuse the same scenes). After checking the report, run plan-one for a fresh concept or plan-week for a new batch.'
-        else:
-            instruction = 'Fix the transient/API issue, then manually run the workflow with action=retry-finalize. Previously delivered Telegram items are checkpointed to prevent duplicate delivery.'
-        alert_failure('BINA SHOR KE finalization stopped safely. No paid fallback was used and nothing was auto-published. ' + instruction + ' Details: ' + error_text[:1300])
-        raise
+                instruction = "Bounded transient retries exhausted or provider unavailable. Existing GPU output preserved."
+            log("Finalizer stopped safely: " + instruction + " " + error_text[:1300])
+            raise
 
 
 def resolve_dispatch_unknown(confirm_running: bool) -> int:
@@ -2085,9 +2493,16 @@ def rebuild_rejected_timing() -> int:
 
 def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
-    if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
-        raise RuntimeError(f"There is no failed or interrupted finalization to retry (status={pending.get('status', 'none')}).")
-    # A GPU output failure itself cannot be repaired by re-running the finalizer. Only retry when Kaggle completed.
+    if pending.get('status') not in {'finalize_failed', 'finalizing'}:
+        raise RuntimeError(
+            'retry-finalize is only for a failed/interrupted finalizer; '
+            f'current status={pending.get("status", "none")}. GPU failures require their guarded recovery path.'
+        )
+    identity_error = pending_gpu_identity_error(pending)
+    if identity_error:
+        raise RuntimeError('Refusing retry-finalize because pending GPU identity is invalid: ' + identity_error)
+    # A GPU output failure itself cannot be repaired by re-running the finalizer.
+    # The downloaded manifest is checked against this exact job before any scene is consumed.
     status, raw = kaggle_status(pending.get('kaggle_kernel_id', ''))
     if status != 'COMPLETE':
         raise RuntimeError(f"Kaggle kernel is not COMPLETE (status={status}). Inspect the GPU worker and use plan-week only after resolving the prior batch. {raw[-800:]}")
@@ -2187,7 +2602,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'repair-scene-6-voiceover-followup-finalize', 'rebuild-rejected-timing', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'watch-existing', 'verify-voice-assets', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'repair-scene-6-voiceover-followup-finalize', 'rebuild-rejected-timing', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -2196,6 +2611,10 @@ def main():
             return plan_week(3)
         if args.command == 'plan-one':
             return plan_week(1)
+        if args.command == 'watch-existing':
+            return watch_existing_kaggle_job()
+        if args.command == 'verify-voice-assets':
+            return verify_finalization_voice_assets()
         if args.command == 'retry-finalize':
             return retry_finalize()
         if args.command == 'repair-rhythm-finalize':

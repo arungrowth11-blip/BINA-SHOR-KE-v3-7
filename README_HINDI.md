@@ -4,7 +4,7 @@
 
 ## वर्तमान architecture: voice-first, image-first 2.5D (v3.7 feature branch)
 
-यह private GitHub project original Hindi story writing, voice-first timing, illustrated FLUX still generation, Depth Anything V2 depth maps, deterministic 2.5D parallax, branded post-production, fail-closed QA और private Telegram review को automate करने के लिए बनाया जा रहा है। **Primary visual architecture 100% 2.5D parallax है; default path में Wan video generation नहीं है।** Wan2.2 केवल पुराने manifests की backward-compatible legacy route है। Facebook पर auto-publish नहीं होता।
+यह मौजूदा **Public GitHub repository** original Hindi story writing, voice-first timing, illustrated FLUX still generation, Depth Anything V2 depth maps, deterministic 2.5D parallax, branded post-production, fail-closed QA और private Telegram delivery को automate करती है। **Primary visual architecture 100% 2.5D parallax है; default path में Wan video generation नहीं है।** Wan2.2 केवल पुराने manifests की backward-compatible legacy route है। Facebook पर auto-publish नहीं होता।
 
 > **साफ़ सीमा:** इस package को offline tests पर verify किया गया है; तुम्हारे Google/GitHub/Kaggle/Telegram accounts पर live API/GPU run अभी नहीं हुआ है। Free GPU availability, quotas और generated video quality की guarantee नहीं है। Workflow paid fallback नहीं लेगा; unavailable quota/hardware पर fail/alert करेगा।
 
@@ -25,33 +25,32 @@ Men's style इस Page का मुख्य niche नहीं है; वह
 3. **Independent Editorial Critic:** पहले Groq, फिर Mistral, फिर enabled Cloudflare, और अंत में Gemini. इसलिए Groq/Mistral key जोड़ने पर reviewer primary Gemini model से अलग provider family में critique करता है; बिना backup key के यह अलग model/provider की guarantee नहीं देता.
 4. **Primary image-first visual worker (FLUX.1 Schnell Q4_K_S GGUF + ComfyUI on Kaggle GPU):** हर source beat के लिए एक 704×1280 illustrated PNG still बनती है। Wan video clip बनाकर keyframe निकालने की जरूरत नहीं.
 5. **2.5D motion worker (Depth Anything V2 + OpenCV/FFmpeg):** हर still से depth map, eased camera push/drift और parallax MP4 बनता है। Default editorial coverage 100% depth-parallax है; 1080×1920, 30 FPS master तैयार होता है। पुरानी Wan 24 FPS route केवल legacy manifests के लिए है.
-6. **QA:** editorial score + strict schema, voice/audio validation, MP4 dimensions/codecs/fps/duration/size checks, sampled VLM frame review, full-video black/freeze diagnostics, 1 FPS Tesseract OCR (Hindi + English) for leaked prompt labels, and local Hindi Whisper transcript QA. VLM/OCR/motion QA unavailable या incomplete होने पर delivery रुकती है; human review अनिवार्य है.
+6. **QA:** editorial score + strict schema, voice/audio validation, MP4 dimensions/codecs/fps/duration/size checks, sampled VLM frame review, full-video black/freeze diagnostics, 1 FPS Tesseract OCR (Hindi + English) for leaked prompt labels, and local Hindi Whisper transcript QA. AI semantic evidence अधूरा हो तो manual-review fallback सिर्फ तभी मिलेगा जब deterministic local visual checks, technical QA, full-video motion scan और OCR सभी pass हों; इनमें से कोई objective gate fail हुआ तो delivery रुक जाएगी. हर Reel पर तीन independent लोगों का Pass/Fail review और owner का पूरा playback भी /approve से पहले जरूरी है.
+   Final AAC encode के बाद FFmpeg integrated loudness और true peak भी मापता है: -18 से -14 LUFS और अधिकतम -1 dBTP की सीमा। सीमा से बाहर हो तो सिर्फ एक 48 kHz AAC remaster करके फिर मापा जाता है; फिर भी fail या measurement unavailable हो तो delivery रुकती है.
 7. **Telegram delivery:** MP4, cover, copy-ready caption, hashtags, suggested slot, visual prompts, credits और QA report. Facebook posting remains manual.
+
+**Manual human review (कोई reviewer ID या extra secret नहीं):** यदि Reel AI EVIDENCE INCOMPLETE के साथ आती है, तो पहले पूरा वीडियो खुद देखें और तीन भरोसेमंद independent लोगों से अलग-अलग देखवाएं। उनसे सिर्फ Pass/Fail और कमी पूछें; नाम, Telegram ID या numeric ratings न लें। तीनों Pass हों और सभी कमियाँ ठीक हों तभी Telegram में /approve title=Exact Reel Title भेजें। एक भी Fail हो तो approve न करें—feedback लेकर Reel सुधारें और दोबारा review कराएं। /approve software में owner-attested manual review दर्ज करता है, bot-verified votes नहीं. Technical, motion या OCR failure को कोई human override नहीं कर सकता.
 8. **Adaptive feedback:** अलग `Telegram Feedback Sync` workflow हर 6 घंटे में `/approve`, `/reject`, `/published` और `/insights` commands को private history में सुरक्षित करता है—GPU batch के बिना भी. `/insights` metrics पर्याप्त sample होने पर pillar mix और lunch/evening test slots को धीरे-धीरे adapt करते हैं. यह Meta Insights API integration नहीं है.
 
 ## 3. Zero-spend controls
 
 - Primary text: `gemini-3.8-flash`; optional independent/recovery text providers: `openai/gpt-oss-120b` via Groq Free, `ministral-8b-latest` as the Mistral Studio Free-mode candidate (model access must be checked in the account), and Cloudflare `@cf/meta/llama-3.1-8b-instruct` only after explicit opt-in. Hindi voice: `gemini-3.8-flash-lite-tts`. These free quotas are limited and can change; fallback means a different free provider, not unlimited capacity. No automatic paid provider is configured.
 - Primary visuals: FLUX.1 Schnell Q4_K_S GGUF + FLUX CLIP-L/T5 encoders + FLUX AE VAE, plus Depth Anything V2 Small on Kaggle CUDA. First successful complete image-first Reel stores immutable ComfyUI/GGUF/model/runtime revisions in `data/image_toolchain_lock.json`. The legacy Wan model/ComfyUI lock stays separate in `data/toolchain_lock.json`; do not copy or reuse the old Wan benchmark as proof for FLUX. Review upstream and quantization licenses/notices before commercial use. Current primary preflight requires at least 12 GiB VRAM and 18 GiB free disk; actual Kaggle model load/render still needs a live qualification run.
-- Automation: GitHub Free private-repo standard runner included minutes only. In GitHub Billing, disable paid Actions overage / set the relevant budget to $0; if free quota ends, let runs stop.
+- Automation: repository Public ही रहेगा। Standard GitHub-hosted runners (जैसे ubuntu-latest) पर public repository के workflows free और unlimited हैं; private repository के monthly included compute minutes की जरूरत नहीं पड़ती। Larger runners paid हैं—इस project में उन्हें इस्तेमाल न करें.
 - TTS calls are conservatively paced (about one request every 21 seconds). Each beat carries a restrained actor direction (pace, warmth, pause and emotional restraint) into Gemini speech metadata; cache keys include both exact narration and voice direction, so a changed performance is not accidentally reused. Validated WAV files are cached across GitHub workflow reruns. The cache is private workflow cache data, not committed to the repository.
 - Telegram Bot API is the delivery route; WhatsApp Cloud API is deliberately excluded from the zero-cost baseline because account/setup/usage terms may change.
 - No Pexels, stock-video subscription, paid image API, paid audio library, or paid video API is used by the strict production workflow.
-- No billing keys in the repository, source files, prompts, issues or logs. Keep the repository private.
+- कोई billing key, API token, bot token, password या निजी पहचान repository, source files, prompts, issues या logs में न डालें। Source repository Public रहेगा; credentials केवल GitHub Actions Secrets में रखें.
 - Gemini Free Tier prompts/responses may be used to improve Google products. Send only fictional, public-safe stories. Never paste real police information, case details, identifiable people, personal information or confidential material.
 - “₹0 intended spend” is enforced by design only while account settings/free quotas remain as configured. No platform can promise free service or GPU availability forever.
 
 ## 4. One-time setup (Windows, no coding)
 
-### A. Download + private GitHub repo
+### A. Existing Public GitHub repository
 
-1. Download this ZIP and select **Extract All**.
-2. Create an empty **Private** repository at https://github.com/new, named `bina-shor-ke-studio`.
-3. Install GitHub Desktop from https://desktop.github.com/ and sign in.
-4. Clone your empty repository. Copy every extracted project file/folder into that cloned folder; make sure the hidden `.github` directory is copied too.
-5. GitHub Desktop: summary `Add BINA SHOR KE Studio v3.5` → **Commit to main** → **Push origin**.
-6. Repository → Settings → Actions → General → if organization policy allows, select **Read and write permissions** for workflow GITHUB_TOKEN. The workflows declare only `contents: write`.
-
+1. मौजूदा repository arungrowth11-blip/BINA-SHOR-KE-v3-7 को **Public** ही रहने दें। नया duplicate या Private repository न बनाएं.
+2. इस project में सामान्य ubuntu-latest GitHub-hosted runner ही इस्तेमाल होगा; paid Larger Runner या बाहरी paid runner अपने-आप enable नहीं होगा.
+3. GitHub Actions → Secrets and variables → Actions में API credentials रखें। कोई token या private identifier source files में commit न करें.
 ### B. Free Gemini key (no billing)
 
 1. Open https://aistudio.google.com/app/apikey, sign in and create an API key.
@@ -73,7 +72,7 @@ Men's style इस Page का मुख्य niche नहीं है; वह
 
 ### E. Add repository secrets
 
-In your private GitHub repository: **Settings → Secrets and variables → Actions → New repository secret**. Add these four names exactly:
+मौजूदा GitHub repository में: **Settings → Secrets and variables → Actions → New repository secret**. Add these four names exactly:
 
 - `GEMINI_API_KEY`
 - `TELEGRAM_BOT_TOKEN`
@@ -178,7 +177,7 @@ Use actual numbers; `watch` is average watch time in seconds and `completion` is
 - `scripts/model_lab.py` + `data/model_lab/`: offline candidate scorecards; no model downloads or live API calls.
 - `tests/`: offline logic and orchestration checks.
 - `data/history.json`: topic anti-repeat and measured performance state.
-- `data/telegram_state.json`: pinned owner chat and update cursor; keep repo private.
+- `data/telegram_state.json`: Telegram owner binding और update cursor; feature branch इसे Fernet encryption के साथ save करती है। पुराने public Git commits में legacy plaintext binding अब भी हो सकती है; कोई पहचान/ID public न करें.
 - `data/performance_log.csv`: manually shared performance metrics.
 
 ## 10. Annual operating cadence
@@ -271,7 +270,7 @@ HunyuanVideo-1.5 is worth a future isolated comparison because its repository de
 ## 16. v3.6 continuous Telegram feedback sync
 
 - An independent scheduled workflow drains the pinned private owner chat every six hours even when no GPU batch is active.
-- It persists approval/rejection decisions, manual publication records, actual performance observations, and the Telegram update cursor to the private repository.
+- It persists approval/rejection decisions, manual publication records, actual performance observations, and the encrypted Telegram update cursor to the existing public source repository; private identifiers stay in ciphertext.
 - This avoids waiting until the next weekly plan to consume commands; Telegram retains pending updates for no longer than 24 hours. Scheduled workflow delays remain possible, so manual `Run workflow` is available for immediate sync.
 - `getUpdates` and webhooks are mutually exclusive. Use a fresh BotFather bot without a webhook for this workflow.
 

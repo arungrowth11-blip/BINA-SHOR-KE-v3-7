@@ -11,7 +11,7 @@ class WorkflowConfigTests(unittest.TestCase):
         body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
         workflow = yaml.load(body, Loader=yaml.BaseLoader)
         push = workflow["on"]["push"]
-        self.assertEqual(push["branches"], ["feature/voice-first-3d-foundation"])
+        self.assertEqual(push["branches"], ["feature/human-reality-qa-engine"])
         self.assertEqual(
             push["paths"],
             [
@@ -26,11 +26,11 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_one_shot_plan_one_push_trigger_is_branch_and_path_scoped(self):
         body = (ROOT / '.github' / 'workflows' / 'weekly-factory.yml').read_text(encoding='utf-8')
         self.assertIn('branches:', body)
-        self.assertIn('- feature/voice-first-3d-foundation', body)
+        self.assertIn('- feature/human-reality-qa-engine', body)
         self.assertIn('".github/dispatch/plan-one.once"', body)
         self.assertIn("contains(github.event.head_commit.message, 'PLAN_ONE_ONLY')", body)
         self.assertIn("contains(github.event.head_commit.message, 'PLAN_ONE_ONLY')", body)
-        self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"', body)
+        self.assertIn('test "$GITHUB_REF" = "refs/heads/feature/human-reality-qa-engine"', body)
         self.assertIn('git log -1 --format=%B | grep -qx "PLAN_ONE_ONLY_FREE_TIER_CONFIRMED"', body)
         self.assertIn('grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once', body)
         self.assertIn('grep -qx "FREE_TIER_ONLY_CONFIRMED" .github/dispatch/plan-one.once', body)
@@ -61,6 +61,8 @@ class WorkflowConfigTests(unittest.TestCase):
     def test_gpu_workflow_has_guarded_same_reel_retry_action(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
         self.assertIn('retry-gpu', body)
+        self.assertIn('[bsk-retry-finalize]', body)
+        self.assertIn('feature/human-reality-qa-engine', body)
         self.assertIn('repair-rhythm', body)
         self.assertIn('Repair borderline narration rhythm using the same AI scenes', body)
         self.assertIn("[ \"$POLL_ACTION\" = 'repair-rhythm' ]", body)
@@ -164,7 +166,8 @@ class WorkflowConfigTests(unittest.TestCase):
 
     def test_retry_finalize_does_not_reactivate_a_delivered_batch(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
-        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+        self.assertIn('retry_states = {"finalize_failed", "finalizing"}', body)
+        self.assertNotIn('"gpu_failed"}', body[body.index('retry_states ='):body.index('qa_reason =')])
         self.assertIn('active = state.get("status") in allowed', body)
         self.assertNotIn('"delivered"', body[body.index('retry_states ='):body.index('qa_reason =')])
 
@@ -176,6 +179,10 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('scripts/telegram_feedback_sync.py', body)
         self.assertIn('data/telegram_state.json data/history.json data/performance_log.csv', body)
         self.assertIn('group: bina-shor-ke-studio', body)
+        self.assertIn('feature/human-reality-qa-engine', body)
+        self.assertIn('"scripts/producer.py"', body)
+        self.assertIn('Migrate legacy Telegram owner binding to encrypted state', body)
+        self.assertIn('Telegram owner binding encrypted; update cursor preserved.', body)
 
     def test_kaggle_status_timestamp_is_expanded_by_shell(self):
         body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
@@ -192,8 +199,8 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('resolve-dispatch-running', body)
         self.assertIn('resolve-dispatch-not-started', body)
         self.assertIn('REQUIRE_AI_VIDEO: "1"', body)
-        self.assertIn('actions/cache/restore@v4', body)
-        self.assertIn('actions/cache/save@v4', body)
+        self.assertIn('actions/cache/restore@v6', body)
+        self.assertIn('actions/cache/save@v6', body)
         self.assertIn('Quick remote Kaggle status check (minimal CLI only)', body)
         self.assertIn("if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'poll'", body)
         self.assertIn("if: steps.work.outputs.finalize == 'true'", body)
@@ -213,12 +220,12 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn(refresh_name, body)
         self.assertLess(body.index(refresh_name), body.index(pending_name))
         refresh = body[body.index(refresh_name):body.index(pending_name)]
-        self.assertIn("if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/voice-first-3d-foundation'", refresh)
+        self.assertIn("if: github.ref == 'refs/heads/feature/human-reality-qa-engine' && (github.event_name == 'workflow_dispatch' || github.event_name == 'push')", refresh)
         self.assertIn('git fetch --no-tags origin "$GITHUB_REF"', refresh)
         self.assertIn('git reset --hard FETCH_HEAD', refresh)
         self.assertIn('group: bina-shor-ke-studio', body)
         self.assertIn('cancel-in-progress: false', body)
-        self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
+        self.assertIn('retry_states = {"finalize_failed", "finalizing"}', body)
 
 
     def test_director_installs_only_required_ffmpeg_and_devanagari_fonts(self):
@@ -228,6 +235,34 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertNotIn('fonts-noto-extra', setup)
         self.assertIn('fc-match "Noto Sans Devanagari"', setup)
 
+
+    def test_manual_external_human_review_needs_no_reviewer_ids_or_extra_secrets(self):
+        poll = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
+        sync = (ROOT / ".github" / "workflows" / "telegram-feedback-sync.yml").read_text(encoding="utf-8")
+        weekly = (ROOT / ".github" / "workflows" / "weekly-factory.yml").read_text(encoding="utf-8")
+        producer = (ROOT / "scripts" / "producer.py").read_text(encoding="utf-8")
+        for body in (poll, sync, weekly):
+            self.assertNotIn("BSK_HUMAN_REVIEWER_CHAT_IDS", body)
+            self.assertNotIn("BSK_REVIEWER_HASH_SALT", body)
+            self.assertNotIn("BSK_HUMAN_REVIEW_ENCRYPTION_KEY", body)
+        self.assertIn("cryptography>=42.0.0,<47.0.0", sync)
+        self.assertIn("def save_telegram_state", producer)
+        self.assertIn("_telegram_state_fernet().encrypt", producer)
+        self.assertIn("manual_external_review_attestation", producer)
+        self.assertIn("reported_independent_reviewers", producer)
+        self.assertIn("owner_attested_not_bot_verified", producer)
+        self.assertNotIn("git add data/human_reviews.enc", sync)
+
+    def test_workflows_use_node24_compatible_current_action_majors(self):
+        workflow_dir = ROOT / ".github" / "workflows"
+        for path in workflow_dir.glob("*.yml"):
+            body = path.read_text(encoding="utf-8")
+            self.assertNotIn("actions/checkout@v4", body, path.name)
+            self.assertNotIn("actions/setup-python@v5", body, path.name)
+            self.assertNotIn("actions/cache/restore@v4", body, path.name)
+            self.assertNotIn("actions/cache/save@v4", body, path.name)
+            self.assertNotIn("actions/cache@v4", body, path.name)
+            self.assertNotIn("actions/upload-artifact@v4", body, path.name)
 
     def test_gpu_finalizer_prerequisite_shell_block_is_valid_bash(self):
         body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
@@ -244,6 +279,29 @@ class WorkflowConfigTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0, result.stderr)
 
+
+
+    def test_image_first_lock_and_review_evidence_are_persisted(self):
+        body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
+        self.assertIn("data/image_toolchain_lock.json", body)
+        persist = body.split("- name: Persist delivery and performance state", 1)[1]
+        self.assertNotIn("continue-on-error: true", persist)
+        self.assertIn('git add -- data/image_toolchain_lock.json', persist)
+        self.assertIn("output/**/audience_qa.json", body)
+        self.assertIn("output/**/qa_frames/**", body)
+        self.assertIn("output/**/metadata_ocr_report.json", body)
+
+    def test_feature_branch_retry_marker_is_scoped_and_refreshes_latest_state(self):
+        body = (ROOT / ".github" / "workflows" / "poll-gpu.yml").read_text(encoding="utf-8")
+        workflow = yaml.load(body, Loader=yaml.BaseLoader)
+        self.assertEqual(workflow["on"]["push"]["branches"], ["feature/human-reality-qa-engine"])
+        self.assertEqual(workflow["on"]["push"]["paths"], [".github/workflows/poll-gpu.yml"])
+        self.assertIn("'retry-finalize'", body[body.index("POLL_ACTION:"):body.index("GEMINI_API_KEY:")])
+        self.assertIn("[bsk-retry-finalize]", body)
+        refresh = body.split("Refresh queued feature-branch dispatch to latest state", 1)[1].split(
+            "Check whether a GPU batch actually needs polling", 1
+        )[0]
+        self.assertIn("github.event_name == 'push'", refresh)
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

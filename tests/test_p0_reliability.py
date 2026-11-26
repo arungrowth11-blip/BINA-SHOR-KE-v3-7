@@ -58,6 +58,8 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "motion_diagnostics_status": "passed",
                 "metadata_ocr_status": "passed",
                 "telegram_delivered": True,
+                "manual_external_review_required": True,
+                "manual_external_reviewers_required": 3,
             }]
         }
         result = producer._parse_review_message(
@@ -88,6 +90,8 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 "qa_passed": True, "visual_qa_status": "reviewed",
                 "motion_diagnostics_status": "passed", "metadata_ocr_status": "passed",
                 "telegram_delivered": True,
+                "manual_external_review_required": True,
+                "manual_external_reviewers_required": 3,
             }]}), encoding="utf-8")
             lock_path = base / "toolchain_lock.json"
             lock_path.write_text(json.dumps({
@@ -159,9 +163,19 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                     "qa_passed": qa_passed,
                     "telegram_delivered": delivered,
                 }]}
-                producer._parse_review_message(
-                    "/approve title=परीक्षण कहानी", history, approved=True
-                )
+                if not qa_passed:
+                    with self.assertRaisesRegex(ValueError, "has not completed its QA path"):
+                        producer._parse_review_message(
+                            "/approve title=परीक्षण कहानी", history, approved=True
+                        )
+                    self.assertEqual(
+                        history["topics"][0]["status"],
+                        "ready_for_manual_publish_not_confirmed_published",
+                    )
+                else:
+                    producer._parse_review_message(
+                        "/approve title=परीक्षण कहानी", history, approved=True
+                    )
                 self.assertNotIn("one_reel_qualification", history)
 
     def test_slug_uses_safe_default_for_unset_empty_and_whitespace(self):
@@ -233,6 +247,110 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
         persist = body.split("- name: Persist owner cursor, reviews and performance metrics", 1)[1]
         self.assertIn("if: success() && env.TELEGRAM_BOT_TOKEN != ''", persist)
 
+
+
+    def test_gpu_output_manifest_is_bound_to_exact_job_renderer_and_scene_inventory(self):
+        pending = {
+            "job_id": "job-image-first-1",
+            "kaggle_kernel_id": "owner/private-worker",
+            "manifest": {"job_id": "job-image-first-1", "generation_mode": "still_image_first"},
+            "reels": [{
+                "reel_id": "reel_01_test",
+                "concept": {"beats": [{}, {}, {}]},
+            }],
+        }
+        gpu_manifest = {
+            "job_id": "job-image-first-1",
+            "status": "complete",
+            "generation_mode": "still_image_first",
+            "scenes": [
+                {"reel_id": "reel_01_test", "scene_index": 1, "media_type": "image/png"},
+                {"reel_id": "reel_01_test", "scene_index": 2, "media_type": "image/png"},
+                {"reel_id": "reel_01_test", "scene_index": 3, "media_type": "image/png"},
+            ],
+            "parallax_scenes": [
+                {"reel_id": "reel_01_test", "scene_index": 1},
+                {"reel_id": "reel_01_test", "scene_index": 2},
+                {"reel_id": "reel_01_test", "scene_index": 3},
+            ],
+        }
+        with patch.object(studio_pipeline, "kaggle_kernel_id", return_value="owner/private-worker"):
+            self.assertIsNone(studio_pipeline.pending_gpu_identity_error(pending))
+        self.assertIsNone(
+            studio_pipeline.gpu_output_identity_error(gpu_manifest, pending, require_complete=True)
+        )
+
+        stale = json.loads(json.dumps(gpu_manifest))
+        stale["job_id"] = "older-kaggle-job"
+        self.assertIn("job_id mismatch", studio_pipeline.gpu_output_identity_error(stale, pending))
+
+        wrong_renderer = json.loads(json.dumps(gpu_manifest))
+        wrong_renderer["generation_mode"] = "wan_video_first_legacy"
+        self.assertIn("renderer mismatch", studio_pipeline.gpu_output_identity_error(wrong_renderer, pending))
+
+        missing_scene = json.loads(json.dumps(gpu_manifest))
+        missing_scene["scenes"].pop()
+        self.assertIn("scene inventory count mismatch", studio_pipeline.gpu_output_identity_error(
+            missing_scene, pending, require_complete=True
+        ))
+
+        missing_parallax = json.loads(json.dumps(gpu_manifest))
+        missing_parallax["parallax_scenes"].pop()
+        self.assertIn("depth-parallax inventory", studio_pipeline.gpu_output_identity_error(
+            missing_parallax, pending, require_complete=True
+        ))
+
+    def test_pending_job_identity_rejects_wrong_kernel_and_embedded_manifest(self):
+        pending = {
+            "job_id": "expected-job",
+            "kaggle_kernel_id": "owner/wrong-worker",
+            "manifest": {"job_id": "expected-job", "generation_mode": "still_image_first"},
+        }
+        with patch.object(studio_pipeline, "kaggle_kernel_id", return_value="owner/private-worker"):
+            self.assertIn("kernel identity", studio_pipeline.pending_gpu_identity_error(pending))
+            pending["kaggle_kernel_id"] = "owner/private-worker"
+            pending["manifest"]["job_id"] = "different-job"
+            self.assertIn("embedded worker manifest", studio_pipeline.pending_gpu_identity_error(pending))
+
+    def test_tts_cache_fingerprint_is_bound_to_model_voice_and_performance(self):
+        original = producer.GEMINI_TTS_MODEL
+        first = producer.tts_cache_fingerprint("नमस्ते", "धीमे स्वर में", "Kore")
+        try:
+            producer.GEMINI_TTS_MODEL = "different-tts-model"
+            self.assertNotEqual(first, producer.tts_cache_fingerprint("नमस्ते", "धीमे स्वर में", "Kore"))
+            producer.GEMINI_TTS_MODEL = original
+            self.assertNotEqual(first, producer.tts_cache_fingerprint("नमस्ते", "सामान्य स्वर में", "Kore"))
+            self.assertNotEqual(first, producer.tts_cache_fingerprint("नमस्ते", "धीमे स्वर में", "Aoede"))
+        finally:
+            producer.GEMINI_TTS_MODEL = original
+
+    def test_locked_voice_asset_requires_exact_hash_and_duration(self):
+        import hashlib
+        import wave
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            wav_path = root / "data" / "voice_assets" / "reel-test" / "line.wav"
+            wav_path.parent.mkdir(parents=True)
+            with wave.open(str(wav_path), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(24000)
+                output.writeframes(bytes(48000))
+            digest = hashlib.sha256(wav_path.read_bytes()).hexdigest()
+            segment = {"segment_id": "line", "voice_asset": {
+                "schema_version": 1, "path": "data/voice_assets/reel-test/line.wav",
+                "sha256": digest, "duration_seconds": 1.0,
+            }}
+            with patch.object(producer, "ROOT", root):
+                self.assertEqual(producer.validate_locked_voice_asset(segment), wav_path)
+                segment["voice_asset"]["sha256"] = "0" * 64
+                with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+                    producer.validate_locked_voice_asset(segment)
+
+    def test_voice_first_finalizer_never_regenerates_missing_locked_audio(self):
+        segment = {"segment_id": "line-1", "text": "यह संवाद है।"}
+        with self.assertRaisesRegex(RuntimeError, "no immutable voice asset"):
+            producer.validate_locked_voice_asset(segment)
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

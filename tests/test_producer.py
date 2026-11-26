@@ -466,14 +466,62 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertIn("कहानी काल्पनिक है।", producer.safe_caption(story))
         self.assertNotIn("कहानी काल्पनिक है।", producer.safe_caption(lifestyle))
 
-    def test_telegram_state_save_is_atomic_and_round_trips(self):
+    def test_telegram_state_save_is_atomic_encrypted_and_round_trips(self):
         old_path = producer.TELEGRAM_STATE_PATH
-        with tempfile.TemporaryDirectory() as folder:
+        with tempfile.TemporaryDirectory() as folder, patch.object(producer, "TELEGRAM_BOT_TOKEN", "test-telegram-bot-token"):
             producer.TELEGRAM_STATE_PATH = Path(folder) / 'telegram_state.json'
             try:
                 producer.save_telegram_state({'owner_chat_id': '123', 'last_update_id': 55})
-                self.assertEqual(producer.load_telegram_state()['last_update_id'], 55)
+                raw = producer.TELEGRAM_STATE_PATH.read_text(encoding="utf-8")
+                stored = json.loads(raw)
+                self.assertNotIn("owner_chat_id", stored)
+                self.assertIn("owner_chat_id_encrypted", stored)
+                self.assertNotIn('"123"', raw)
+                loaded = producer.load_telegram_state()
+                self.assertEqual(loaded['owner_chat_id'], '123')
+                self.assertEqual(loaded['last_update_id'], 55)
                 self.assertFalse(producer.TELEGRAM_STATE_PATH.with_suffix('.json.tmp').exists())
+            finally:
+                producer.TELEGRAM_STATE_PATH = old_path
+
+    def test_legacy_plaintext_telegram_owner_state_migrates_without_cursor_loss(self):
+        old_path = producer.TELEGRAM_STATE_PATH
+        with tempfile.TemporaryDirectory() as folder, patch.object(producer, "TELEGRAM_BOT_TOKEN", "test-telegram-bot-token"):
+            producer.TELEGRAM_STATE_PATH = Path(folder) / "telegram_state.json"
+            try:
+                producer.TELEGRAM_STATE_PATH.write_text(
+                    json.dumps({"owner_chat_id": "legacy-owner-id", "last_update_id": 674097690}),
+                    encoding="utf-8",
+                )
+                state = producer.load_telegram_state()
+                self.assertEqual(state["owner_chat_id"], "legacy-owner-id")
+                self.assertEqual(state["last_update_id"], 674097690)
+                producer.save_telegram_state(state)
+                persisted = json.loads(producer.TELEGRAM_STATE_PATH.read_text(encoding="utf-8"))
+                self.assertNotIn("owner_chat_id", persisted)
+                self.assertNotIn("legacy-owner-id", json.dumps(persisted))
+                self.assertEqual(persisted["last_update_id"], 674097690)
+                reloaded = producer.load_telegram_state()
+                self.assertEqual(reloaded["owner_chat_id"], "legacy-owner-id")
+                self.assertEqual(reloaded["last_update_id"], 674097690)
+                encrypted_snapshot = producer.TELEGRAM_STATE_PATH.read_bytes()
+                producer.save_telegram_state(reloaded)
+                self.assertEqual(producer.TELEGRAM_STATE_PATH.read_bytes(), encrypted_snapshot)
+            finally:
+                producer.TELEGRAM_STATE_PATH = old_path
+
+    def test_wrong_telegram_bot_token_fails_closed_without_overwriting_state(self):
+        old_path = producer.TELEGRAM_STATE_PATH
+        with tempfile.TemporaryDirectory() as folder:
+            producer.TELEGRAM_STATE_PATH = Path(folder) / "telegram_state.json"
+            try:
+                with patch.object(producer, "TELEGRAM_BOT_TOKEN", "original-bot-token"):
+                    producer.save_telegram_state({"owner_chat_id": "owner-id", "last_update_id": 91})
+                original_bytes = producer.TELEGRAM_STATE_PATH.read_bytes()
+                with patch.object(producer, "TELEGRAM_BOT_TOKEN", "rotated-bot-token"):
+                    with self.assertRaisesRegex(RuntimeError, "could not be decrypted"):
+                        producer.load_telegram_state()
+                self.assertEqual(producer.TELEGRAM_STATE_PATH.read_bytes(), original_bytes)
             finally:
                 producer.TELEGRAM_STATE_PATH = old_path
 
@@ -673,8 +721,7 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_tts_cache_reuses_exact_text_and_valid_wav_across_reruns(self):
         text = "एक छोटी कहानी की परीक्षण पंक्ति।"
-        cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
-        digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
+        digest = producer.tts_cache_fingerprint(text)
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             old_cache = producer.TTS_CACHE_DIR
@@ -701,10 +748,9 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_tts_cache_identity_includes_voice_and_performance_direction(self):
         text = "यह एक छोटी सी परीक्षण पंक्ति है।"
-        common = text + "\n[voice_direction=calm]"
-        first = producer.hashlib.sha256((common + "\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
-        second = producer.hashlib.sha256((common + "\n[gemini_voice=Gacrux]").encode("utf-8")).hexdigest()
-        third = producer.hashlib.sha256((text + "\n[voice_direction=angry]\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
+        first = producer.tts_cache_fingerprint(text, "calm", "Puck")
+        second = producer.tts_cache_fingerprint(text, "calm", "Gacrux")
+        third = producer.tts_cache_fingerprint(text, "angry", "Puck")
         self.assertNotEqual(first, second)
         self.assertNotEqual(first, third)
 
@@ -777,8 +823,7 @@ class FactoryLogicTests(unittest.TestCase):
                         wav_file.writeframes(b"\x00\x00" * 24000)
                 with patch.object(producer, "tts_wav", side_effect=fake_tts):
                     self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
-                cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
-                digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
+                digest = producer.tts_cache_fingerprint(text)
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav").exists())
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav.sha256").exists())
                 self.assertTrue((producer.TTS_CACHE_DIR / ".dirty").exists())
@@ -1028,12 +1073,85 @@ class FactoryLogicTests(unittest.TestCase):
         record_again = producer._parse_published_message("/published title=एक अलग कहानी", history)
         self.assertTrue(record_again["already_published"])
 
-    def test_final_audio_mix_applies_integrated_loudness_and_true_peak_mastering(self):
+    def test_final_audio_mix_applies_true_peak_headroom_without_limiter_makeup_gain(self):
         filter_graph = producer.final_audio_mix_filter()
         self.assertIn("amix=inputs=2:duration=first", filter_graph)
         self.assertIn("volume=0.22[bed]", filter_graph)
-        self.assertIn("loudnorm=I=-16:TP=-1.5:LRA=11", filter_graph)
-        self.assertIn("alimiter=limit=0.84[a]", filter_graph)
+        self.assertIn("loudnorm=I=-16:TP=-2.5:LRA=11", filter_graph)
+        self.assertIn("alimiter=limit=0.84:level=false[a]", filter_graph)
+
+    def test_final_audio_loudness_measurement_parses_ffmpeg_json(self):
+        payload = (
+            'video stream metadata\\n'
+            + '{"input_i" : "-16.31", "input_tp" : "-2.42", '
+            + '"input_lra" : "3.80", "input_thresh" : "-26.50"}'
+        )
+        with tempfile.TemporaryDirectory() as folder:
+            media = Path(folder) / "reel.mp4"
+            media.write_bytes(b"valid media placeholder")
+            with patch.object(producer.subprocess, "run", return_value=Mock(returncode=0, stderr=payload, stdout="")) as mocked:
+                result = producer.measure_audio_loudness(media)
+        self.assertEqual(result["integrated_loudness_lufs"], -16.31)
+        self.assertEqual(result["true_peak_dbtp"], -2.42)
+        self.assertIn("loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", mocked.call_args.args[0])
+
+    def test_final_audio_qa_accepts_encoded_audio_inside_limits_without_remaster(self):
+        measured = {"integrated_loudness_lufs": -16.2, "true_peak_dbtp": -2.1}
+        with (
+            patch.object(producer, "measure_audio_loudness", return_value=measured),
+            patch.object(producer, "run_cmd") as remaster,
+        ):
+            result = producer.enforce_final_audio_qa(Path("reel.mp4"))
+        self.assertEqual(result["status"], "passed")
+        self.assertFalse(result["remastered"])
+        self.assertEqual(result["measured"], measured)
+        remaster.assert_not_called()
+
+    def test_final_audio_qa_remasters_hot_aac_once_and_rechecks_before_replace(self):
+        before = {"integrated_loudness_lufs": -15.15, "true_peak_dbtp": 0.31}
+        after = {"integrated_loudness_lufs": -16.67, "true_peak_dbtp": -2.46}
+        command_seen = []
+
+        def fake_remaster(command, timeout=240):
+            command_seen.append(command)
+            Path(command[-1]).write_bytes(b"remastered-aac" * 10000)
+
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "reel.mp4"
+            video.write_bytes(b"original-video" * 1000)
+            original = video.read_bytes()
+            with (
+                patch.object(producer, "measure_audio_loudness", side_effect=[before, after]),
+                patch.object(producer, "run_cmd", side_effect=fake_remaster),
+            ):
+                result = producer.enforce_final_audio_qa(video)
+            self.assertEqual(video.read_bytes(), b"remastered-aac" * 10000)
+            self.assertNotEqual(video.read_bytes(), original)
+        self.assertEqual(result["status"], "passed")
+        self.assertTrue(result["remastered"])
+        self.assertEqual(result["before"], before)
+        self.assertEqual(result["measured"], after)
+        self.assertIn("level=false", " ".join(command_seen[0]))
+        self.assertIn("48000", command_seen[0])
+
+    def test_final_audio_qa_fails_closed_and_preserves_original_when_remaster_stays_hot(self):
+        before = {"integrated_loudness_lufs": -15.15, "true_peak_dbtp": 0.31}
+        still_hot = {"integrated_loudness_lufs": -16.0, "true_peak_dbtp": -0.4}
+
+        def fake_remaster(command, timeout=240):
+            Path(command[-1]).write_bytes(b"unsafe-remaster" * 10000)
+
+        with tempfile.TemporaryDirectory() as folder:
+            video = Path(folder) / "reel.mp4"
+            original = b"original-video" * 1000
+            video.write_bytes(original)
+            with (
+                patch.object(producer, "measure_audio_loudness", side_effect=[before, still_hot]),
+                patch.object(producer, "run_cmd", side_effect=fake_remaster),
+            ):
+                with self.assertRaisesRegex(RuntimeError, "remaster"):
+                    producer.enforce_final_audio_qa(video)
+            self.assertEqual(video.read_bytes(), original)
 
     def test_sound_bed_has_valid_stereo_wave(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -1179,7 +1297,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertGreater(producer.character_error_rate("नमस्ते दुनिया", "नमस्ते दोस्त"), 0.0)
 
     def test_review_command_marks_ready_for_manual_publish_only(self):
-        history = {"topics": [{"title": "सीमा तय करना", "status": "ready_for_manual_publish_not_confirmed_published"}]}
+        history = {"topics": [{"title": "सीमा तय करना", "status": "ready_for_manual_publish_not_confirmed_published", "qa_passed": True}]}
         result = producer._parse_review_message("/approve title=सीमा तय करना", history, approved=True)
         self.assertTrue(result["approved"])
         self.assertEqual(history["topics"][0]["status"], "owner_approved_for_manual_publish")
@@ -1277,3 +1395,25 @@ class SceneAudioFilterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+
+    def test_finalizer_never_generates_tts_when_exact_cache_is_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            old_cache = producer.TTS_CACHE_DIR
+            producer.TTS_CACHE_DIR = Path(folder) / "empty-cache"
+            try:
+                destination = Path(folder) / "render" / "voice.wav"
+                with patch.object(producer, "tts_wav") as mocked_tts:
+                    with self.assertRaisesRegex(RuntimeError, "refusing to regenerate a measured voice line"):
+                        producer.ensure_tts_wav(
+                            "मौजूदा मापी हुई आवाज़ सुरक्षित रहे।",
+                            destination,
+                            voice_direction="Adult feminine Hindi voice.",
+                            voice_name="Aoede",
+                            allow_generation=False,
+                        )
+                mocked_tts.assert_not_called()
+                self.assertFalse(destination.exists())
+            finally:
+                producer.TTS_CACHE_DIR = old_cache
