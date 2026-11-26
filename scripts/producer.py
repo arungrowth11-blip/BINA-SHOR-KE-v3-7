@@ -269,10 +269,19 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
 
 
 
+def _mistral_free_only_enabled() -> bool:
+    return os.getenv("BSK_MISTRAL_FREE_ONLY", "").strip().upper() in {"YES", "TRUE"}
+
+
 def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
-    """Mistral Studio Free-mode Chat Completions route; never enables pay-as-you-go."""
+    """Mistral route is unavailable unless the owner explicitly confirms free-only billing."""
     if not MISTRAL_API_KEY:
         raise RuntimeError("Mistral is not configured (MISTRAL_API_KEY is absent).")
+    if not _mistral_free_only_enabled():
+        raise RuntimeError(
+            "Mistral is disabled: set BSK_MISTRAL_FREE_ONLY=YES only after confirming "
+            "the connected Mistral workspace has no paid billing."
+        )
     payload = {
         "model": MISTRAL_TEXT_MODEL,
         "messages": [
@@ -370,7 +379,7 @@ def _text_provider_order(prefer_independent: bool = False) -> list[tuple[str, An
     enabled = {
         "gemini": bool(GEMINI_API_KEY),
         "groq": bool(GROQ_API_KEY),
-        "mistral": bool(MISTRAL_API_KEY),
+        "mistral": bool(MISTRAL_API_KEY and _mistral_free_only_enabled()),
         "cloudflare": bool(CF_WORKERS_AI_ENABLED and CF_ACCOUNT_ID and CF_API_TOKEN),
     }
     return [(name, providers[name]) for name in names if enabled[name] and _provider_available(name)]
@@ -1797,7 +1806,7 @@ def _vision_provider_order() -> list[tuple[str, str, str, str, str, int]]:
         # Mistral may be connected to a billable workspace. A key alone never enables it.
         "mistral": bool(
             MISTRAL_API_KEY
-            and os.getenv("BSK_MISTRAL_FREE_ONLY", "").strip().upper() in {"YES", "TRUE"}
+            and _mistral_free_only_enabled()
         ),
         # Cloudflare is used only when the operator explicitly enables its free-only route.
         "cloudflare": bool(CF_WORKERS_AI_ENABLED and CF_ACCOUNT_ID and CF_API_TOKEN),

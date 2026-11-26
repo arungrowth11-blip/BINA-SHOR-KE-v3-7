@@ -56,6 +56,7 @@ class WorkflowConfigTests(unittest.TestCase):
             self.assertIn("GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}", body)
             self.assertIn("MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}", body)
             self.assertIn("BSK_MISTRAL_FREE_ONLY: ${{ vars.BSK_MISTRAL_FREE_ONLY }}", body)
+            self.assertIn("BSK_MISTRAL_FREE_ONLY: ${{ vars.BSK_MISTRAL_FREE_ONLY }}", body)
             self.assertIn('CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"', body)
 
 

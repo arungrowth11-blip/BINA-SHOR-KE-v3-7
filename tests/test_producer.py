@@ -121,7 +121,8 @@ class FactoryLogicTests(unittest.TestCase):
         response = Mock()
         response.status_code = 200
         response.json.return_value = {"choices": [{"message": {"content": '{"ok": true}'}}]}
-        with patch.object(producer, "MISTRAL_API_KEY", "test-mistral-key"), patch.object(producer.requests, "post", return_value=response) as mocked:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+             patch.object(producer, "MISTRAL_API_KEY", "test-mistral-key"), patch.object(producer.requests, "post", return_value=response) as mocked:
             result = producer.mistral_json("system", "make json")
         self.assertTrue(result["ok"])
         self.assertEqual(mocked.call_args.args[0], "https://api.mistral.ai/v1/chat/completions")
@@ -291,6 +292,15 @@ class FactoryLogicTests(unittest.TestCase):
         groq.assert_called_once()
         self.assertEqual(len(groq.call_args.args[6]), 2)
 
+    def test_text_mistral_direct_call_is_disabled_without_free_only_opt_in(self):
+        response = Mock()
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(producer, "MISTRAL_API_KEY", "test-mistral-key"), \
+             patch.object(producer.requests, "post", return_value=response) as mocked:
+            with self.assertRaisesRegex(RuntimeError, "Mistral is disabled"):
+                producer.mistral_json("system", "prompt")
+        mocked.assert_not_called()
+
     def test_vision_router_falls_through_groq_to_mistral(self):
         from PIL import Image
         with tempfile.TemporaryDirectory() as folder:
@@ -453,7 +463,8 @@ class FactoryLogicTests(unittest.TestCase):
         groq.assert_called_once()
 
     def test_text_router_falls_back_to_mistral_after_groq_failure(self):
-        with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", side_effect=RuntimeError("429 rate limit")), patch.object(producer, "mistral_json", return_value={"writer": "mistral"}) as mistral:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+             patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", side_effect=RuntimeError("429 rate limit")), patch.object(producer, "mistral_json", return_value={"writer": "mistral"}) as mistral:
             result = producer.text_json("system", "prompt")
         self.assertEqual(result["writer"], "mistral")
         mistral.assert_called_once()
@@ -466,7 +477,8 @@ class FactoryLogicTests(unittest.TestCase):
         gemini.assert_not_called()
 
     def test_independent_review_avoids_the_provider_that_wrote_the_draft(self):
-        with patch.object(producer, "_LAST_TEXT_PROVIDER_USED", "groq"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "mistral_json", return_value={"critic": "mistral"}) as mistral, patch.object(producer, "groq_json") as groq:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+             patch.object(producer, "_LAST_TEXT_PROVIDER_USED", "groq"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "mistral_json", return_value={"critic": "mistral"}) as mistral, patch.object(producer, "groq_json") as groq:
             result = producer.independent_review_json("system", "prompt")
         self.assertEqual(result["critic"], "mistral")
         mistral.assert_called_once()
