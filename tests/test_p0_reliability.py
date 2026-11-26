@@ -312,5 +312,45 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
             pending["manifest"]["job_id"] = "different-job"
             self.assertIn("embedded worker manifest", studio_pipeline.pending_gpu_identity_error(pending))
 
+    def test_tts_cache_fingerprint_is_bound_to_model_voice_and_performance(self):
+        original = producer.GEMINI_TTS_MODEL
+        first = producer.tts_cache_fingerprint("नमस्ते", "धीमे स्वर में", "Kore")
+        try:
+            producer.GEMINI_TTS_MODEL = "different-tts-model"
+            self.assertNotEqual(first, producer.tts_cache_fingerprint("नमस्ते", "धीमे स्वर में", "Kore"))
+            producer.GEMINI_TTS_MODEL = original
+            self.assertNotEqual(first, producer.tts_cache_fingerprint("नमस्ते", "सामान्य स्वर में", "Kore"))
+            self.assertNotEqual(first, producer.tts_cache_fingerprint("नमस्ते", "धीमे स्वर में", "Aoede"))
+        finally:
+            producer.GEMINI_TTS_MODEL = original
+
+    def test_locked_voice_asset_requires_exact_hash_and_duration(self):
+        import hashlib
+        import wave
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            wav_path = root / "data" / "voice_assets" / "reel-test" / "line.wav"
+            wav_path.parent.mkdir(parents=True)
+            with wave.open(str(wav_path), "wb") as output:
+                output.setnchannels(1)
+                output.setsampwidth(2)
+                output.setframerate(24000)
+                output.writeframes(b"\\x00\\x00" * 24000)
+            digest = hashlib.sha256(wav_path.read_bytes()).hexdigest()
+            segment = {"segment_id": "line", "voice_asset": {
+                "schema_version": 1, "path": "data/voice_assets/reel-test/line.wav",
+                "sha256": digest, "duration_seconds": 1.0,
+            }}
+            with patch.object(producer, "ROOT", root):
+                self.assertEqual(producer.validate_locked_voice_asset(segment), wav_path)
+                segment["voice_asset"]["sha256"] = "0" * 64
+                with self.assertRaisesRegex(RuntimeError, "SHA-256 mismatch"):
+                    producer.validate_locked_voice_asset(segment)
+
+    def test_voice_first_finalizer_never_regenerates_missing_locked_audio(self):
+        segment = {"segment_id": "line-1", "text": "यह संवाद है।"}
+        with self.assertRaisesRegex(RuntimeError, "no immutable voice asset"):
+            producer.validate_locked_voice_asset(segment)
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

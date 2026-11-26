@@ -33,6 +33,7 @@ on:
       timezone: "Asia/Kolkata"
 
 permissions:
+  actions: read
   contents: write
 
 concurrency:
@@ -100,6 +101,9 @@ jobs:
               state = {}
           if not isinstance(state, dict):
               raise SystemExit("pending_gpu_job.json must contain a JSON object; refusing to continue")
+          plan_run_id = str(state.get("plan_workflow_run_id", "")).strip()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write("plan_run_id=" + plan_run_id + "\n")
           action = os.environ.get("POLL_ACTION", "poll")
           poll_states = {"gpu_running", "gpu_complete"}
           retry_states = {"finalize_failed", "finalizing"}
@@ -324,6 +328,15 @@ jobs:
           key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: |
             bsk-tts-${{ runner.os }}-
+
+      - name: Download exact planning-run voice assets
+        if: steps.work.outputs.finalize == 'true' && steps.pending.outputs.plan_run_id != ''
+        uses: actions/download-artifact@v7
+        with:
+          name: bsk-voice-assets-\${{ steps.pending.outputs.plan_run_id }}
+          run-id: \${{ steps.pending.outputs.plan_run_id }}
+          github-token: \${{ secrets.GITHUB_TOKEN }}
+          path: data/voice_assets
 
       - name: Install only missing FFmpeg and Devanagari prerequisites
         if: steps.work.outputs.finalize == 'true'

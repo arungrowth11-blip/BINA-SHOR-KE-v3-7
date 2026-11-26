@@ -1532,6 +1532,50 @@ def _valid_tts_wav(path: Path) -> bool:
     return _tts_wav_validation_error(path) is None
 
 
+def file_sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def tts_cache_fingerprint(text: str, voice_direction: str | None = None, voice_name: str | None = None) -> str:
+    """Versioned cache identity for the exact TTS generation contract."""
+    material = {
+        "schema": "bsk-tts-cache-v4", "provider": "google-gemini",
+        "model": GEMINI_TTS_MODEL, "voice": str(voice_name or TTS_VOICE).strip(),
+        "voice_direction": str(voice_direction or ""), "text": str(text),
+        "response_format": {"mime_type": "audio/l16", "sample_rate": 24000, "channels": 1, "sample_width_bytes": 2},
+    }
+    canonical = json.dumps(material, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def validate_locked_voice_asset(segment: dict[str, Any]) -> Path:
+    """Resolve and verify the immutable planning WAV; never silently regenerate it."""
+    asset = segment.get("voice_asset")
+    if not isinstance(asset, dict) or asset.get("schema_version") != 1:
+        raise RuntimeError(f"Voice-first segment {segment.get('segment_id', '<unknown>')} has no immutable voice asset; re-plan the voice timeline before finalization.")
+    relative = Path(str(asset.get("path") or ""))
+    if relative.is_absolute() or ".." in relative.parts:
+        raise RuntimeError("Locked voice asset path is unsafe; refusing finalization.")
+    root = ROOT.resolve()
+    path = (root / relative).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise RuntimeError(f"Locked voice asset is missing or outside the repository: {relative}")
+    expected_sha = str(asset.get("sha256") or "")
+    if len(expected_sha) != 64 or file_sha256(path) != expected_sha:
+        raise RuntimeError(f"Locked voice asset SHA-256 mismatch for {segment.get('segment_id', '<unknown>')}.")
+    validation_error = _tts_wav_validation_error(path)
+    if validation_error:
+        raise RuntimeError(f"Locked voice asset is invalid: {validation_error}")
+    measured = voice_first.wav_duration(path)
+    expected_duration = float(asset.get("duration_seconds", 0) or 0)
+    if expected_duration <= 0 or abs(measured - expected_duration) > 0.01:
+        raise RuntimeError(f"Locked voice asset duration mismatch for {segment.get('segment_id', '<unknown>')}: manifest {expected_duration:.4f}s, file {measured:.4f}s.")
+    return path
+
 def ensure_tts_wav(
     text: str,
     destination: Path,
@@ -1544,8 +1588,7 @@ def ensure_tts_wav(
     retries do not regenerate identical voice lines and burn additional free-tier quota.
     """
     selected_voice = str(voice_name or TTS_VOICE).strip()
-    cache_material = text + "\n[voice_direction=" + (voice_direction or "") + "]\n[gemini_voice=" + selected_voice + "]"
-    digest = hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
+    digest = tts_cache_fingerprint(text, voice_direction, selected_voice)
     sidecar_suffix = ".wav.sha256"
     cached_audio = TTS_CACHE_DIR / f"{digest}.wav"
     cached_sidecar = TTS_CACHE_DIR / f"{digest}{sidecar_suffix}"
@@ -2752,11 +2795,17 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                     str(line.get("voice_direction") or "Natural Hindi dialogue.")
                     + " Performance emotion: " + str(line.get("emotion") or "natural, restrained")
                 )
-                ensure_tts_wav(
-                    str(line["text"]), line_path,
-                    voice_direction=voice_direction,
-                    voice_name=str(line.get("gemini_voice") or TTS_VOICE),
-                )
+                if concept.get("voice_first_plan", {}).get("status") == "voice_measured_before_video":
+                    # Exact planning bytes are authoritative; no TTS regeneration in finalization.
+                    locked_asset = validate_locked_voice_asset(line)
+                    shutil.copy2(locked_asset, line_path)
+                else:
+                    # Compatibility path is restricted to legacy manifests without a measured voice plan.
+                    ensure_tts_wav(
+                        str(line["text"]), line_path,
+                        voice_direction=voice_direction,
+                        voice_name=str(line.get("gemini_voice") or TTS_VOICE),
+                    )
                 measured = voice_first.wav_duration(line_path)
                 expected = line.get("duration_seconds")
                 if expected is not None and abs(measured - float(expected)) > 0.15:

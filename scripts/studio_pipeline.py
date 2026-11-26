@@ -342,43 +342,43 @@ def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
     characters = concept.get('characters', [])
     if not characters:
         raise RuntimeError('Voice-first screenplay has no cast; refusing GPU dispatch.')
-    # Character metadata is persisted only after the complete voice-first storyboard passes.
-    with tempfile.TemporaryDirectory(prefix='bsk-voice-preflight-') as temp_root:
-        temp_root = Path(temp_root)
-        for beat_index, beat in enumerate(concept['beats'], start=1):
-            segments = beat.get('speech_segments')
-            if not isinstance(segments, list):
-                raise RuntimeError(f'Beat {beat_index} has no structured speech_segments array.')
-            measured = {}
-            for line_index, segment in enumerate(segments, start=1):
-                segment_id = str(segment.get('segment_id') or f'beat_{beat_index:02d}_line_{line_index:02d}')
-                segment['segment_id'] = segment_id
-                voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
-                voice_direction = voice_first.segment_voice_direction(segment)
-                destination = temp_root / f'{reel_id}_{segment_id}_{segment.get("speaker_id", "speaker")}.wav'
-                # Cache key includes transcript, performance direction and voice identity.
-                producer.ensure_tts_wav(
-                    str(segment['text']), destination,
-                    voice_direction=voice_direction, voice_name=voice_name,
-                )
-                duration = voice_first.wav_duration(destination)
-                segment['duration_seconds'] = round(duration, 4)
-                measured[segment_id] = duration
-                log(f'[{concept.get("title", reel_id)}] Voice locked: {segment_id} / {voice_name} / {duration:.2f}s')
-            timing = voice_first.build_scene_timing_plan(segments, measured)
-            beat['voice_timing'] = timing
-            beat['target_frames'] = timing['target_frames']
-            log(
-                f'[{concept.get("title", reel_id)}] Scene {beat_index} timing locked: '
-                f'{timing["target_frames"]} frames / {timing["target_duration_seconds"]:.2f}s; '
-                f'{len(segments)} speaker turn(s), no dialogue truncation.'
-            )
+    # Persist the exact WAV bytes used for measurement; finalization verifies these bytes.
+    voice_root = ROOT / 'data' / 'voice_assets' / reel_id
+    voice_root.mkdir(parents=True, exist_ok=True)
+    asset_count = 0
+    for beat_index, beat in enumerate(concept['beats'], start=1):
+        segments = beat.get('speech_segments')
+        if not isinstance(segments, list):
+            raise RuntimeError(f'Beat {beat_index} has no structured speech_segments array.')
+        measured = {}
+        for line_index, segment in enumerate(segments, start=1):
+            segment_id = str(segment.get('segment_id') or f'beat_{beat_index:02d}_line_{line_index:02d}')
+            segment['segment_id'] = segment_id
+            voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
+            voice_direction = voice_first.segment_voice_direction(segment)
+            safe_segment = re.sub(r'[^a-zA-Z0-9_-]+', '_', segment_id)
+            safe_speaker = re.sub(r'[^a-zA-Z0-9_-]+', '_', str(segment.get('speaker_id', 'speaker')))
+            destination = voice_root / f'{safe_segment}_{safe_speaker}.wav'
+            producer.ensure_tts_wav(str(segment['text']), destination, voice_direction=voice_direction, voice_name=voice_name)
+            duration = voice_first.wav_duration(destination)
+            segment['duration_seconds'] = round(duration, 4)
+            segment['voice_asset'] = {
+                'schema_version': 1, 'path': destination.relative_to(ROOT).as_posix(),
+                'sha256': producer.file_sha256(destination), 'duration_seconds': round(duration, 4),
+                'model': producer.GEMINI_TTS_MODEL, 'voice': voice_name,
+                'cache_fingerprint': producer.tts_cache_fingerprint(str(segment['text']), voice_direction, voice_name),
+            }
+            asset_count += 1
+            measured[segment_id] = duration
+            log(f'[{concept.get("title", reel_id)}] Voice locked: {segment_id} / {voice_name} / {duration:.2f}s')
+        timing = voice_first.build_scene_timing_plan(segments, measured)
+        beat['voice_timing'] = timing
+        beat['target_frames'] = timing['target_frames']
+        log(f'[{concept.get("title", reel_id)}] Scene {beat_index} timing locked: {timing["target_frames"]} frames / {timing["target_duration_seconds"]:.2f}s; {len(segments)} speaker turn(s), no dialogue truncation.')
     concept['voice_first_plan'] = {
-        'status': 'voice_measured_before_video',
-        'audio_model': producer.GEMINI_TTS_MODEL,
-        'cache_key_version': 2,
-        'scene_count': len(concept['beats']),
-        'dialogue_truncated': False,
+        'status': 'voice_measured_before_video', 'audio_model': producer.GEMINI_TTS_MODEL,
+        'cache_key_version': 4, 'voice_asset_schema_version': 1, 'voice_asset_count': asset_count,
+        'scene_count': len(concept['beats']), 'dialogue_truncated': False,
         'video_duration_source': 'measured_voice_audio',
     }
     return concept
@@ -540,6 +540,7 @@ def plan_week(reel_count: int = 3) -> int:
     }
     write_json(PENDING, {
         'job_id': job_id, 'created_at_ist': manifest['created_at_ist'], 'status': 'dispatching',
+        'plan_workflow_run_id': str(os.getenv('GITHUB_RUN_ID', '')).strip(),
         'kaggle_kernel_id': kaggle_kernel_id(), 'manifest': manifest, 'reels': planned,
         'policy': {'paid_fallback': False, 'auto_facebook_publish': False, 'max_reels': reel_count},
     })
