@@ -29,6 +29,7 @@ TZ = ZoneInfo('Asia/Kolkata')
 sys.path.insert(0, str(ROOT / 'scripts'))
 import producer  # noqa: E402
 import voice_first  # noqa: E402
+import factory_supervisor  # noqa: E402
 import character_library  # noqa: E402
 import audience_qa  # noqa: E402
 
@@ -541,6 +542,11 @@ def plan_week(reel_count: int = 3) -> int:
     write_json(PENDING, {
         'job_id': job_id, 'created_at_ist': manifest['created_at_ist'], 'status': 'dispatching',
         'plan_workflow_run_id': str(os.getenv('GITHUB_RUN_ID', '')).strip(),
+        'plan_workflow_run_attempt': int(os.getenv('GITHUB_RUN_ATTEMPT', '1') or '1'),
+        'voice_assets_artifact_name': (
+            f"bsk-voice-assets-{str(os.getenv('GITHUB_RUN_ID', '')).strip()}"
+            if str(os.getenv('GITHUB_RUN_ID', '')).strip() else ''
+        ),
         'kaggle_kernel_id': kaggle_kernel_id(), 'manifest': manifest, 'reels': planned,
         'policy': {'paid_fallback': False, 'auto_facebook_publish': False, 'max_reels': reel_count},
     })
@@ -1275,6 +1281,131 @@ def fail_gpu_output_identity(pending: dict, reason: str) -> int:
     return 1
 
 
+def verify_finalization_voice_assets(pending: dict | None = None) -> int:
+    """Verify original narration assets before rendering; never synthesize replacements."""
+    state = pending if isinstance(pending, dict) else (load_json(PENDING, {}) or {})
+    verified = 0
+    for reel in state.get('reels', []):
+        concept = reel.get('concept') if isinstance(reel.get('concept'), dict) else {}
+        voice_plan = concept.get('voice_first_plan') if isinstance(concept.get('voice_first_plan'), dict) else {}
+        for beat_index, beat in enumerate(concept.get('beats', []), start=1):
+            if not isinstance(beat, dict):
+                raise RuntimeError(f"Reel {reel.get('reel_id')} beat {beat_index} is malformed.")
+            segments = beat.get('speech_segments')
+            if isinstance(segments, list) and segments:
+                for line_index, segment in enumerate(segments, start=1):
+                    segment_id = str(segment.get('segment_id') or f"beat_{beat_index:02d}_line_{line_index:02d}")
+                    if isinstance(segment.get('voice_asset'), dict):
+                        producer.validate_locked_voice_asset(segment)
+                        verified += 1
+                        continue
+                    if int(voice_plan.get('voice_asset_schema_version', 0) or 0) >= 1:
+                        raise RuntimeError(
+                            f"Locked voice-first plan is missing immutable WAV metadata for {segment_id}; "
+                            "refusing broad cache fallback or TTS regeneration."
+                        )
+                    narration = str(segment.get('text') or '')
+                    if not narration.strip():
+                        raise RuntimeError(f"Voice segment {segment_id} has no narration text.")
+                    direction = voice_first.segment_voice_direction(segment)
+                    voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
+                    fingerprint = producer.tts_cache_fingerprint(narration, direction, voice_name)
+                    wav_path = producer.TTS_CACHE_DIR / f"{fingerprint}.wav"
+                    sidecar = producer.TTS_CACHE_DIR / f"{fingerprint}.wav.sha256"
+                    if (not wav_path.is_file() or not sidecar.is_file()
+                            or sidecar.read_text(encoding='ascii').strip() != fingerprint
+                            or not producer._valid_tts_wav(wav_path)):
+                        raise RuntimeError(
+                            f"Exact Director-run voice cache is missing or invalid for {segment_id}; "
+                            "finalization stopped before any TTS API request."
+                        )
+                    measured = voice_first.wav_duration(wav_path)
+                    expected = float(segment.get('duration_seconds') or 0)
+                    if expected <= 0 or abs(measured - expected) > 0.15:
+                        raise RuntimeError(
+                            f"Exact Director-run WAV duration mismatch for {segment_id}: "
+                            f"planned {expected:.3f}s, cached {measured:.3f}s; refusing regeneration."
+                        )
+                    verified += 1
+            elif beat.get('voiceover'):
+                fingerprint = producer.tts_cache_fingerprint(
+                    str(beat['voiceover']), beat.get('voice_direction'), producer.TTS_VOICE
+                )
+                wav_path = producer.TTS_CACHE_DIR / f"{fingerprint}.wav"
+                sidecar = producer.TTS_CACHE_DIR / f"{fingerprint}.wav.sha256"
+                if (not wav_path.is_file() or not sidecar.is_file()
+                        or sidecar.read_text(encoding='ascii').strip() != fingerprint
+                        or not producer._valid_tts_wav(wav_path)):
+                    raise RuntimeError(
+                        f"Exact Director-run voice cache is missing or invalid for beat_{beat_index:02d}; "
+                        "finalization stopped before any TTS API request."
+                    )
+                verified += 1
+    if verified == 0:
+        raise RuntimeError("Finalization voice preflight found no verified narration assets.")
+    log(f"Finalization voice preflight passed: {verified} original/locked voice asset(s); no TTS regeneration permitted.")
+    return verified
+
+
+def watch_existing_kaggle_job() -> int:
+    """Watch the same Kaggle job in bounded windows; never dispatch another kernel."""
+    pending = load_json(PENDING, {}) or {}
+    if pending.get('status') not in {'gpu_running', 'gpu_complete'}:
+        raise RuntimeError(f"Automatic watcher requires gpu_running/gpu_complete; status={pending.get('status', 'none')}.")
+    identity_error = pending_gpu_identity_error(pending)
+    if identity_error:
+        raise RuntimeError("Automatic watcher refused invalid GPU identity: " + identity_error)
+    supervisor = pending.setdefault('supervisor', {})
+    now = datetime.now(TZ)
+    started_text = str(supervisor.get('gpu_watch_started_at_ist') or '').strip()
+    if started_text:
+        started = datetime.fromisoformat(started_text)
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=TZ)
+    else:
+        started = now
+        supervisor['gpu_watch_started_at_ist'] = now.isoformat(timespec='seconds')
+    chunk_seconds = max(300, int(os.getenv('BSK_GPU_WATCH_CHUNK_SECONDS', '10800')))
+    total_seconds = max(chunk_seconds, int(os.getenv('BSK_GPU_WATCH_MAX_SECONDS', '43200')))
+    interval = max(60, int(os.getenv('BSK_GPU_POLL_INTERVAL_SECONDS', '300')))
+    chunk_started = time.monotonic()
+    while True:
+        status, _raw = kaggle_status(str(pending.get('kaggle_kernel_id') or ''))
+        observed = datetime.now(TZ)
+        pending['last_seen_gpu_status'] = status
+        pending['last_seen_gpu_status_at_ist'] = observed.isoformat(timespec='seconds')
+        supervisor['last_remote_status'] = status
+        supervisor['last_remote_status_at_ist'] = observed.isoformat(timespec='seconds')
+        supervisor['poll_count'] = int(supervisor.get('poll_count', 0) or 0) + 1
+        write_json(PENDING, pending)
+        decision = factory_supervisor.next_watch_action(
+            status,
+            chunk_elapsed_seconds=time.monotonic() - chunk_started,
+            total_elapsed_seconds=max(0.0, (observed - started).total_seconds()),
+            chunk_limit_seconds=chunk_seconds,
+            total_limit_seconds=total_seconds,
+        )
+        log(f"Factory supervisor: job={pending.get('job_id')} Kaggle={status}; decision={decision or 'continue'}.")
+        if decision == 'stop':
+            supervisor['status'] = 'owner_action_required'
+            supervisor['stop_reason'] = (
+                f"Kaggle status {status} is unknown/unmapped or the {total_seconds // 3600}h watch limit was reached. "
+                "The existing job is preserved; no duplicate GPU dispatch was attempted."
+            )
+            write_json(PENDING, pending)
+            raise RuntimeError(supervisor['stop_reason'])
+        if decision in {'watch', 'poll'}:
+            supervisor['next_action'] = decision
+            supervisor['next_action_at_ist'] = observed.isoformat(timespec='seconds')
+            write_json(PENDING, pending)
+            output_path = os.getenv('GITHUB_OUTPUT', '').strip()
+            if output_path:
+                with open(output_path, 'a', encoding='utf-8') as output:
+                    output.write(f"next_action={decision}\\n")
+            return 0
+        time.sleep(interval)
+
+
 def _poll_and_finalize_impl() -> int:
     producer.require_env()
     pending = load_json(PENDING, {})
@@ -1301,6 +1432,9 @@ def _poll_and_finalize_impl() -> int:
                 write_json(PENDING, pending)
                 alert_failure(f'BINA SHOR KE GPU batch is still {status} after about {age_hours:.1f} hours. Free Kaggle queue/session limits may be involved. No duplicate job or paid fallback was started; inspect Kaggle status before retrying.')
         return 0
+
+    if status == 'COMPLETE':
+        verify_finalization_voice_assets(pending)
 
     with tempfile.TemporaryDirectory(prefix='bsk-kaggle-output-') as td:
         dest = Path(td) / 'downloaded'
@@ -1644,42 +1778,59 @@ def _poll_and_finalize_impl() -> int:
 
 
 def poll_and_finalize() -> int:
-    """Run a single poll/finalize attempt; persist failure and require explicit retry."""
-    try:
-        return _poll_and_finalize_impl()
-    except Exception as exc:
-        pending = load_json(PENDING, {}) or {}
-        error_text = f'{type(exc).__name__}: {exc}'[:5000]
-        if pending.get('status') in {'gpu_running', 'gpu_complete', 'finalizing'}:
-            # A hard visual/rhythm defect is not a transient API error. Mark it rejected so the owner
-            # can create a fresh concept/batch; retry-finalize would only reuse the same bad pixels.
-            if any(marker in error_text.lower() for marker in ('critical visual defect', 'excessive speed change', 'too short')):
-                pending['status'] = 'qa_rejected'
-                pending['qa_rejection_reason'] = error_text
-                pending['qa_rejected_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-                history = producer.load_history()
-                failed_reel_id = pending.get('active_finalizing_reel_id')
-                for reel in pending.get('reels', []):
-                    if reel.get('delivery_status') != 'delivered':
-                        is_failed_reel = reel.get('reel_id') == failed_reel_id
-                        history.setdefault('topics', []).append({
-                            'title': reel.get('title', ''), 'theme': reel.get('theme', ''), 'pillar': reel.get('pillar', ''),
-                            'generated_at': pending.get('created_at_ist'), 'planned_publish_at': reel.get('planned_publish_at'),
-                            'status': 'qa_rejected_not_published' if is_failed_reel else 'batch_aborted_not_rendered',
-                            'rejection_reason': error_text[:700] if is_failed_reel else 'Batch stopped before this Reel finished production.',
-                        })
-                producer.save_history(history)
+    """Finalize the same COMPLETE Kaggle job; retry only transient provider/network failures."""
+    for attempt in range(1, 4):
+        try:
+            return _poll_and_finalize_impl()
+        except Exception as exc:
+            pending = load_json(PENDING, {}) or {}
+            error_text = f'{type(exc).__name__}: {exc}'[:5000]
+            failure_class = factory_supervisor.classify_finalization_failure(error_text)
+            if pending.get('status') in {'gpu_running', 'gpu_complete', 'finalizing'}:
+                if any(marker in error_text.lower() for marker in (
+                    'critical visual defect', 'excessive speed change', 'too short',
+                    'forbidden prompt labels',
+                )):
+                    pending['status'] = 'qa_rejected'
+                    pending['qa_rejection_reason'] = error_text
+                    pending['qa_rejected_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                    history = producer.load_history()
+                    failed_reel_id = pending.get('active_finalizing_reel_id')
+                    for reel in pending.get('reels', []):
+                        if reel.get('delivery_status') != 'delivered':
+                            is_failed_reel = reel.get('reel_id') == failed_reel_id
+                            history.setdefault('topics', []).append({
+                                'title': reel.get('title', ''), 'theme': reel.get('theme', ''), 'pillar': reel.get('pillar', ''),
+                                'generated_at': pending.get('created_at_ist'), 'planned_publish_at': reel.get('planned_publish_at'),
+                                'status': 'qa_rejected_not_published' if is_failed_reel else 'batch_aborted_not_rendered',
+                                'rejection_reason': error_text[:700] if is_failed_reel else 'Batch aborted before this Reel finished production.',
+                            })
+                    producer.save_history(history)
+                else:
+                    pending['status'] = 'finalize_failed'
+                    pending['finalize_error'] = error_text
+                    pending['finalize_failed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                write_json(PENDING, pending)
+            delay = factory_supervisor.finalization_retry_delay_seconds(attempt)
+            if failure_class == 'transient_provider' and delay is not None and pending.get('status') != 'qa_rejected':
+                remote_status, _remote_output = kaggle_status(str(pending.get('kaggle_kernel_id') or ''))
+                if remote_status == 'COMPLETE' and pending_gpu_identity_error(pending) is None:
+                    pending['status'] = 'gpu_running'
+                    pending['automatic_finalize_retry_count'] = int(pending.get('automatic_finalize_retry_count', 0) or 0) + 1
+                    pending['automatic_finalize_last_error'] = error_text
+                    pending['automatic_finalize_retry_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+                    write_json(PENDING, pending)
+                    log(f"Transient provider failure; retry {attempt + 1}/3 for SAME Kaggle output in {delay}s. No new GPU dispatch.")
+                    time.sleep(delay)
+                    continue
+            if pending.get('status') == 'qa_rejected':
+                instruction = "Hard visual/rhythm/OCR QA failed. Do not retry-finalize the same rejected pixels."
+            elif failure_class == 'non_retryable_integrity_or_qa':
+                instruction = "Voice/cache/asset integrity or objective QA failed. No TTS regeneration, cache substitution or QA bypass was attempted."
             else:
-                pending['status'] = 'finalize_failed'
-                pending['finalize_error'] = error_text
-                pending['finalize_failed_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-            write_json(PENDING, pending)
-        if pending.get('status') == 'qa_rejected':
-            instruction = 'The reel was rejected for a hard visual/rhythm QA issue. Do NOT publish it and do NOT use retry-finalize (that would reuse the same scenes). After checking the report, run plan-one for a fresh concept or plan-week for a new batch.'
-        else:
-            instruction = 'Fix the transient/API issue, then manually run the workflow with action=retry-finalize. Previously delivered Telegram items are checkpointed to prevent duplicate delivery.'
-        alert_failure('BINA SHOR KE finalization stopped safely. No paid fallback was used and nothing was auto-published. ' + instruction + ' Details: ' + error_text[:1300])
-        raise
+                instruction = "Bounded transient retries exhausted or provider unavailable. Existing GPU output preserved."
+            log("Finalizer stopped safely: " + instruction + " " + error_text[:1300])
+            raise
 
 
 def resolve_dispatch_unknown(confirm_running: bool) -> int:
@@ -2451,7 +2602,7 @@ def self_test() -> int:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=['plan', 'plan-one', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'repair-scene-6-voiceover-followup-finalize', 'rebuild-rejected-timing', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
+    parser.add_argument('command', choices=['plan', 'plan-one', 'watch-existing', 'verify-voice-assets', 'poll-finalize', 'retry-finalize', 'repair-rhythm-finalize', 'repair-scene-voiceover-finalize', 'repair-scene-6-voiceover-finalize', 'repair-scene-6-voiceover-followup-finalize', 'rebuild-rejected-timing', 'retry-gpu', 'resume-checkpoint', 'resolve-dispatch-running', 'resolve-dispatch-not-started', 'preflight'])
     args = parser.parse_args()
     try:
         if args.command == 'preflight':
@@ -2460,6 +2611,10 @@ def main():
             return plan_week(3)
         if args.command == 'plan-one':
             return plan_week(1)
+        if args.command == 'watch-existing':
+            return watch_existing_kaggle_job()
+        if args.command == 'verify-voice-assets':
+            return verify_finalization_voice_assets()
         if args.command == 'retry-finalize':
             return retry_finalize()
         if args.command == 'repair-rhythm-finalize':

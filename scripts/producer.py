@@ -1581,6 +1581,8 @@ def ensure_tts_wav(
     destination: Path,
     voice_direction: str | None = None,
     voice_name: str | None = None,
+    *,
+    allow_generation: bool = True,
 ) -> str:
     """Reuse only a validated WAV whose SHA-256 sidecar matches this exact narration text.
 
@@ -1616,6 +1618,11 @@ def ensure_tts_wav(
             log(f"Reusing validated local TTS cache: {destination.name}")
             return "cached"
 
+    if not allow_generation:
+        raise RuntimeError(
+            "Verified TTS cache miss during finalization; refusing to regenerate a measured voice line. "
+            "Restore the exact Director-run cache or immutable voice-asset artifact first."
+        )
     destination.unlink(missing_ok=True)
     local_sidecar.unlink(missing_ok=True)
     tts_wav(text, destination, voice_direction=voice_direction, voice_name=selected_voice)
@@ -2805,6 +2812,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                         str(line["text"]), line_path,
                         voice_direction=voice_direction,
                         voice_name=str(line.get("gemini_voice") or TTS_VOICE),
+                        allow_generation=False,
                     )
                 measured = voice_first.wav_duration(line_path)
                 expected = line.get("duration_seconds")
@@ -2828,7 +2836,11 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             total_voice_seconds += spoken_seconds
         else:
             # Backward compatibility for an older pending manifest or a hand-authored test concept.
-            ensure_tts_wav(beat["voiceover"], audio_path, voice_direction=beat.get("voice_direction"))
+            ensure_tts_wav(
+                beat["voiceover"], audio_path,
+                voice_direction=beat.get("voice_direction"),
+                allow_generation=False,
+            )
             audio_duration = probe_duration(audio_path)
             total_voice_seconds += audio_duration
         voice_audio_paths.append(audio_path)

@@ -1395,3 +1395,25 @@ class SceneAudioFilterTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+
+
+    def test_finalizer_never_generates_tts_when_exact_cache_is_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            old_cache = producer.TTS_CACHE_DIR
+            producer.TTS_CACHE_DIR = Path(folder) / "empty-cache"
+            try:
+                destination = Path(folder) / "render" / "voice.wav"
+                with patch.object(producer, "tts_wav") as mocked_tts:
+                    with self.assertRaisesRegex(RuntimeError, "refusing to regenerate a measured voice line"):
+                        producer.ensure_tts_wav(
+                            "मौजूदा मापी हुई आवाज़ सुरक्षित रहे।",
+                            destination,
+                            voice_direction="Adult feminine Hindi voice.",
+                            voice_name="Aoede",
+                            allow_generation=False,
+                        )
+                mocked_tts.assert_not_called()
+                self.assertFalse(destination.exists())
+            finally:
+                producer.TTS_CACHE_DIR = old_cache
