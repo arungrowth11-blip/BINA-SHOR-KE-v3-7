@@ -299,7 +299,8 @@ class FactoryLogicTests(unittest.TestCase):
                 path = Path(folder) / f"frame_{index + 1}.jpg"
                 Image.new("RGB", (540, 960), (50 + index, 70, 80)).save(path, format="JPEG")
                 frames.append(path)
-            with patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+            with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \
                  patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
                  patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
                  patch.object(producer, "_openai_compatible_visual_qa_request", side_effect=[
@@ -334,6 +335,15 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(payload["model"], "ministral-8b-2512")
         self.assertEqual(payload["response_format"], {"type": "json_object"})
         self.assertIn("data:image/jpeg;base64,", payload["messages"][1]["content"][1]["image_url"]["url"])
+
+    def test_mistral_vision_is_disabled_without_explicit_free_only_opt_in(self):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(producer, "GEMINI_API_KEY", ""), \
+             patch.object(producer, "GROQ_API_KEY", ""), \
+             patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
+             patch.object(producer, "CF_WORKERS_AI_ENABLED", False):
+            with self.assertRaisesRegex(RuntimeError, "No configured free-tier vision providers"):
+                producer.gemini_json_with_images("system", "inspect", [Path("unused.jpg")])
 
     def test_local_visual_qa_passes_valid_portrait_and_flags_black_frames(self):
         from PIL import Image

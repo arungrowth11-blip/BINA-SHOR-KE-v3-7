@@ -1794,7 +1794,11 @@ def _vision_provider_order() -> list[tuple[str, str, str, str, str, int]]:
     enabled = {
         "gemini": bool(GEMINI_API_KEY),
         "groq": bool(GROQ_API_KEY),
-        "mistral": bool(MISTRAL_API_KEY),
+        # Mistral may be connected to a billable workspace. A key alone never enables it.
+        "mistral": bool(
+            MISTRAL_API_KEY
+            and os.getenv("BSK_MISTRAL_FREE_ONLY", "").strip().upper() in {"YES", "TRUE"}
+        ),
         # Cloudflare is used only when the operator explicitly enables its free-only route.
         "cloudflare": bool(CF_WORKERS_AI_ENABLED and CF_ACCOUNT_ID and CF_API_TOKEN),
     }

@@ -55,6 +55,7 @@ class WorkflowConfigTests(unittest.TestCase):
             body = (ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8")
             self.assertIn("GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}", body)
             self.assertIn("MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}", body)
+            self.assertIn("BSK_MISTRAL_FREE_ONLY: ${{ vars.BSK_MISTRAL_FREE_ONLY }}", body)
             self.assertIn('CF_TEXT_MODEL: "@cf/meta/llama-3.1-8b-instruct"', body)
 
 
