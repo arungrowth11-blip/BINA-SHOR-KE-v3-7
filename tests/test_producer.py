@@ -252,7 +252,8 @@ class FactoryLogicTests(unittest.TestCase):
                 frame_paths.append(path)
 
             scorecard = valid_visual_scorecard()
-            with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+            with patch.dict(os.environ, {"BSK_VISION_PROVIDER": "gemini"}), \
+                 patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
                  patch.object(producer, "GROQ_API_KEY", "groq-key"), \
                  patch.object(producer, "MISTRAL_API_KEY", ""), \
                  patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
