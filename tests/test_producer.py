@@ -269,6 +269,50 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertTrue(all(len(call.args[6]) == 3 for call in groq.call_args_list))
         self.assertTrue(all(call.args[1] == "https://api.groq.com/openai/v1/chat/completions" for call in groq.call_args_list))
 
+    def test_vision_router_rejects_incomplete_gemini_scorecard_and_uses_groq(self):
+        with tempfile.TemporaryDirectory() as folder:
+            frames = []
+            for index in range(2):
+                path = Path(folder) / f"frame_{index + 1}.jpg"
+                path.write_bytes(f"frame-{index}".encode("ascii"))
+                frames.append(path)
+            with patch.dict(os.environ, {"BSK_VISION_PROVIDER": "gemini"}), \
+                 patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer, "_gemini_visual_qa_request", return_value={
+                     "scores": {}, "critical_issue": False,
+                 }), \
+                 patch.object(producer, "_openai_compatible_visual_qa_request", return_value=valid_visual_scorecard()) as groq:
+                result = producer.gemini_json_with_images("system", "review every frame", frames)
+
+        self.assertEqual(result["visual_qa_provider"], "Groq")
+        groq.assert_called_once()
+        self.assertEqual(len(groq.call_args.args[6]), 2)
+
+    def test_vision_router_falls_through_groq_to_mistral(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            frames = []
+            for index in range(4):
+                path = Path(folder) / f"frame_{index + 1}.jpg"
+                Image.new("RGB", (540, 960), (50 + index, 70, 80)).save(path, format="JPEG")
+                frames.append(path)
+            with patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+                 patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer, "_openai_compatible_visual_qa_request", side_effect=[
+                     RuntimeError("Groq HTTP 503: temporarily unavailable"),
+                     valid_visual_scorecard(),
+                 ]) as request:
+                result = producer.gemini_json_with_images("system", "review every frame", frames)
+
+        self.assertEqual(result["visual_qa_provider"], "Mistral")
+        self.assertEqual(result["visual_qa_model"], "ministral-8b-2512")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args.args[0], "Mistral")
+
     def test_mistral_vision_request_uses_base64_image_and_json_mode(self):
         response = Mock()
         response.status_code = 200
