@@ -333,9 +333,9 @@ jobs:
         if: steps.work.outputs.finalize == 'true' && steps.pending.outputs.plan_run_id != ''
         uses: actions/download-artifact@v7
         with:
-          name: bsk-voice-assets-\${{ steps.pending.outputs.plan_run_id }}
-          run-id: \${{ steps.pending.outputs.plan_run_id }}
-          github-token: \${{ secrets.GITHUB_TOKEN }}
+          name: bsk-voice-assets-${{ steps.pending.outputs.plan_run_id }}
+          run-id: ${{ steps.pending.outputs.plan_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: data/voice_assets
 
       - name: Install only missing FFmpeg and Devanagari prerequisites

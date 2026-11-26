@@ -169,7 +169,7 @@ jobs:
         if: always() && (env.RUN_MODE == 'plan-one' || env.RUN_MODE == 'plan-week') && hashFiles('data/voice_assets/**/*.wav') != ''
         uses: actions/upload-artifact@v7
         with:
-          name: bsk-voice-assets-\${{ github.run_id }}
+          name: bsk-voice-assets-${{ github.run_id }}
           path: data/voice_assets/
           retention-days: 7
           if-no-files-found: error
