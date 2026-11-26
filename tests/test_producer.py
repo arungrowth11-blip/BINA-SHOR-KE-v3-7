@@ -721,8 +721,7 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_tts_cache_reuses_exact_text_and_valid_wav_across_reruns(self):
         text = "एक छोटी कहानी की परीक्षण पंक्ति।"
-        cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
-        digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
+        digest = producer.tts_cache_fingerprint(text)
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             old_cache = producer.TTS_CACHE_DIR
@@ -749,10 +748,9 @@ class FactoryLogicTests(unittest.TestCase):
 
     def test_tts_cache_identity_includes_voice_and_performance_direction(self):
         text = "यह एक छोटी सी परीक्षण पंक्ति है।"
-        common = text + "\n[voice_direction=calm]"
-        first = producer.hashlib.sha256((common + "\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
-        second = producer.hashlib.sha256((common + "\n[gemini_voice=Gacrux]").encode("utf-8")).hexdigest()
-        third = producer.hashlib.sha256((text + "\n[voice_direction=angry]\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
+        first = producer.tts_cache_fingerprint(text, "calm", "Puck")
+        second = producer.tts_cache_fingerprint(text, "calm", "Gacrux")
+        third = producer.tts_cache_fingerprint(text, "angry", "Puck")
         self.assertNotEqual(first, second)
         self.assertNotEqual(first, third)
 
@@ -825,8 +823,7 @@ class FactoryLogicTests(unittest.TestCase):
                         wav_file.writeframes(b"\x00\x00" * 24000)
                 with patch.object(producer, "tts_wav", side_effect=fake_tts):
                     self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
-                cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
-                digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
+                digest = producer.tts_cache_fingerprint(text)
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav").exists())
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav.sha256").exists())
                 self.assertTrue((producer.TTS_CACHE_DIR / ".dirty").exists())

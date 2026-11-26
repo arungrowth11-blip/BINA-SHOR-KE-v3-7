@@ -335,7 +335,7 @@ class P0ReliabilityIntegrationTests(unittest.TestCase):
                 output.setnchannels(1)
                 output.setsampwidth(2)
                 output.setframerate(24000)
-                output.writeframes(b"\\x00\\x00" * 24000)
+                output.writeframes(bytes(48000))
             digest = hashlib.sha256(wav_path.read_bytes()).hexdigest()
             segment = {"segment_id": "line", "voice_asset": {
                 "schema_version": 1, "path": "data/voice_assets/reel-test/line.wav",
