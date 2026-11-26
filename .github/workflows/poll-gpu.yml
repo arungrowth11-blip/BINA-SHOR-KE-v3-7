@@ -45,7 +45,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || 'poll') }}
+      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-vision-fallback-retry]') && 'retry-finalize' || 'poll')) }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
