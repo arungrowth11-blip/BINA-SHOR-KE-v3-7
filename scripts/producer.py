@@ -1750,7 +1750,7 @@ def _openai_compatible_visual_qa_request(
         encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
         content.append({
             "type": "image_url",
-            "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
+            "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
         })
     payload: dict[str, Any] = {
         "model": model,
@@ -1777,7 +1777,7 @@ def _openai_compatible_visual_qa_request(
     return _openai_json_completion(response.json(), provider, 6000)
 
 
-def _vision_provider_order() -> list[tuple[str, str, str, str, int]]:
+def _vision_provider_order() -> list[tuple[str, str, str, str, str, int]]:
     """Configured free-tier providers only; each route uses a documented vision model."""
     providers = {
         "gemini": ("Gemini", GEMINI_TEXT_MODEL, "", GEMINI_API_KEY, 18),
@@ -1789,7 +1789,7 @@ def _vision_provider_order() -> list[tuple[str, str, str, str, int]]:
             CF_API_TOKEN, 8,
         ),
     }
-    primary = os.getenv("BSK_VISION_PROVIDER", "gemini").strip().lower()
+    primary = os.getenv("BSK_VISION_PROVIDER", "groq").strip().lower()
     names = [primary] + [name for name in ("gemini", "groq", "mistral", "cloudflare") if name != primary]
     enabled = {
         "gemini": bool(GEMINI_API_KEY),
@@ -1849,6 +1849,7 @@ def gemini_json_with_images(
                 for index in range(0, len(image_paths), detail_limit)
             ]
             batch_results: list[dict[str, Any]] = []
+            hard_rejection = False
             for batch_index, batch in enumerate(batches, start=1):
                 request_images = ([overview] if overview else []) + batch
                 batch_prompt = user_prompt
@@ -1878,6 +1879,7 @@ def gemini_json_with_images(
                 if result.get("critical_issue") is True or min(
                     float(result["scores"][key]) for key in VISION_REQUIRED_SCORE_KEYS
                 ) <= 2:
+                    hard_rejection = True
                     break
 
             combined_scores = {
@@ -1911,7 +1913,7 @@ def gemini_json_with_images(
             }
             # A critical result can stop early (and reject); a pass is accepted only after
             # every expected detail batch was reviewed successfully.
-            if not combined["critical_issue"] and len(batch_results) != len(batches):
+            if not hard_rejection and len(batch_results) != len(batches):
                 raise RuntimeError(f"{provider_label} visual QA stopped before all batches were reviewed.")
             log(
                 f"Visual QA completed with {provider_label} model {model} "
@@ -2225,7 +2227,7 @@ def metadata_ocr_qa(video_path: Path, reel_dir: Path, duration: float) -> dict[s
 
 
 def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_durations: list[float] | None = None) -> dict[str, Any]:
-    """Sample the whole Reel, run local diagnostics, then use Gemini as an optional critic."""
+    """Sample the whole Reel, run local diagnostics, then use the configured vision-provider cascade."""
     frames_dir = reel_dir / "qa_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     timestamps = []
