@@ -29,6 +29,11 @@ on:
       - feature/voice-first-3d-foundation
     paths:
       - ".github/workflows/poll-gpu.yml"
+  # PR #10 sync is a one-time recovery hook for the existing completed GPU job.
+  # The job is restricted to this PR/branch and the Python precheck permits only
+  # its first retry-finalize attempt; it never invokes retry-gpu.
+  pull_request:
+    types: [synchronize]
   schedule:
     - cron: "0 */2 * * *"
       timezone: "Asia/Kolkata"
@@ -42,10 +47,11 @@ concurrency:
 
 jobs:
   finalize:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.number == 10 && github.event.pull_request.head.ref == 'feature/voice-first-3d-foundation')
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-vision-fallback-retry]') && 'retry-finalize' || 'poll')) }}
+      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-vision-fallback-retry]') && 'retry-finalize' || (github.event_name == 'pull_request' && github.event.pull_request.number == 10 && github.event.pull_request.head.ref == 'feature/voice-first-3d-foundation' && 'retry-finalize' || 'poll'))) }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
@@ -71,6 +77,7 @@ jobs:
       - name: Checkout private repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
           fetch-depth: 0
 
       - name: Refresh queued feature-branch dispatch to latest state
@@ -241,6 +248,11 @@ jobs:
           resume_states = {"gpu_checkpoint_saved"}
           if action == "retry-finalize":
               allowed = retry_states
+              # PR-sync recovery is deliberately single-shot. Manual workflow_dispatch
+              # remains available for a later owner-approved retry if this one fails.
+              if (os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
+                      and int(state.get("retry_finalization_count", 0) or 0) >= 1):
+                  allowed = set()
           elif action == "repair-rhythm":
               allowed = {"qa_rejected"} if rhythm_repair_ok else set()
           elif action == "repair-scene-voiceover":
