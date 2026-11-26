@@ -245,5 +245,19 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
 
+    def test_gpu_poll_never_auto_retries_finalization_on_pr_or_marker_push(self):
+        body = (ROOT / '.github' / 'workflows' / 'poll-gpu.yml').read_text(encoding='utf-8')
+        workflow = yaml.load(body, Loader=yaml.BaseLoader)
+        self.assertNotIn('pull_request', workflow['on'])
+        self.assertNotIn('bsk-vision-fallback-retry', body)
+        self.assertIn("'workflow_dispatch' && inputs.action", body)
+        self.assertIn('output/**/visual_qa_report.json', body)
+        self.assertIn('output/**/metadata_ocr_report.json', body)
+        self.assertIn('output/**/qa_frames/**', body)
+        persist = body.split('name: Persist delivery and performance state', 1)[1]
+        self.assertNotIn('continue-on-error: true', persist)
+        self.assertIn('git rebase FETCH_HEAD', persist)
+        self.assertIn('for attempt in 1 2 3', persist)
+
 if __name__ == '__main__':
     unittest.main(verbosity=2)

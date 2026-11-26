@@ -2226,6 +2226,119 @@ def metadata_ocr_qa(video_path: Path, reel_dir: Path, duration: float) -> dict[s
     return report
 
 
+def reconcile_actual_voice_timing(beat: dict[str, Any], measured_durations: dict[str, float]) -> dict[str, Any]:
+    """Make the validated WAV files authoritative and rebuild the beat timing without truncating speech.
+
+    The planning and finalization runners may restore different snapshots of a shared cache.
+    Matching transcript/voice identity does not guarantee an identical synthesized duration.
+    A duration drift is therefore reconciled against the exact WAV being rendered, then the
+    normal scene-duration and bounded video-retiming guards decide whether it is safe.
+    """
+    segments = beat.get("speech_segments")
+    if not isinstance(segments, list) or not segments:
+        return {"adjusted": False, "differences": []}
+
+    old_timing = beat.get("voice_timing")
+    old_segments = old_timing.get("segments", []) if isinstance(old_timing, dict) else []
+    planned_by_id = {
+        str(item.get("segment_id")): float(item["duration_seconds"])
+        for item in old_segments
+        if isinstance(item, dict)
+        and item.get("segment_id") is not None
+        and isinstance(item.get("duration_seconds"), (int, float))
+        and not isinstance(item.get("duration_seconds"), bool)
+    }
+
+    differences: list[dict[str, Any]] = []
+    for segment in segments:
+        segment_id = str(segment.get("segment_id") or "")
+        if segment_id not in measured_durations:
+            raise RuntimeError(f"Measured WAV duration is missing for voice segment {segment_id!r}.")
+        measured = float(measured_durations[segment_id])
+        if not math.isfinite(measured) or measured <= 0:
+            raise RuntimeError(f"Measured WAV duration is invalid for voice segment {segment_id!r}.")
+        planned = planned_by_id.get(segment_id)
+        if planned is not None and abs(measured - planned) > 0.15:
+            differences.append({
+                "segment_id": segment_id,
+                "planned_seconds": round(planned, 4),
+                "actual_wav_seconds": round(measured, 4),
+                "delta_seconds": round(measured - planned, 4),
+            })
+        segment["duration_seconds"] = round(measured, 4)
+
+    if differences:
+        gap_count = max(0, len(segments) - 1)
+        recorded_gap = (
+            float(old_timing.get("dialogue_gap_seconds", 0.0) or 0.0)
+            if isinstance(old_timing, dict) else 0.0
+        )
+        gap_per_turn = (
+            recorded_gap / gap_count if gap_count else voice_first.DEFAULT_DIALOGUE_GAP_SECONDS
+        )
+        rebuilt = voice_first.build_scene_timing_plan(
+            segments,
+            {str(item["segment_id"]): float(item["duration_seconds"]) for item in segments},
+            dialogue_gap_seconds=gap_per_turn,
+            head_handle_seconds=float(
+                old_timing.get("head_handle_seconds", voice_first.HEAD_HANDLE_SECONDS)
+                if isinstance(old_timing, dict) else voice_first.HEAD_HANDLE_SECONDS
+            ),
+            tail_handle_seconds=float(
+                old_timing.get("tail_handle_seconds", voice_first.TAIL_HANDLE_SECONDS)
+                if isinstance(old_timing, dict) else voice_first.TAIL_HANDLE_SECONDS
+            ),
+            fps=int(
+                old_timing.get("fps", voice_first.FPS)
+                if isinstance(old_timing, dict) else voice_first.FPS
+            ),
+        )
+        beat["voice_timing"] = rebuilt
+        beat["target_frames"] = rebuilt["target_frames"]
+        log(
+            "Rebuilt voice-first timing from the exact validated WAV duration(s): "
+            + ", ".join(
+                f"{item['segment_id']} {item['planned_seconds']:.3f}s→{item['actual_wav_seconds']:.3f}s"
+                for item in differences
+            )
+            + f"; new scene target {rebuilt['target_duration_seconds']:.3f}s."
+        )
+
+    return {
+        "adjusted": bool(differences),
+        "differences": differences,
+        "new_target_duration_seconds": (
+            beat.get("voice_timing", {}).get("target_duration_seconds")
+            if isinstance(beat.get("voice_timing"), dict) else None
+        ),
+    }
+
+
+def persist_visual_qa_report(reel_dir: Path, review: dict[str, Any]) -> Path:
+    """Persist QA results and frame evidence even when a later hard gate rejects the Reel."""
+    frames_dir = reel_dir / "qa_frames"
+    frames = sorted(
+        path.relative_to(reel_dir).as_posix()
+        for path in frames_dir.glob("frame_*.jpg")
+        if path.is_file() and path.stat().st_size > 1000
+    )
+    contact_sheet = frames_dir / "qa_contact_sheet.jpg"
+    report = dict(review)
+    report["qa_evidence"] = {
+        "frames": frames,
+        "contact_sheet": (
+            contact_sheet.relative_to(reel_dir).as_posix()
+            if contact_sheet.is_file() else None
+        ),
+    }
+    destination = reel_dir / "visual_qa_report.json"
+    destination.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return destination
+
+
 def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_durations: list[float] | None = None) -> dict[str, Any]:
     """Sample the whole Reel, run local diagnostics, then use the configured vision-provider cascade."""
     frames_dir = reel_dir / "qa_frames"
@@ -2310,6 +2423,17 @@ def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_duratio
 
     ocr_report = metadata_ocr_qa(video_path, reel_dir, duration)
     result["metadata_ocr_qa"] = ocr_report
+    result["qa_evidence"] = {
+        "frames": [
+            path.relative_to(reel_dir).as_posix()
+            for path in frame_paths
+            if path.is_file()
+        ],
+        "contact_sheet": (
+            (frames_dir / "qa_contact_sheet.jpg").relative_to(reel_dir).as_posix()
+            if (frames_dir / "qa_contact_sheet.jpg").is_file() else None
+        ),
+    }
     if ocr_report.get("status") == "warning":
         result["critical_issue"] = True
         result["status"] = "warning"
@@ -2893,6 +3017,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         if isinstance(speech_segments, list):
             line_paths: list[Path] = []
             spoken_seconds = 0.0
+            measured_line_durations: dict[str, float] = {}
             for line_index, line in enumerate(speech_segments, start=1):
                 speaker_id = str(line["speaker_id"])
                 segment_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(line.get("segment_id") or f"beat_{i+1:02d}_line_{line_index:02d}"))
@@ -2907,15 +3032,18 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                     voice_name=str(line.get("gemini_voice") or TTS_VOICE),
                 )
                 measured = voice_first.wav_duration(line_path)
-                expected = line.get("duration_seconds")
-                if expected is not None and abs(measured - float(expected)) > 0.15:
-                    raise RuntimeError(
-                        f"Voice cache mismatch for {segment_id}: planned {float(expected):.3f}s, "
-                        f"finalizer has {measured:.3f}s. Refusing to render out of sync."
-                    )
-                line["duration_seconds"] = round(measured, 4)
+                measured_line_durations[segment_id] = measured
                 spoken_seconds += measured
                 line_paths.append(line_path)
+            if line_paths:
+                timing_reconciliation = reconcile_actual_voice_timing(
+                    beat, measured_line_durations
+                )
+                if timing_reconciliation["adjusted"]:
+                    log(
+                        f"[{concept['title']}] Beat {i+1}: exact WAV timing differed from the "
+                        "planning snapshot; the beat was safely replanned from measured audio."
+                    )
             if not line_paths:
                 planned_scene = float((beat.get("voice_timing") or {}).get("target_duration_seconds", 2.5))
                 voice_first.write_silence_wav(audio_path, max(2.5, planned_scene))
@@ -3135,6 +3263,9 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     segment_durations = [probe_duration(path) for path in segment_paths]
     frame_review = visual_qa(video_path, reel_dir, final_duration, segment_durations=segment_durations)
     frame_review["full_video_motion_diagnostics"] = motion_diagnostics(video_path)
+    # Save the scorecard and sampled frames before the fail-closed gate so rejected
+    # Reels always carry the evidence referenced by Telegram alerts and Actions artifacts.
+    persist_visual_qa_report(reel_dir, frame_review)
     # Fail closed for unmistakably broken text/composition. If visual model review is
     # unavailable, deliver only with an explicit human-review requirement instead.
     enforce_visual_qa(frame_review)

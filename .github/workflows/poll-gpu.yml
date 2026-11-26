@@ -29,11 +29,6 @@ on:
       - feature/voice-first-3d-foundation
     paths:
       - ".github/workflows/poll-gpu.yml"
-  # PR #10 sync is a one-time recovery hook for the existing completed GPU job.
-  # The job is restricted to this PR/branch and the Python precheck permits only
-  # its first retry-finalize attempt; it never invokes retry-gpu.
-  pull_request:
-    types: [synchronize]
   schedule:
     - cron: "0 */2 * * *"
       timezone: "Asia/Kolkata"
@@ -51,7 +46,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-vision-fallback-retry]') && 'retry-finalize' || (github.event_name == 'pull_request' && github.event.pull_request.number == 10 && github.event.pull_request.head.ref == 'feature/voice-first-3d-foundation' && 'retry-finalize' || 'poll'))) }}
+      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || 'poll') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
@@ -458,6 +453,9 @@ jobs:
             output/**/credits.txt
             output/**/quality_report.json
             output/**/ai_visual_prompts.txt
+            output/**/visual_qa_report.json
+            output/**/metadata_ocr_report.json
+            output/**/qa_frames/**
             data/pending_gpu_job.json
             data/history.json
             data/performance_log.csv
@@ -485,12 +483,32 @@ jobs:
 
       - name: Persist delivery and performance state
         if: always() && steps.work.outputs.required == 'true'
-        continue-on-error: true
+        shell: bash
         run: |
+          set -euo pipefail
+          branch="${GITHUB_REF_NAME}"
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
           git add data/pending_gpu_job.json data/history.json data/telegram_state.json data/performance_log.csv data/toolchain_lock.json
           if ! git diff --cached --quiet; then
             git commit -m "Update BSK GPU delivery and QA state [skip ci]"
-            git push
+            pushed=false
+            for attempt in 1 2 3; do
+              git fetch --no-tags origin "$branch"
+              if ! git rebase FETCH_HEAD; then
+                git rebase --abort || true
+                echo "State persistence rebase conflict; refusing to discard QA/delivery state." >&2
+                exit 1
+              fi
+              if git push origin "HEAD:refs/heads/$branch"; then
+                pushed=true
+                echo "Persisted BSK state after $attempt push attempt(s)."
+                break
+              fi
+              echo "State push raced with another commit (attempt $attempt/3); refetching." >&2
+            done
+            if [ "$pushed" != true ]; then
+              echo "Could not persist BSK state after three fetch/rebase/push attempts." >&2
+              exit 1
+            fi
           fi

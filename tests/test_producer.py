@@ -1382,6 +1382,77 @@ class SceneAudioFilterTests(unittest.TestCase):
             "atempo=1.020000,apad=pad_dur=0.080,loudnorm=I=-16:TP=-1.5:LRA=11",
         )
 
+    def test_reconcile_actual_voice_timing_replans_from_exact_wav_duration(self):
+        segment = {
+            "segment_id": "beat_02_line_01",
+            "speaker_id": "narrator",
+            "text": "यह परीक्षण संवाद है।",
+            "duration_seconds": 5.72,
+        }
+        planned = producer.voice_first.build_scene_timing_plan(
+            [segment], {"beat_02_line_01": 5.72}
+        )
+        beat = {
+            "speech_segments": [segment],
+            "voice_timing": planned,
+            "target_frames": planned["target_frames"],
+        }
+
+        result = producer.reconcile_actual_voice_timing(
+            beat, {"beat_02_line_01": 5.21}
+        )
+
+        self.assertTrue(result["adjusted"])
+        self.assertAlmostEqual(
+            beat["speech_segments"][0]["duration_seconds"], 5.21, places=3
+        )
+        self.assertAlmostEqual(
+            beat["voice_timing"]["speech_duration_seconds"], 5.21, places=3
+        )
+        self.assertLess(
+            beat["voice_timing"]["target_duration_seconds"],
+            planned["target_duration_seconds"],
+        )
+        self.assertEqual(result["differences"][0]["segment_id"], "beat_02_line_01")
+
+    def test_reconcile_actual_voice_timing_does_not_flag_small_duration_variance(self):
+        segment = {
+            "segment_id": "beat_01_line_01",
+            "speaker_id": "narrator",
+            "text": "यह छोटा परीक्षण है।",
+            "duration_seconds": 3.28,
+        }
+        planned = producer.voice_first.build_scene_timing_plan(
+            [segment], {"beat_01_line_01": 3.28}
+        )
+        beat = {"speech_segments": [segment], "voice_timing": planned}
+        result = producer.reconcile_actual_voice_timing(
+            beat, {"beat_01_line_01": 3.35}
+        )
+        self.assertFalse(result["adjusted"])
+        self.assertAlmostEqual(segment["duration_seconds"], 3.35, places=3)
+
+    def test_persist_visual_qa_report_keeps_frames_and_contact_sheet_reference(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            frames_dir = reel_dir / "qa_frames"
+            frames_dir.mkdir()
+            (frames_dir / "frame_1.jpg").write_bytes(b"x" * 2000)
+            (frames_dir / "qa_contact_sheet.jpg").write_bytes(b"y" * 2000)
+            review = {
+                "status": "warning",
+                "critical_issue": True,
+                "scores": {"character_continuity": 1},
+                "notes": ["Visible character identity drift."],
+            }
+            report_path = producer.persist_visual_qa_report(reel_dir, review)
+            saved = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["status"], "warning")
+        self.assertEqual(saved["qa_evidence"]["frames"], ["qa_frames/frame_1.jpg"])
+        self.assertEqual(
+            saved["qa_evidence"]["contact_sheet"], "qa_frames/qa_contact_sheet.jpg"
+        )
+
     def test_scene_audio_filter_rejects_nonfinite_timing(self):
         with self.assertRaisesRegex(ValueError, "tempo must be finite"):
             producer._scene_audio_filter(float("nan"), 0.08, has_speech=False)
