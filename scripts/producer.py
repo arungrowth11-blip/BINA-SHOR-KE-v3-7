@@ -59,6 +59,15 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.8-flash-lite-tts")
+# Vision QA uses independent provider routing; text-only models are never selected here.
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b").strip()
+MISTRAL_VISION_MODEL = os.getenv("MISTRAL_VISION_MODEL", "ministral-8b-2512").strip()
+CF_VISION_MODEL = os.getenv("CF_VISION_MODEL", "@cf/qwen/qwen3.8-27b").strip()
+VISION_REQUIRED_SCORE_KEYS = (
+    "text_legibility", "devanagari_rendering", "anatomy_integrity",
+    "story_visual_match", "safe_composition", "visual_quality",
+    "character_continuity", "metadata_text_cleanliness",
+)
 TTS_VOICE = os.getenv("TTS_VOICE", "Kore")
 FONT_DIR = "/usr/share/fonts/truetype/noto"
 # A conservative request pacing guard for free-tier TTS quotas (roughly <= 3 requests/min).
@@ -321,11 +330,14 @@ def cloudflare_json(system: str, user_prompt: str, temperature: float = 0.8, tim
 
 def _provider_failure_cooldown(name: str, exc: Exception) -> None:
     message = str(exc).lower()
-    permanent = any(token in message for token in ("http 400", "http 401", "http 403", "http 404", "invalid api key", "unauthorized", "model_not_found", "unknown model"))
-    if permanent:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code in {400, 401, 403, 404} or any(
+        token in message for token in ("http 400", "http 401", "http 403", "http 404", "invalid api key", "unauthorized", "model_not_found", "unknown model")
+    ):
         _PROVIDER_DISABLED_THIS_RUN.add(name)
         log(f"Provider circuit opened for {name} for the remainder of this run (configuration/model error).")
-    elif any(token in message for token in ("http 429", "quota", "rate limit", "resource_exhausted")):
+    elif status_code == 429 or any(token in message for token in ("http 429", "quota", "rate limit", "resource_exhausted")):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 900
         log(f"Provider circuit opened for {name} for 15 minutes (quota/rate-limit response).")
     elif any(token in message for token in (
@@ -333,12 +345,12 @@ def _provider_failure_cooldown(name: str, exc: Exception) -> None:
         "output reached its", "invalid json", "empty or unsupported message content",
     )):
         # Invalid JSON is a response-quality failure, not proof the provider is unavailable.
-        # Keep the bounded candidate loop able to retry; hard truncation has larger budgets.
         log(f"Provider {name} returned invalid/truncated structured output; retaining it for a bounded candidate retry.")
-    elif any(token in message for token in ("http 500", "http 502", "http 503", "http 504", "timeout", "connection", "temporarily unavailable")):
+    elif status_code in {408, 500, 502, 503, 504} or any(token in message for token in (
+        "http 408", "http 500", "http 502", "http 503", "http 504", "timeout", "connection", "temporarily unavailable"
+    )):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 120
         log(f"Provider circuit opened for {name} for 2 minutes (transient failure).")
-
 
 def _provider_available(name: str) -> bool:
     if name in _PROVIDER_DISABLED_THIS_RUN:
@@ -1618,22 +1630,70 @@ def run_cmd(args: list[str], timeout: int = 240) -> None:
 
 
 
-def gemini_json_with_images(system: str, user_prompt: str, image_paths: list[Path], temperature: float = 0.2) -> dict[str, Any]:
-    """Send rendered frames to Gemini with bounded retries for transient failures."""
+def _valid_visual_scorecard(result: Any) -> bool:
+    """A provider is eligible only when it returns every required score and a real boolean gate."""
+    if not isinstance(result, dict) or not isinstance(result.get("scores"), dict):
+        return False
+    if not isinstance(result.get("critical_issue"), bool):
+        return False
+    for key in VISION_REQUIRED_SCORE_KEYS:
+        value = result["scores"].get(key)
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or not 1.0 <= float(value) <= 5.0
+        ):
+            return False
+    return True
+
+
+def _visual_contact_sheet(image_paths: list[Path]) -> Path | None:
+    """Build a small whole-Reel overview so per-provider image batches retain continuity context."""
+    if len(image_paths) < 3:
+        return None
+    try:
+        from PIL import Image, ImageOps
+
+        cell_width, cell_height, columns = 180, 320, 3
+        rows = math.ceil(len(image_paths) / columns)
+        sheet = Image.new("RGB", (columns * cell_width, rows * cell_height), (24, 24, 24))
+        for index, image_path in enumerate(image_paths):
+            with Image.open(image_path) as source:
+                thumb = ImageOps.contain(source.convert("RGB"), (cell_width, cell_height))
+            x = (index % columns) * cell_width + (cell_width - thumb.width) // 2
+            y = (index // columns) * cell_height + (cell_height - thumb.height) // 2
+            sheet.paste(thumb, (x, y))
+        destination = image_paths[0].parent / "qa_contact_sheet.jpg"
+        sheet.save(destination, format="JPEG", quality=82, optimize=True)
+        return destination
+    except Exception as exc:
+        # The full-resolution frames remain authoritative; overview is an aid, never a gate.
+        log(f"Could not build optional visual QA contact sheet: {str(exc)[:180]}")
+        return None
+
+
+def _gemini_visual_qa_request(
+    system: str,
+    user_prompt: str,
+    image_paths: list[Path],
+    temperature: float = 0.2,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Gemini multimodal request with a bounded transient retry; caller handles provider fallback."""
     if not GEMINI_API_KEY:
         raise RuntimeError("Gemini visual QA is not configured (GEMINI_API_KEY is absent).")
-
+    selected_model = model or GEMINI_TEXT_MODEL
     parts: list[dict[str, Any]] = [{"text": user_prompt}]
     for image_path in image_paths:
         raw = image_path.read_bytes()
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(raw).decode("ascii")}})
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model}:generateContent"
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": temperature},
     }
-
     last_error: Exception | None = None
     for attempt in range(3):
         try:
@@ -1660,22 +1720,212 @@ def gemini_json_with_images(system: str, user_prompt: str, image_paths: list[Pat
             malformed_response = isinstance(exc, (json.JSONDecodeError, KeyError, IndexError, ValueError, RuntimeError))
             if attempt >= 2 or not (transient_http or transient_network or malformed_response):
                 break
-
             retry_after = 0
             if error_response is not None:
                 try:
                     retry_after = int(float(error_response.headers.get("Retry-After", "0")))
                 except (AttributeError, TypeError, ValueError):
                     retry_after = 0
-            delay = min(retry_after, 45) if retry_after > 0 else min(5 * (2 ** attempt), 20)
-            log(
-                f"Gemini visual QA transient/response failure "
-                f"(attempt {attempt + 1}/3): {str(exc)[:220]}; retrying in {delay}s."
-            )
+            delay = min(retry_after, 10) if retry_after > 0 else min(3 * (2 ** attempt), 8)
+            log(f"Gemini visual QA transient/response failure (attempt {attempt + 1}/3): {str(exc)[:220]}; retrying in {delay}s.")
             time.sleep(delay)
-
     raise RuntimeError(f"Gemini visual QA failed after bounded retries: {last_error}") from last_error
 
+
+def _openai_compatible_visual_qa_request(
+    provider: str,
+    endpoint: str,
+    api_key: str,
+    model: str,
+    system: str,
+    user_prompt: str,
+    image_paths: list[Path],
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    """Vision request for Groq, Mistral, or explicitly enabled Cloudflare Workers AI."""
+    if not api_key:
+        raise RuntimeError(f"{provider} vision QA is not configured.")
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    for image_path in image_paths:
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{encoded}", "detail": "high"},
+        })
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system + "\nReturn valid JSON only. Follow the requested scorecard exactly."},
+            {"role": "user", "content": content},
+        ],
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    if provider == "Groq":
+        payload["max_completion_tokens"] = 6000
+        payload["reasoning_effort"] = "low"
+    else:
+        payload["max_tokens"] = 6000
+    response = requests.post(
+        endpoint,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=150,
+    )
+    response.raise_for_status()
+    return _openai_json_completion(response.json(), provider, 6000)
+
+
+def _vision_provider_order() -> list[tuple[str, str, str, str, int]]:
+    """Configured free-tier providers only; each route uses a documented vision model."""
+    providers = {
+        "gemini": ("Gemini", GEMINI_TEXT_MODEL, "", GEMINI_API_KEY, 18),
+        "groq": ("Groq", GROQ_VISION_MODEL, "https://api.groq.com/openai/v1/chat/completions", GROQ_API_KEY, 3),
+        "mistral": ("Mistral", MISTRAL_VISION_MODEL, "https://api.mistral.ai/v1/chat/completions", MISTRAL_API_KEY, 8),
+        "cloudflare": (
+            "Cloudflare Workers AI", CF_VISION_MODEL,
+            f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/v1/chat/completions",
+            CF_API_TOKEN, 8,
+        ),
+    }
+    primary = os.getenv("BSK_VISION_PROVIDER", "gemini").strip().lower()
+    names = [primary] + [name for name in ("gemini", "groq", "mistral", "cloudflare") if name != primary]
+    enabled = {
+        "gemini": bool(GEMINI_API_KEY),
+        "groq": bool(GROQ_API_KEY),
+        "mistral": bool(MISTRAL_API_KEY),
+        # Cloudflare is used only when the operator explicitly enables its free-only route.
+        "cloudflare": bool(CF_WORKERS_AI_ENABLED and CF_ACCOUNT_ID and CF_API_TOKEN),
+    }
+    return [
+        (name, *providers[name])
+        for name in names
+        if name in providers and enabled[name] and _provider_available(f"{name}_vision")
+    ]
+
+
+def gemini_json_with_images(
+    system: str,
+    user_prompt: str,
+    image_paths: list[Path],
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    """Use every configured free-tier vision provider until one completes the full validated review.
+
+    A real visual rejection is returned immediately and cannot be overwritten by a second model.
+    Provider outages or malformed/incomplete scorecards move to the next configured vision model.
+    """
+    if not image_paths:
+        raise RuntimeError("Visual QA received no rendered frames.")
+    order = _vision_provider_order()
+    if not order:
+        raise RuntimeError(
+            "No configured free-tier vision providers are available "
+            "(Gemini, Groq, Mistral, or explicitly enabled Cloudflare Workers AI)."
+        )
+    contact_sheet = _visual_contact_sheet(image_paths)
+    failures: list[str] = []
+    for provider_key, provider_label, model, endpoint, api_key, max_images in order:
+        try:
+            if provider_key == "gemini":
+                result = _gemini_visual_qa_request(
+                    system, user_prompt, image_paths, temperature=temperature, model=model
+                )
+                if not _valid_visual_scorecard(result):
+                    raise ValueError("Gemini returned an incomplete or invalid visual QA scorecard.")
+                result["visual_qa_provider"] = provider_label
+                result["visual_qa_model"] = model
+                result["visual_qa_batches"] = 1
+                log(f"Visual QA completed with {provider_label} model {model}.")
+                return result
+
+            # Groq documents a maximum of 3 images/request; Mistral and Workers AI
+            # are kept to 8/request. A whole-Reel overview accompanies detailed batches.
+            overview = contact_sheet if contact_sheet is not None else None
+            detail_limit = max(1, max_images - (1 if overview else 0))
+            batches = [
+                image_paths[index:index + detail_limit]
+                for index in range(0, len(image_paths), detail_limit)
+            ]
+            batch_results: list[dict[str, Any]] = []
+            for batch_index, batch in enumerate(batches, start=1):
+                request_images = ([overview] if overview else []) + batch
+                batch_prompt = user_prompt
+                if overview:
+                    batch_prompt += (
+                        "\nThe first image is a small contact sheet of ALL ordered Reel samples. "
+                        "Use it to judge whole-Reel continuity. The remaining images are full-resolution "
+                        f"detail samples for batch {batch_index}/{len(batches)}; inspect each closely."
+                    )
+                if len(batches) > 1:
+                    batch_prompt += (
+                        f"\nThis is detail batch {batch_index} of {len(batches)}. "
+                        "Score every required dimension for the supplied detailed frames, "
+                        "and report any critical defect visible either in the overview or detail frames."
+                    )
+                result = _openai_compatible_visual_qa_request(
+                    provider_label, endpoint, api_key, model, system, batch_prompt,
+                    request_images, temperature=temperature,
+                )
+                if not _valid_visual_scorecard(result):
+                    raise ValueError(
+                        f"{provider_label} batch {batch_index}/{len(batches)} returned an incomplete or invalid visual QA scorecard."
+                    )
+                batch_results.append(result)
+                # A genuine critical finding is a hard rejection; do not shop for a more
+                # favourable model response or spend tokens reviewing additional batches.
+                if result.get("critical_issue") is True or min(
+                    float(result["scores"][key]) for key in VISION_REQUIRED_SCORE_KEYS
+                ) <= 2:
+                    break
+
+            combined_scores = {
+                key: min(float(item["scores"][key]) for item in batch_results)
+                for key in VISION_REQUIRED_SCORE_KEYS
+            }
+            confidence_order = {"low": 0, "medium": 1, "high": 2}
+            confidences = [
+                str(item.get("confidence", "low")).lower()
+                for item in batch_results
+            ]
+            confidence = min(
+                (value for value in confidences if value in confidence_order),
+                key=lambda value: confidence_order[value],
+                default="low",
+            )
+            notes = []
+            for item in batch_results:
+                item_notes = item.get("notes", [])
+                if isinstance(item_notes, list):
+                    notes.extend(str(note)[:400] for note in item_notes[:8])
+            combined = {
+                "scores": combined_scores,
+                "critical_issue": any(item["critical_issue"] for item in batch_results),
+                "notes": notes[:24],
+                "confidence": confidence,
+                "visual_qa_provider": provider_label,
+                "visual_qa_model": model,
+                "visual_qa_batches": len(batch_results),
+                "visual_qa_expected_batches": len(batches),
+            }
+            # A critical result can stop early (and reject); a pass is accepted only after
+            # every expected detail batch was reviewed successfully.
+            if not combined["critical_issue"] and len(batch_results) != len(batches):
+                raise RuntimeError(f"{provider_label} visual QA stopped before all batches were reviewed.")
+            log(
+                f"Visual QA completed with {provider_label} model {model} "
+                f"({len(batch_results)}/{len(batches)} batches)."
+            )
+            return combined
+        except Exception as exc:
+            failures.append(f"{provider_label}/{model}: {str(exc)[:300]}")
+            _provider_failure_cooldown(f"{provider_key}_vision", exc)
+            log(f"Visual QA provider {provider_label} model {model} failed: {str(exc)[:240]}")
+    raise RuntimeError(
+        "All configured free-tier vision providers failed to complete a valid whole-Reel scorecard; "
+        "no paid fallback was attempted. " + " | ".join(failures)
+    )
 
 def deterministic_local_visual_qa(frame_paths: list[Path]) -> dict[str, Any]:
     """Run dependency-light, deterministic checks on every sampled frame.
