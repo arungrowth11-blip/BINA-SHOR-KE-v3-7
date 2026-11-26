@@ -15,6 +15,22 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import producer  # noqa: E402
 
 
+def valid_visual_scorecard(**overrides):
+    result = {
+        "scores": {
+            "text_legibility": 5, "devanagari_rendering": 5,
+            "anatomy_integrity": 5, "story_visual_match": 5,
+            "safe_composition": 5, "visual_quality": 5,
+            "character_continuity": 5, "metadata_text_cleanliness": 5,
+        },
+        "critical_issue": False,
+        "notes": ["No critical issue in the supplied frame samples."],
+        "confidence": "high",
+    }
+    result.update(overrides)
+    return result
+
+
 class FactoryLogicTests(unittest.TestCase):
     def setUp(self):
         producer._PROVIDER_COOLDOWN_UNTIL.clear()
@@ -187,7 +203,7 @@ class FactoryLogicTests(unittest.TestCase):
     def test_gemini_visual_qa_request_uses_header_for_api_key(self):
         response = Mock()
         response.json.return_value = {
-            "candidates": [{"content": {"parts": [{"text": '{"scores": {}}'}]}}]
+            "candidates": [{"content": {"parts": [{"text": json.dumps(valid_visual_scorecard())}]}}]
         }
         with tempfile.TemporaryDirectory() as folder:
             frame = Path(folder) / "frame.jpg"
@@ -208,7 +224,12 @@ class FactoryLogicTests(unittest.TestCase):
         error = producer.requests.HTTPError("Gemini HTTP 503: unavailable", response=busy)
         success = Mock()
         success.json.return_value = {
-            "candidates": [{"content": {"parts": [{"text": '{"scores": {"visual_quality": 4}}'}]}}]
+            "candidates": [{"content": {"parts": [{"text": json.dumps(valid_visual_scorecard(scores={
+                "text_legibility": 5, "devanagari_rendering": 5,
+                "anatomy_integrity": 5, "story_visual_match": 5,
+                "safe_composition": 5, "visual_quality": 4,
+                "character_continuity": 5, "metadata_text_cleanliness": 5,
+            }))}]}}]
         }
         with tempfile.TemporaryDirectory() as folder:
             frame = Path(folder) / "frame.jpg"
@@ -220,6 +241,54 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(result["scores"]["visual_quality"], 4)
         self.assertEqual(mocked.call_count, 2)
         sleep.assert_called_once_with(2)
+
+    def test_visual_qa_falls_back_from_gemini_to_groq_and_reviews_every_frame_batch(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            frame_paths = []
+            for index in range(12):
+                path = Path(folder) / f"frame_{index + 1:02d}.jpg"
+                Image.new("RGB", (540, 960), (40 + index, 70, 90)).save(path, format="JPEG", quality=90)
+                frame_paths.append(path)
+
+            scorecard = valid_visual_scorecard()
+            with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \\
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \\
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \\
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \\
+                 patch.object(producer, "_gemini_visual_qa_request", side_effect=RuntimeError("Gemini HTTP 503: unavailable")), \\
+                 patch.object(producer, "_openai_compatible_visual_qa_request", return_value=scorecard) as groq:
+                result = producer.gemini_json_with_images("system", "inspect all samples", frame_paths)
+
+        self.assertEqual(result["visual_qa_provider"], "Groq")
+        self.assertEqual(result["visual_qa_model"], "qwen/qwen3.8-27b")
+        self.assertEqual(result["visual_qa_batches"], 6)
+        self.assertEqual(result["visual_qa_expected_batches"], 6)
+        self.assertEqual(groq.call_count, 6)
+        self.assertTrue(all(len(call.args[7]) == 3 for call in groq.call_args_list))
+        self.assertTrue(all(call.args[1] == "https://api.groq.com/openai/v1/chat/completions" for call in groq.call_args_list))
+
+    def test_mistral_vision_request_uses_base64_image_and_json_mode(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(valid_visual_scorecard())}}]
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            frame = Path(folder) / "frame.jpg"
+            frame.write_bytes(b"frame-bytes")
+            with patch.object(producer.requests, "post", return_value=response) as mocked:
+                result = producer._openai_compatible_visual_qa_request(
+                    "Mistral", "https://api.mistral.ai/v1/chat/completions",
+                    "test-mistral-key", "ministral-8b-2512",
+                    "system", "inspect image", [frame],
+                )
+        self.assertTrue(producer._valid_visual_scorecard(result))
+        self.assertEqual(mocked.call_args.args[0], "https://api.mistral.ai/v1/chat/completions")
+        payload = mocked.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "ministral-8b-2512")
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertIn("data:image/jpeg;base64,", payload["messages"][1]["content"][1]["image_url"]["url"])
 
     def test_local_visual_qa_passes_valid_portrait_and_flags_black_frames(self):
         from PIL import Image
