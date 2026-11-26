@@ -265,7 +265,7 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(result["visual_qa_batches"], 6)
         self.assertEqual(result["visual_qa_expected_batches"], 6)
         self.assertEqual(groq.call_count, 6)
-        self.assertTrue(all(len(call.args[7]) == 3 for call in groq.call_args_list))
+        self.assertTrue(all(len(call.args[6]) == 3 for call in groq.call_args_list))
         self.assertTrue(all(call.args[1] == "https://api.groq.com/openai/v1/chat/completions" for call in groq.call_args_list))
 
     def test_mistral_vision_request_uses_base64_image_and_json_mode(self):
