@@ -212,7 +212,7 @@ class FactoryLogicTests(unittest.TestCase):
                 producer.requests, "post", return_value=response
             ) as mocked:
                 result = producer.gemini_json_with_images("system", "prompt", [frame])
-        self.assertEqual(result, {"scores": {}})
+        self.assertEqual(result["scores"], valid_visual_scorecard()["scores"])
         self.assertEqual(mocked.call_args.kwargs["headers"]["x-goog-api-key"], "test-gemini-key")
         self.assertNotIn("params", mocked.call_args.kwargs)
         self.assertNotIn("test-gemini-key", mocked.call_args.args[0])
@@ -252,11 +252,11 @@ class FactoryLogicTests(unittest.TestCase):
                 frame_paths.append(path)
 
             scorecard = valid_visual_scorecard()
-            with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \\
-                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \\
-                 patch.object(producer, "MISTRAL_API_KEY", ""), \\
-                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \\
-                 patch.object(producer, "_gemini_visual_qa_request", side_effect=RuntimeError("Gemini HTTP 503: unavailable")), \\
+            with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer, "_gemini_visual_qa_request", side_effect=RuntimeError("Gemini HTTP 503: unavailable")), \
                  patch.object(producer, "_openai_compatible_visual_qa_request", return_value=scorecard) as groq:
                 result = producer.gemini_json_with_images("system", "inspect all samples", frame_paths)
 
