@@ -1,0 +1,13 @@
+# Project-scoped Codex configuration for BINA SHOR KE.
+# Codex versions/policies may differ; inspect effective configuration before use.
+# Multi-agent support is experimental and can be disabled by setting it false.
+[features]
+multi_agent = true
+
+[agents]
+max_threads = 3
+max_depth = 1
+
+[agents.reviewer]
+description = "Read-only BSK reviewer for evidence integrity, human-vs-synthetic QA, privacy, approval gates, and publishing safety."
+config_file = "agents/reviewer.toml"
