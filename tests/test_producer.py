@@ -235,7 +235,11 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             frame = Path(folder) / "frame.jpg"
             frame.write_bytes(b"frame-bytes")
-            with patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), \
+            with patch.dict(os.environ, {"BSK_VISION_PROVIDER": "gemini"}), \
+                 patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), \
+                 patch.object(producer, "GROQ_API_KEY", ""), \
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
                  patch.object(producer.requests, "post", side_effect=[error, success]) as mocked, \
                  patch.object(producer.time, "sleep") as sleep:
                 result = producer.gemini_json_with_images("system", "prompt", [frame])
