@@ -1886,5 +1886,13 @@
     "source_run_id": 45752908189,
     "reconciled_at_ist": "2026-11-28T09:23:31+05:30",
     "superseded_branch_finalize_error": "RuntimeError: Voice cache mismatch for beat_02_line_01: planned 5.720s, finalizer has 5.210s. Refusing to render out of sync."
+  },
+  "finalization_resolution": {
+    "status": "archived_terminal_qa_rejection",
+    "resolved_at_ist": "2026-11-28T12:38:07+05:30",
+    "archive_path": "data/job_archive/20261123_170831.json",
+    "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
+    "verified_kaggle_status": "COMPLETE",
+    "new_gpu_dispatch_required": false
   }
 }
