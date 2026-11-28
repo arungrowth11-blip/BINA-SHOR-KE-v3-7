@@ -1,7 +1,7 @@
 {
   "job_id": "20261123_170831",
   "created_at_ist": "2026-11-23T17:13:11+05:30",
-  "status": "finalize_failed",
+  "status": "qa_rejected",
   "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
   "manifest": {
     "job_id": "20261123_170831",
@@ -79,7 +79,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 3.28,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 3.5417,
@@ -106,7 +106,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "punch_in",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 1.7709,
                 "duration_seconds": 1.7709,
                 "zoom": 1.16,
@@ -142,7 +142,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 5.72,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 6.0417,
@@ -169,7 +169,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "gentle_push",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 3.0208,
                 "duration_seconds": 3.0208,
                 "zoom": 1.08,
@@ -216,7 +216,7 @@
                   "speaker_id": "story_b593dfae_supporting",
                   "start_seconds": 0.08,
                   "end_seconds": 3.08,
-                  "duration_seconds": 3.0
+                  "duration_seconds": 3
                 },
                 {
                   "segment_id": "beat_03_line_02",
@@ -239,7 +239,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "reaction_close",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 3.0208,
                 "duration_seconds": 3.0208,
                 "zoom": 1.18,
@@ -293,7 +293,7 @@
                   "speaker_id": "story_b593dfae_protagonist",
                   "start_seconds": 3.06,
                   "end_seconds": 5.06,
-                  "duration_seconds": 2.0
+                  "duration_seconds": 2
                 }
               ],
               "timing_source": "measured_tts_wav_before_gpu",
@@ -309,7 +309,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "track_left",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 2.6042,
                 "duration_seconds": 2.6042,
                 "zoom": 1.08,
@@ -379,7 +379,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "reveal_push",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 2.1806,
                 "duration_seconds": 2.1806,
                 "zoom": 1.2,
@@ -431,7 +431,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 4.44,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.7083,
@@ -458,7 +458,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "slow_pull_frame",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 2.3542,
                 "duration_seconds": 2.3542,
                 "zoom": 1.04,
@@ -574,7 +574,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 3.28,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 3.5417,
@@ -601,7 +601,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "punch_in",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 1.7709,
                 "duration_seconds": 1.7709,
                 "zoom": 1.16,
@@ -656,7 +656,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 5.72,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 6.0417,
@@ -683,7 +683,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "gentle_push",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 3.0208,
                 "duration_seconds": 3.0208,
                 "zoom": 1.08,
@@ -724,7 +724,7 @@
                 "voice_profile_id": "hi_male_adult_charon",
                 "gemini_voice": "Charon",
                 "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
-                "duration_seconds": 3.0
+                "duration_seconds": 3
               },
               {
                 "segment_id": "beat_03_line_02",
@@ -760,7 +760,7 @@
                   "speaker_id": "story_b593dfae_supporting",
                   "start_seconds": 0.08,
                   "end_seconds": 3.08,
-                  "duration_seconds": 3.0
+                  "duration_seconds": 3
                 },
                 {
                   "segment_id": "beat_03_line_02",
@@ -783,7 +783,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "reaction_close",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 3.0208,
                 "duration_seconds": 3.0208,
                 "zoom": 1.18,
@@ -835,7 +835,7 @@
                 "voice_profile_id": "hi_female_adult_aoede",
                 "gemini_voice": "Aoede",
                 "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
-                "duration_seconds": 2.0
+                "duration_seconds": 2
               }
             ],
             "voiceover": "मैं यहाँ साफ‑सफ़ाई कर लेता हूँ मैं अपनी चाय ले लेती हूँ",
@@ -867,7 +867,7 @@
                   "speaker_id": "story_b593dfae_protagonist",
                   "start_seconds": 3.06,
                   "end_seconds": 5.06,
-                  "duration_seconds": 2.0
+                  "duration_seconds": 2
                 }
               ],
               "timing_source": "measured_tts_wav_before_gpu",
@@ -883,7 +883,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "track_left",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 2.6042,
                 "duration_seconds": 2.6042,
                 "zoom": 1.08,
@@ -983,7 +983,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "reveal_push",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 2.1806,
                 "duration_seconds": 2.1806,
                 "zoom": 1.2,
@@ -1054,7 +1054,7 @@
             "voice_timing": {
               "fps": 24,
               "speech_duration_seconds": 4.44,
-              "dialogue_gap_seconds": 0.0,
+              "dialogue_gap_seconds": 0,
               "head_handle_seconds": 0.08,
               "tail_handle_seconds": 0.08,
               "target_duration_seconds": 4.7083,
@@ -1081,7 +1081,7 @@
                 "coverage": "establishing",
                 "source": "depth_parallax",
                 "camera_move": "slow_pull_frame",
-                "start_seconds": 0.0,
+                "start_seconds": 0,
                 "end_seconds": 2.3542,
                 "duration_seconds": 2.3542,
                 "zoom": 1.04,
@@ -1211,8 +1211,8 @@
             "camera_grammar": "gentle push-ins, intimate reaction close-ups, slow lateral drifts, held emotional payoff",
             "surface_language": "semi-painterly Indian graphic-novel illustration, tactile brush grain, restrained ink contours"
           },
-          "primary_2_5d_share_target": 1.0,
-          "hero_video_share_target": 0.0,
+          "primary_2_5d_share_target": 1,
+          "hero_video_share_target": 0,
           "visual_generation_mode": "image_first_flux_stills",
           "image_generation_count": 6,
           "story_type": "emotional",
@@ -1220,8 +1220,8 @@
           "source_beat_count": 6,
           "editorial_shot_count": 13,
           "hero_video_shot_count": 0,
-          "hero_video_share_actual": 0.0,
-          "depth_parallax_share_actual": 1.0,
+          "hero_video_share_actual": 0,
+          "depth_parallax_share_actual": 1,
           "depth_parallax_shot_count": 13,
           "gpu_generation_count": 6,
           "gpu_generation_saving_claim": false,
@@ -1234,7 +1234,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "punch_in",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 1.7709,
               "duration_seconds": 1.7709,
               "zoom": 1.16,
@@ -1266,7 +1266,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "gentle_push",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 3.0208,
               "duration_seconds": 3.0208,
               "zoom": 1.08,
@@ -1298,7 +1298,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "reaction_close",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 3.0208,
               "duration_seconds": 3.0208,
               "zoom": 1.18,
@@ -1330,7 +1330,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "track_left",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 2.6042,
               "duration_seconds": 2.6042,
               "zoom": 1.08,
@@ -1362,7 +1362,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "reveal_push",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 2.1806,
               "duration_seconds": 2.1806,
               "zoom": 1.2,
@@ -1410,7 +1410,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "slow_pull_frame",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 2.3542,
               "duration_seconds": 2.3542,
               "zoom": 1.04,
@@ -1457,7 +1457,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 3.28,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 3.5417,
@@ -1484,7 +1484,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "punch_in",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 1.7709,
               "duration_seconds": 1.7709,
               "zoom": 1.16,
@@ -1520,7 +1520,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 5.72,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 6.0417,
@@ -1547,7 +1547,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "gentle_push",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 3.0208,
               "duration_seconds": 3.0208,
               "zoom": 1.08,
@@ -1594,7 +1594,7 @@
                 "speaker_id": "story_b593dfae_supporting",
                 "start_seconds": 0.08,
                 "end_seconds": 3.08,
-                "duration_seconds": 3.0
+                "duration_seconds": 3
               },
               {
                 "segment_id": "beat_03_line_02",
@@ -1617,7 +1617,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "reaction_close",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 3.0208,
               "duration_seconds": 3.0208,
               "zoom": 1.18,
@@ -1671,7 +1671,7 @@
                 "speaker_id": "story_b593dfae_protagonist",
                 "start_seconds": 3.06,
                 "end_seconds": 5.06,
-                "duration_seconds": 2.0
+                "duration_seconds": 2
               }
             ],
             "timing_source": "measured_tts_wav_before_gpu",
@@ -1687,7 +1687,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "track_left",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 2.6042,
               "duration_seconds": 2.6042,
               "zoom": 1.08,
@@ -1757,7 +1757,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "reveal_push",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 2.1806,
               "duration_seconds": 2.1806,
               "zoom": 1.2,
@@ -1809,7 +1809,7 @@
           "voice_timing": {
             "fps": 24,
             "speech_duration_seconds": 4.44,
-            "dialogue_gap_seconds": 0.0,
+            "dialogue_gap_seconds": 0,
             "head_handle_seconds": 0.08,
             "tail_handle_seconds": 0.08,
             "target_duration_seconds": 4.7083,
@@ -1836,7 +1836,7 @@
               "coverage": "establishing",
               "source": "depth_parallax",
               "camera_move": "slow_pull_frame",
-              "start_seconds": 0.0,
+              "start_seconds": 0,
               "end_seconds": 2.3542,
               "duration_seconds": 2.3542,
               "zoom": 1.04,
@@ -1877,6 +1877,14 @@
   "active_finalizing_reel_id": "reel_01_170831",
   "finalize_failed_at_ist": "2026-11-26T09:39:55+05:30",
   "retry_finalization_count": 1,
-  "retry_requested_at_ist": "2026-11-26T09:39:27+05:30",
-  "finalize_error": "RuntimeError: Voice cache mismatch for beat_02_line_01: planned 5.720s, finalizer has 5.210s. Refusing to render out of sync."
+  "retry_requested_at_ist": "2026-11-26T09:35:49+05:30",
+  "finalize_error": null,
+  "qa_rejected_at_ist": "2026-11-26T09:38:39+05:30",
+  "qa_rejection_reason": "RuntimeError: Rendered-frame QA detected a potentially critical visual defect; the Reel was not added to the publish kit. Check QA frames and rerun.",
+  "state_reconciliation": {
+    "source": "bsk-publish-kit-121",
+    "source_run_id": 45752908189,
+    "reconciled_at_ist": "2026-11-28T09:23:31+05:30",
+    "superseded_branch_finalize_error": "RuntimeError: Voice cache mismatch for beat_02_line_01: planned 5.720s, finalizer has 5.210s. Refusing to render out of sync."
+  }
 }

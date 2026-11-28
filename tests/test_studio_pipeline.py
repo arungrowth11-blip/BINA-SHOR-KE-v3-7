@@ -1100,6 +1100,96 @@ class StudioPipelineTests(unittest.TestCase):
                 studio_pipeline.PENDING = old_pending
                 studio_pipeline.DATA = old_data
 
+    def test_terminal_critical_visual_qa_rejection_is_archived_after_kaggle_complete(self):
+        old_pending = studio_pipeline.PENDING
+        old_data = studio_pipeline.DATA
+        with tempfile.TemporaryDirectory() as folder:
+            data_dir = Path(folder) / "data"
+            studio_pipeline.DATA = data_dir
+            studio_pipeline.PENDING = data_dir / "pending_gpu_job.json"
+            reason = (
+                "RuntimeError: Rendered-frame QA detected a potentially critical visual defect; "
+                "the Reel was not added to the publish kit. Check QA frames and rerun."
+            )
+            pending = {
+                "job_id": "job-visual-qa-1",
+                "status": "qa_rejected",
+                "retry_finalization_count": 1,
+                "qa_rejection_reason": reason,
+                "kaggle_kernel_id": "owner/worker",
+                "manifest": {
+                    "job_id": "job-visual-qa-1",
+                    "reels": [{"reel_id": "reel-1", "beats": [{}, {}, {}, {}, {}, {}]}],
+                },
+                "reels": [{"reel_id": "reel-1", "delivery_status": "planned"}],
+            }
+            studio_pipeline.write_json(studio_pipeline.PENDING, pending)
+            try:
+                self.assertEqual(studio_pipeline.terminal_finalization_qa_reason(pending), reason)
+                with patch.object(
+                    studio_pipeline, "kaggle_status",
+                    return_value=("COMPLETE", "KernelWorkerStatus.COMPLETE"),
+                ) as status:
+                    resolved = studio_pipeline.archive_completed_qa_rejection(pending, reason)
+                status.assert_called_once_with("owner/worker")
+                self.assertEqual(resolved["status"], "qa_rejected")
+                self.assertEqual(resolved["qa_rejection_reason"], reason)
+                self.assertEqual(resolved["finalization_resolution"]["verified_kaggle_status"], "COMPLETE")
+                self.assertFalse(resolved["finalization_resolution"]["new_gpu_dispatch_required"])
+                archived = studio_pipeline.load_json(data_dir / "job_archive" / "job-visual-qa-1.json")
+                self.assertEqual(archived["status"], "qa_rejected")
+                self.assertEqual(archived["archive_metadata"]["final_qa_rejection_reason"], reason)
+            finally:
+                studio_pipeline.PENDING = old_pending
+                studio_pipeline.DATA = old_data
+
+    def test_visual_qa_incomplete_503_is_not_misclassified_as_terminal_rejection(self):
+        pending = {
+            "status": "finalize_failed",
+            "finalize_error": (
+                "RuntimeError: Rendered-frame QA did not complete successfully; "
+                "Gemini HTTP 503 Service Unavailable."
+            ),
+        }
+        self.assertEqual(studio_pipeline.terminal_finalization_qa_reason(pending), "")
+
+    def test_retry_finalize_refuses_second_attempt_before_kaggle_query(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / "pending_gpu_job.json"
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                "job_id": "job-retry-1",
+                "status": "finalize_failed",
+                "retry_finalization_count": 1,
+                "kaggle_kernel_id": "owner/worker",
+            })
+            try:
+                with patch.object(studio_pipeline, "kaggle_status") as status:
+                    with self.assertRaisesRegex(RuntimeError, "one permitted finalization retry"):
+                        studio_pipeline.retry_finalize()
+                    status.assert_not_called()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_retry_finalize_refuses_recorded_critical_visual_rejection(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / "pending_gpu_job.json"
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                "job_id": "job-retry-visual-1",
+                "status": "finalize_failed",
+                "retry_finalization_count": 0,
+                "qa_rejection_reason": "Rendered-frame QA detected a potentially critical visual defect.",
+                "kaggle_kernel_id": "owner/worker",
+            })
+            try:
+                with patch.object(studio_pipeline, "kaggle_status") as status:
+                    with self.assertRaisesRegex(RuntimeError, "critical visual QA rejection is terminal"):
+                        studio_pipeline.retry_finalize()
+                    status.assert_not_called()
+            finally:
+                studio_pipeline.PENDING = old_pending
+
     def test_unknown_finalization_failure_is_not_classified_as_terminal_qa_rejection(self):
         pending = {
             "status": "finalize_failed",

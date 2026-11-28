@@ -58,16 +58,24 @@ ACTIVE_GPU_STATES = {
 
 
 def terminal_finalization_qa_reason(pending: dict) -> str:
-    """Return a reason only for the known, non-retryable end-hold QA rejection."""
-    if pending.get('status') != 'finalize_failed':
+    """Return only evidence-backed terminal QA rejections; transient outages stay retryable."""
+    status = str(pending.get('status') or '')
+    qa_reason = str(pending.get('qa_rejection_reason') or '').strip()
+    if status in {'qa_rejected', 'finalize_failed'} and 'critical visual defect' in qa_reason.lower():
+        return qa_reason
+    if status != 'finalize_failed':
         return ''
     error = str(pending.get('finalize_error') or '').strip()
+    if 'critical visual defect' in error.lower():
+        return error
     if (
         'AI scene needs' in error
         and 'end hold' in error
         and 'above the 1.20s quality limit' in error
     ):
         return error
+    # "Rendered-frame QA did not complete" (including Gemini 503) is transient,
+    # not proof of a visual rejection; it must remain eligible for the one safe retry.
     return ''
 
 
@@ -77,8 +85,11 @@ def archive_completed_qa_rejection(pending: dict, reason: str) -> dict:
     Unknown/transient finalization errors are deliberately not eligible. This preserves the
     retry-finalize path for recoverable failures and never releases an active/ambiguous GPU job.
     """
-    if pending.get('status') != 'finalize_failed' or not reason:
+    status = str(pending.get('status') or '')
+    if status not in {'finalize_failed', 'qa_rejected'} or not reason:
         raise RuntimeError('Only a classified terminal finalization QA rejection can be archived.')
+    if terminal_finalization_qa_reason(pending) != reason:
+        raise RuntimeError('Refusing to archive a QA reason that is not supported by the saved terminal state.')
     job_id = str(pending.get('job_id') or '').strip()
     if not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', job_id):
         raise RuntimeError('Cannot archive terminal QA batch: job_id is missing or invalid.')
@@ -103,8 +114,15 @@ def archive_completed_qa_rejection(pending: dict, reason: str) -> dict:
     archive_path = archive_dir / f'{job_id}.json'
     if archive_path.exists():
         existing = load_json(archive_path, {}) or {}
-        if existing.get('job_id') != job_id or existing.get('status') != 'finalize_failed':
+        if existing.get('job_id') != job_id or existing.get('status') not in {'finalize_failed', 'qa_rejected'}:
             raise RuntimeError(f'Archive path already contains a different record: {archive_path}')
+        existing_reason = str(
+            (existing.get('archive_metadata') or {}).get('final_qa_rejection_reason')
+            or existing.get('qa_rejection_reason')
+            or ''
+        ).strip()
+        if existing_reason and existing_reason != reason:
+            raise RuntimeError(f'Archive path already records a different QA rejection: {archive_path}')
     else:
         archived = json.loads(json.dumps(pending, ensure_ascii=False))
         archived['archive_metadata'] = {
@@ -2087,8 +2105,12 @@ def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
         raise RuntimeError(f"There is no failed or interrupted finalization to retry (status={pending.get('status', 'none')}).")
+    if int(pending.get('retry_finalization_count', 0) or 0) >= 1:
+        raise RuntimeError('The one permitted finalization retry has already been used; refusing a second retry.')
+    qa_reason = str(pending.get('qa_rejection_reason') or '').lower()
+    if 'critical visual defect' in qa_reason:
+        raise RuntimeError('A critical visual QA rejection is terminal; archive the rejected job and create a fresh plan instead of retrying it.')
     # A GPU output failure itself cannot be repaired by re-running the finalizer. Only retry when Kaggle completed.
-    status, raw = kaggle_status(pending.get('kaggle_kernel_id', ''))
     if status != 'COMPLETE':
         raise RuntimeError(f"Kaggle kernel is not COMPLETE (status={status}). Inspect the GPU worker and use plan-week only after resolving the prior batch. {raw[-800:]}")
     pending['status'] = 'gpu_running'

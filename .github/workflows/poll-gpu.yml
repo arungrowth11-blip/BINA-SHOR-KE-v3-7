@@ -244,10 +244,10 @@ jobs:
           resume_states = {"gpu_checkpoint_saved"}
           if action == "retry-finalize":
               allowed = retry_states
-              # PR-sync recovery is deliberately single-shot. Manual workflow_dispatch
-              # remains available for a later owner-approved retry if this one fails.
-              if (os.environ.get("GITHUB_EVENT_NAME") == "pull_request"
-                      and int(state.get("retry_finalization_count", 0) or 0) >= 1):
+              # Finalization retry is globally one-shot. A recorded critical visual
+              # rejection is terminal and must never reuse the rejected scenes.
+              if (int(state.get("retry_finalization_count", 0) or 0) >= 1
+                      or "critical visual defect" in qa_reason):
                   allowed = set()
           elif action == "repair-rhythm":
               allowed = {"qa_rejected"} if rhythm_repair_ok else set()

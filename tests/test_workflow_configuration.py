@@ -169,6 +169,8 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('retry_states = {"finalize_failed", "finalizing", "gpu_failed"}', body)
         self.assertIn('active = state.get("status") in allowed', body)
         self.assertNotIn('"delivered"', body[body.index('retry_states ='):body.index('qa_reason =')])
+        self.assertIn('int(state.get("retry_finalization_count", 0) or 0) >= 1', body)
+        self.assertIn('"critical visual defect" in qa_reason', body)
 
     def test_telegram_feedback_sync_runs_independently_of_gpu_batches(self):
         body = (ROOT / '.github' / 'workflows' / 'telegram-feedback-sync.yml').read_text(encoding='utf-8')
