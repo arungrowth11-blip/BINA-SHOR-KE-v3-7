@@ -1889,7 +1889,7 @@
   },
   "finalization_resolution": {
     "status": "archived_terminal_qa_rejection",
-    "resolved_at_ist": "2026-11-28T12:38:07+05:30",
+    "resolved_at_ist": "2026-11-28T13:41:45+05:30",
     "archive_path": "data/job_archive/20261123_170831.json",
     "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
     "verified_kaggle_status": "COMPLETE",
