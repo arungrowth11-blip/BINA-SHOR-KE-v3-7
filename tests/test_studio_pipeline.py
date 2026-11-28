@@ -1190,6 +1190,61 @@ class StudioPipelineTests(unittest.TestCase):
             finally:
                 studio_pipeline.PENDING = old_pending
 
+    def test_retry_finalize_queries_kaggle_and_finalizes_only_completed_kernel(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / "pending_gpu_job.json"
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                "job_id": "job-retry-complete",
+                "status": "finalize_failed",
+                "retry_finalization_count": 0,
+                "kaggle_kernel_id": "owner/worker",
+            })
+            try:
+                with (
+                    patch.object(
+                        studio_pipeline, "kaggle_status",
+                        return_value=("COMPLETE", "KernelWorkerStatus.COMPLETE"),
+                    ) as status,
+                    patch.object(studio_pipeline, "poll_and_finalize", return_value=0) as finalize,
+                ):
+                    self.assertEqual(studio_pipeline.retry_finalize(), 0)
+                status.assert_called_once_with("owner/worker")
+                finalize.assert_called_once_with()
+                saved = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(saved["status"], "gpu_running")
+                self.assertEqual(saved["retry_finalization_count"], 1)
+            finally:
+                studio_pipeline.PENDING = old_pending
+
+    def test_retry_finalize_refuses_noncomplete_kaggle_status_without_consuming_retry(self):
+        old_pending = studio_pipeline.PENDING
+        with tempfile.TemporaryDirectory() as folder:
+            studio_pipeline.PENDING = Path(folder) / "pending_gpu_job.json"
+            studio_pipeline.write_json(studio_pipeline.PENDING, {
+                "job_id": "job-retry-running",
+                "status": "finalize_failed",
+                "retry_finalization_count": 0,
+                "kaggle_kernel_id": "owner/worker",
+            })
+            try:
+                with (
+                    patch.object(
+                        studio_pipeline, "kaggle_status",
+                        return_value=("RUNNING", "KernelWorkerStatus.RUNNING"),
+                    ) as status,
+                    patch.object(studio_pipeline, "poll_and_finalize") as finalize,
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "Kaggle kernel is not COMPLETE"):
+                        studio_pipeline.retry_finalize()
+                status.assert_called_once_with("owner/worker")
+                finalize.assert_not_called()
+                saved = studio_pipeline.load_json(studio_pipeline.PENDING)
+                self.assertEqual(saved["status"], "finalize_failed")
+                self.assertEqual(saved["retry_finalization_count"], 0)
+            finally:
+                studio_pipeline.PENDING = old_pending
+
     def test_unknown_finalization_failure_is_not_classified_as_terminal_qa_rejection(self):
         pending = {
             "status": "finalize_failed",

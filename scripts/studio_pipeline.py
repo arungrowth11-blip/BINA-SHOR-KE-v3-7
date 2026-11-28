@@ -2110,9 +2110,18 @@ def retry_finalize() -> int:
     qa_reason = str(pending.get('qa_rejection_reason') or '').lower()
     if 'critical visual defect' in qa_reason:
         raise RuntimeError('A critical visual QA rejection is terminal; archive the rejected job and create a fresh plan instead of retrying it.')
-    # A GPU output failure itself cannot be repaired by re-running the finalizer. Only retry when Kaggle completed.
+    kernel_id = str(pending.get('kaggle_kernel_id') or '').strip()
+    if not kernel_id or '/' not in kernel_id:
+        raise RuntimeError('Saved Kaggle kernel identity is missing or invalid; refusing to retry finalization.')
+    # Query Kaggle only after the one-shot and terminal-QA guards above have passed.
+    status, raw = kaggle_status(kernel_id)
+    # A GPU output failure itself cannot be repaired by re-running the finalizer.
     if status != 'COMPLETE':
-        raise RuntimeError(f"Kaggle kernel is not COMPLETE (status={status}). Inspect the GPU worker and use plan-week only after resolving the prior batch. {raw[-800:]}")
+        detail = str(raw or '').strip()[-800:]
+        raise RuntimeError(
+            f"Kaggle kernel is not COMPLETE (status={status}). "
+            f"Inspect the GPU worker before retrying finalization. {detail}"
+        )
     pending['status'] = 'gpu_running'
     pending['retry_finalization_count'] = int(pending.get('retry_finalization_count', 0)) + 1
     pending['retry_requested_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')

@@ -258,7 +258,10 @@ class WorkflowConfigTests(unittest.TestCase):
         self.assertIn('output/**/visual_qa_report.json', body)
         self.assertIn('output/**/metadata_ocr_report.json', body)
         self.assertIn('output/**/qa_frames/**', body)
+        self.assertIn('data/image_toolchain_lock.json', body)
         persist = body.split('name: Persist delivery and performance state', 1)[1]
+        self.assertIn('if [ -f data/image_toolchain_lock.json ]; then', persist)
+        self.assertIn('git add data/image_toolchain_lock.json', persist)
         self.assertNotIn('continue-on-error: true', persist)
         self.assertIn('git rebase FETCH_HEAD', persist)
         self.assertIn('for attempt in 1 2 3', persist)
