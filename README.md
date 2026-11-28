@@ -1,15 +1,24 @@
 # BINA SHOR KE — AI Cinematic Story Factory v3.7 P0 Reliability
 
-A private GitHub Actions + Kaggle free-GPU pipeline for original Hindi faceless Reels. The target cadence is three Reels/week, but the workflow requires a successful one-Reel GPU qualification before a weekly batch. It automates editorial planning, multi-provider text generation and critique, Wan2.2 video scene generation through ComfyUI, Hindi TTS, branded post-production, local Hindi ASR, full-video black/freeze diagnostics, beat-stratified visual QA, scene checkpoint recovery and Telegram delivery. **Facebook publishing stays manual.**
+A private GitHub Actions + Kaggle GPU pipeline for original Hindi faceless Reels. The selected primary architecture is **image-first 2.5D motion-comic cinema**: write and approve the story, generate and measure Hindi speaker WAVs, produce one illustrated FLUX still per narrative beat, derive Depth Anything V2 maps, create deterministic 2.5D parallax clips, then assemble a 30 FPS Reel. Wan2.2 remains as a backward-compatible legacy path for older manifests only. The new image-first path is implemented in this feature branch but is **not yet live GPU-qualified**. Automated editorial, post-production, OCR/visual/audio QA, checkpoint recovery and private Telegram delivery remain in scope. **Facebook publishing stays manual.**
 
 ## Architecture
 
 - **Primary writer:** Gemini 3.8 Flash Free Tier.
 - **Optional text failover / independent editor:** Groq `openai/gpt-oss-120b` Free, Mistral `ministral-8b-latest` in Studio Free mode, and Cloudflare Workers AI `@cf/meta/llama-3.1-8b-instruct` only with explicit Free-plan opt-in. Requests fail over sequentially; there is no paid route or parallel prompt fan-out.
-- **Narration:** Gemini 3.8 Flash-Lite TTS remains the only qualified production Hindi voice. Local Whisper ASR checks transcript alignment; it is not a TTS fallback.
-- **Video:** Wan2.2 TI2V-5B Q4_K_M GGUF on Kaggle free GPU through ComfyUI. Model output 704×1280 / 24fps; final render is upscaled to 1080×1920.
+- **Narration:** Gemini 3.8 Flash-Lite TTS generates separate character dialogue turns with speaker-specific voice IDs. Each WAV is validated and measured before the final editorial shot prompts and image-first still/parallax dispatch. Voice mappings are candidates requiring Hindi listening review; they are not guarantees of a character's exact age or acting quality.
+- **Primary visual generation:** FLUX.1 Schnell Q4_K_S GGUF through ComfyUI, 4-step still-image graphs, one vertical 704×1280 still per narrative beat. Pinned Depth Anything V2 Small estimates depth; OpenCV/FFmpeg generates camera-driven parallax motion. Editorial master is 1080×1920 at 30 FPS. The default story plan routes 100% of editorial shots through depth-parallax and dispatches no Wan video calls.
+- **Legacy renderer:** Wan2.2 TI2V-5B Q4_K_M GGUF remains available for already-created legacy jobs and older manifests; it is not the default generation route.
+- **Qualification status:** image-first workflow has offline code/tests but still requires a real Kaggle one-Reel render, model/runtime lock, measured GPU benchmark, output inspection and human visual approval before weekly batch qualification.
 - **Post:** FFmpeg/Pillow, custom typography, subtitles, overlays, cover and locally synthesized ambience.
 - **Delivery/learning:** private Telegram; `/approve` or `/reject` records the final owner decision; manual publishing; `/published` and `/insights` feed measured history.
+
+## Voice-first dialogue and 3D pilot
+
+- Script/cast and dialogue turns are locked first. Each speaker turn gets its own TTS request and a cache key that includes exact text, acting direction and voice ID.
+- Final visual beats and editorial shot timing are generated only after WAV durations and speaker timestamps are measured. FLUX stills are narrative keyframes; depth-parallax clips are encoded against the exact voice-beat duration. Dialogue is never shortened to fit a fixed clip.
+- The persistent character registry stores metadata and explicit reuse IDs. FLUX prompts receive the same per-Reel visual bible and character appearance/wardrobe descriptions. **True image-conditioned character-sheet locking across all generated stills and across episodes is not yet qualified**; it remains a visual QA and asset-library gap. Binary Blender assets remain outside Git.
+- Blender is an isolated stylised two-character pilot only. Its current mouth movement is amplitude-driven, not phoneme-accurate Hindi lip-sync. It is not part of the primary 2.5D renderer.
 
 ## Storytelling quality system
 
@@ -30,7 +39,7 @@ Run: `preflight` → `plan-one` → confirm the Reel is QA-passed and delivered 
 
 ## Important limitations
 
-No guarantee of artifact-free video, audience distribution, 10,000 views, monetization or Meta recommendation eligibility. Sampled-frame QA and technical motion checks supplement (but do not replace) one full human playback. If Kaggle exposes output after a failed run, verified scenes may be saved to a private Kaggle dataset and resumed; hard infrastructure loss may still prevent recovery. Gemini Free Tier prompts/responses may be used to improve Google products; only invented, public-safe stories belong in this workflow. Review the Wan2.2 upstream and quantization model license/NOTICE before commercial use.
+No guarantee of artifact-free video, audience distribution, 10,000 views, monetization or Meta recommendation eligibility. VLM frame review, 1 FPS OCR sampling and full-video black/freeze diagnostics supplement (but do not replace) one full human playback. Image-first PNG stills and legacy MP4 scene checkpoints are hash-verified for private Kaggle recovery; hard infrastructure loss may still prevent recovery. Gemini Free Tier prompts/responses may be used to improve Google products; only invented, public-safe stories belong in this workflow. Review FLUX Schnell/quantization, encoder, VAE, ComfyUI-GGUF and Depth Anything licences/notices before commercial use.
 
 ## References
 
@@ -53,7 +62,7 @@ No guarantee of artifact-free video, audience distribution, 10,000 views, moneti
 ## v3.7 P0 reliability corrections
 
 - Fixed Kaggle worker manifest injection so the generated `MANIFEST` is a dictionary; the worker also validates the injected type at startup.
-- Weekly three-Reel planning now requires a successfully finalized Reel, passed technical QA, all four Telegram delivery steps, and an owner `/approve` record. The GPU runtime benchmark remains an additional independent gate.
+- Weekly three-Reel planning now requires a successfully finalized image-first 2.5D Reel, passed VLM/OCR/motion/technical QA, all four Telegram delivery steps, and an owner `/approve` record. The separate FLUX + depth image-first GPU runtime benchmark remains an independent gate; the old Wan benchmark cannot qualify the new renderer.
 - Telegram feedback drain and persistence steps are skipped unless `TELEGRAM_BOT_TOKEN` is configured.
 - Empty/unset `KAGGLE_KERNEL_SLUG` values resolve to the safe default `bina-shor-ke-studio-video`.
 - New plans are blocked while a resumable `gpu_checkpoint_saved` state exists.
@@ -71,6 +80,6 @@ This release is offline-tested only. No live Kaggle GPU, external API, or Telegr
 
 ## Selective upgrades from the separate AI Comedy Factory blueprint
 
-- The six Wan scene prompts now receive a consistent, story-aware coverage role: establishing, action, detail insert, consequence, turning point and visual payoff. The same visual bible is repeated across all six prompts. Camera guidance cannot invent characters, props or events and never overrides the beat's actual action.
+- **Legacy Wan route only:** the six Wan scene prompts receive consistent, story-aware coverage roles. The primary image-first FLUX route now uses the same per-Reel visual bible, cast appearance, wardrobe, narrative role, state change and causal link in every still prompt; true image-conditioned multi-angle character-sheet locking remains outstanding.
 - The complete narration + ambience master bus now receives final integrated loudness normalization at -16 LUFS, a -1.5 dBTP target and a final sample limiter. This adapts the source blueprint's broadcast-mastering idea while preserving BINA SHOR KE's quieter mix target.
-- Existing provider failover, TTS retry/cache, subtitles/overlays, per-scene continuity bible, checkpoint recovery and technical/visual QA were retained rather than duplicated. FLUX/Wan alternate model stacks, meme outros and extra TTS providers were not imported because they are unqualified for this free-GPU production path and would add resource or quality risk.
+- Existing provider failover, TTS retry/cache, subtitles/overlays, per-scene continuity bible, checkpoint recovery and technical/visual QA were retained. The new primary FLUX still + Depth Anything parallax path is implemented but not yet live-GPU qualified; Wan2.2 remains only for older manifests.

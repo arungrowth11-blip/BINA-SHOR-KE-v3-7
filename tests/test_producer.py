@@ -15,6 +15,22 @@ sys.path.insert(0, str(ROOT / "scripts"))
 import producer  # noqa: E402
 
 
+def valid_visual_scorecard(**overrides):
+    result = {
+        "scores": {
+            "text_legibility": 5, "devanagari_rendering": 5,
+            "anatomy_integrity": 5, "story_visual_match": 5,
+            "safe_composition": 5, "visual_quality": 5,
+            "character_continuity": 5, "metadata_text_cleanliness": 5,
+        },
+        "critical_issue": False,
+        "notes": ["No critical issue in the supplied frame samples."],
+        "confidence": "high",
+    }
+    result.update(overrides)
+    return result
+
+
 class FactoryLogicTests(unittest.TestCase):
     def setUp(self):
         producer._PROVIDER_COOLDOWN_UNTIL.clear()
@@ -33,18 +49,40 @@ class FactoryLogicTests(unittest.TestCase):
         overlays = ["अनुरोधों की शुरुआत", "बढ़ती अपेक्षाएँ", "छूटा हुआ काम", "नई सीमा", "दो अलग प्रतिक्रियाएँ", "सीख का निष्कर्ष"]
         queries = ["hands writing notebook desk", "phone notification desk", "unfinished notebook coffee", "hand turning phone down", "quiet empty office chair", "closed notebook warm lamp"]
         beats = []
+        narrative_roles = ("hook", "context", "conflict", "escalation", "turn", "payoff")
+        state_changes = (
+            "A habitual request creates the opening pressure",
+            "Repeated help becomes an assumed responsibility",
+            "The protagonist loses time for a necessary personal task",
+            "The protagonist states a boundary for the first time",
+            "Two people react differently to the new boundary",
+            "The final choice reframes what being dependable means",
+        )
+        causal_links = (
+            "The opening establishes the pressure that needs explanation",
+            "The earlier request is treated as a routine expectation",
+            "That expectation now creates a visible personal cost",
+            "The missed task forces a clear decision",
+            "The boundary causes different reactions from friends",
+            "Those reactions reveal the cost and meaning of the choice",
+        )
         for i in range(6):
             beats.append({
+                "narrative_role": narrative_roles[i],
+                "state_change": state_changes[i],
+                "causal_link": causal_links[i],
                 "voiceover": voice[i],
                 "screen_text": f"दृश्य {i+1} की बात",
                 "visual_query": queries[i],
                 "visual_direction": f"This shot adds narrative context number {i+1}.",
-                "video_prompt": f"Photoreal vertical live-action film shot {i+1}, close-up of a real notebook on a scratched oak desk under a warm practical tungsten lamp, 50mm macro lens with shallow depth of field, slow controlled handheld camera drift, soft natural shadows and realistic wood grain, faint dust in the light beam, muted charcoal and amber colour grade, believable exposure and slight sensor grain, one simple physically plausible movement, no visible face, no readable text, subtitles, logos or watermark.",
+                "video_prompt": f"Semi-painterly Indian graphic-novel motion-comic frame {i+1}, layered foreground notebook, midground hand and background desk, tactile ink-and-gouache surfaces, warm tungsten practical light, slow cinematic camera drift, soft charcoal shadows and amber highlights, subtle paper grain, one physically plausible action, mature illustrated visual design, a consistent visual bible, stable wardrobe anchors, clean negative space, controlled perspective and a balanced mobile composition, no readable text, subtitles, logos or watermark.",
                 "overlay_type": "note" if i != 3 else "contrast",
                 "overlay_text": overlays[i],
             })
         return {
             "title": "सीमा तय करना",
+            "story_type": "insight",
+            "share_recipient": "अपने छोटे भाई को",
             "theme": "एक मददगार व्यक्ति को देर से पता चलता है कि दूसरों की अपेक्षाएँ उसकी जिम्मेदारी नहीं हैं।",
             "visual_bible": "Restrained naturalistic cinematic visuals, charcoal and warm amber practical light, anonymous everyday environments.",
             "share_reason": "The story gives a friend a simple way to think about boundaries without telling them what to do.",
@@ -70,18 +108,54 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertEqual(mocked.call_args.args[0], "https://api.groq.com/openai/v1/chat/completions")
         self.assertEqual(mocked.call_args.kwargs["headers"]["Authorization"], "Bearer test-key")
         self.assertEqual(mocked.call_args.kwargs["json"]["model"], producer.GROQ_TEXT_MODEL)
-        self.assertEqual(mocked.call_args.kwargs["json"]["max_completion_tokens"], 2600)
+        payload = mocked.call_args.kwargs["json"]
+        self.assertEqual(payload["max_completion_tokens"], 12000)
+        self.assertEqual(payload["reasoning_effort"], "low")
+        self.assertEqual(payload["include_reasoning"], False)
+        self.assertNotIn("reasoning_format", payload)
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertEqual(payload["include_reasoning"], False)
+        self.assertNotIn("reasoning_format", payload)
 
     def test_mistral_free_mode_uses_chat_completions_endpoint(self):
         response = Mock()
         response.status_code = 200
         response.json.return_value = {"choices": [{"message": {"content": '{"ok": true}'}}]}
-        with patch.object(producer, "MISTRAL_API_KEY", "test-mistral-key"), patch.object(producer.requests, "post", return_value=response) as mocked:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+             patch.object(producer, "MISTRAL_API_KEY", "test-mistral-key"), patch.object(producer.requests, "post", return_value=response) as mocked:
             result = producer.mistral_json("system", "make json")
         self.assertTrue(result["ok"])
         self.assertEqual(mocked.call_args.args[0], "https://api.mistral.ai/v1/chat/completions")
         self.assertEqual(mocked.call_args.kwargs["headers"]["Authorization"], "Bearer test-mistral-key")
-        self.assertEqual(mocked.call_args.kwargs["json"]["model"], "ministral-8b-latest")
+        payload = mocked.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "ministral-8b-latest")
+        self.assertEqual(payload["max_tokens"], 8000)
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+
+    def test_openai_json_completion_rejects_truncated_output(self):
+        body = {
+            "choices": [{
+                "finish_reason": "length",
+                "message": {"content": '{"title":"incomplete'},
+            }]
+        }
+        with self.assertRaisesRegex(RuntimeError, "refusing to parse truncated JSON"):
+            producer._openai_json_completion(body, "Groq", 5000)
+
+    def test_openai_json_completion_accepts_mistral_text_content_blocks(self):
+        body = {
+            "choices": [{
+                "finish_reason": "stop",
+                "message": {"content": [{"type": "text", "text": '{"ok": true}'}]},
+            }]
+        }
+        self.assertEqual(producer._openai_json_completion(body, "Mistral", 5000), {"ok": True})
+
+    def test_invalid_provider_json_does_not_open_permanent_provider_circuit(self):
+        error = json.JSONDecodeError("Unterminated string", '{"title":"broken', 9)
+        producer._provider_failure_cooldown("groq", error)
+        self.assertTrue(producer._provider_available("groq"))
+        self.assertTrue(producer._provider_available("mistral"))
 
     def test_cloudflare_is_disabled_without_explicit_free_only_flag(self):
         with patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "CF_ACCOUNT_ID", "account"), patch.object(producer, "CF_API_TOKEN", "token"), patch.object(producer.requests, "post") as mocked:
@@ -112,6 +186,216 @@ class FactoryLogicTests(unittest.TestCase):
         self.assertTrue(result["ok"])
         sleep.assert_called_once_with(12)
 
+    def test_gemini_text_request_uses_header_for_api_key(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": '{"ok": true}'}]}}]
+        }
+        with patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), patch.object(
+            producer.requests, "post", return_value=response
+        ) as mocked:
+            result = producer._gemini_json_request("system", "prompt")
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(mocked.call_args.kwargs["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertNotIn("params", mocked.call_args.kwargs)
+        self.assertNotIn("test-gemini-key", mocked.call_args.args[0])
+
+    def test_gemini_visual_qa_request_uses_header_for_api_key(self):
+        response = Mock()
+        response.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": json.dumps(valid_visual_scorecard())}]}}]
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            frame = Path(folder) / "frame.jpg"
+            frame.write_bytes(b"frame-bytes")
+            with patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), patch.object(
+                producer.requests, "post", return_value=response
+            ) as mocked:
+                result = producer.gemini_json_with_images("system", "prompt", [frame])
+        self.assertEqual(result["scores"], valid_visual_scorecard()["scores"])
+        self.assertEqual(mocked.call_args.kwargs["headers"]["x-goog-api-key"], "test-gemini-key")
+        self.assertNotIn("params", mocked.call_args.kwargs)
+        self.assertNotIn("test-gemini-key", mocked.call_args.args[0])
+
+    def test_gemini_visual_qa_retries_transient_503(self):
+        busy = Mock()
+        busy.status_code = 503
+        busy.headers = {"Retry-After": "2"}
+        error = producer.requests.HTTPError("Gemini HTTP 503: unavailable", response=busy)
+        success = Mock()
+        success.json.return_value = {
+            "candidates": [{"content": {"parts": [{"text": json.dumps(valid_visual_scorecard(scores={
+                "text_legibility": 5, "devanagari_rendering": 5,
+                "anatomy_integrity": 5, "story_visual_match": 5,
+                "safe_composition": 5, "visual_quality": 4,
+                "character_continuity": 5, "metadata_text_cleanliness": 5,
+            }))}]}}]
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            frame = Path(folder) / "frame.jpg"
+            frame.write_bytes(b"frame-bytes")
+            with patch.dict(os.environ, {"BSK_VISION_PROVIDER": "gemini"}), \
+                 patch.object(producer, "GEMINI_API_KEY", "test-gemini-key"), \
+                 patch.object(producer, "GROQ_API_KEY", ""), \
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer.requests, "post", side_effect=[error, success]) as mocked, \
+                 patch.object(producer.time, "sleep") as sleep:
+                result = producer.gemini_json_with_images("system", "prompt", [frame])
+        self.assertEqual(result["scores"]["visual_quality"], 4)
+        self.assertEqual(mocked.call_count, 2)
+        sleep.assert_called_once_with(2)
+
+    def test_visual_qa_falls_back_from_gemini_to_groq_and_reviews_every_frame_batch(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            frame_paths = []
+            for index in range(12):
+                path = Path(folder) / f"frame_{index + 1:02d}.jpg"
+                Image.new("RGB", (540, 960), (40 + index, 70, 90)).save(path, format="JPEG", quality=90)
+                frame_paths.append(path)
+
+            scorecard = valid_visual_scorecard()
+            with patch.dict(os.environ, {"BSK_VISION_PROVIDER": "gemini"}), \
+                 patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer, "_gemini_visual_qa_request", side_effect=RuntimeError("Gemini HTTP 503: unavailable")), \
+                 patch.object(producer, "_openai_compatible_visual_qa_request", return_value=scorecard) as groq:
+                result = producer.gemini_json_with_images("system", "inspect all samples", frame_paths)
+
+        self.assertEqual(result["visual_qa_provider"], "Groq")
+        self.assertEqual(result["visual_qa_model"], "qwen/qwen3.8-27b")
+        self.assertEqual(result["visual_qa_batches"], 6)
+        self.assertEqual(result["visual_qa_expected_batches"], 6)
+        self.assertEqual(groq.call_count, 6)
+        self.assertTrue(all(len(call.args[6]) == 3 for call in groq.call_args_list))
+        self.assertTrue(all(call.args[1] == "https://api.groq.com/openai/v1/chat/completions" for call in groq.call_args_list))
+
+    def test_vision_router_rejects_incomplete_gemini_scorecard_and_uses_groq(self):
+        with tempfile.TemporaryDirectory() as folder:
+            frames = []
+            for index in range(2):
+                path = Path(folder) / f"frame_{index + 1}.jpg"
+                path.write_bytes(f"frame-{index}".encode("ascii"))
+                frames.append(path)
+            with patch.dict(os.environ, {"BSK_VISION_PROVIDER": "gemini"}), \
+                 patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+                 patch.object(producer, "MISTRAL_API_KEY", ""), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer, "_gemini_visual_qa_request", return_value={
+                     "scores": {}, "critical_issue": False,
+                 }), \
+                 patch.object(producer, "_openai_compatible_visual_qa_request", return_value=valid_visual_scorecard()) as groq:
+                result = producer.gemini_json_with_images("system", "review every frame", frames)
+
+        self.assertEqual(result["visual_qa_provider"], "Groq")
+        groq.assert_called_once()
+        self.assertEqual(len(groq.call_args.args[6]), 2)
+
+    def test_text_mistral_direct_call_is_disabled_without_free_only_opt_in(self):
+        response = Mock()
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(producer, "MISTRAL_API_KEY", "test-mistral-key"), \
+             patch.object(producer.requests, "post", return_value=response) as mocked:
+            with self.assertRaisesRegex(RuntimeError, "Mistral is disabled"):
+                producer.mistral_json("system", "prompt")
+        mocked.assert_not_called()
+
+    def test_vision_router_falls_through_groq_to_mistral(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            frames = []
+            for index in range(4):
+                path = Path(folder) / f"frame_{index + 1}.jpg"
+                Image.new("RGB", (540, 960), (50 + index, 70, 80)).save(path, format="JPEG")
+                frames.append(path)
+            with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+                 patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+                 patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
+                 patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+                 patch.object(producer, "_openai_compatible_visual_qa_request", side_effect=[
+                     RuntimeError("Groq HTTP 503: temporarily unavailable"),
+                     valid_visual_scorecard(),
+                 ]) as request:
+                result = producer.gemini_json_with_images("system", "review every frame", frames)
+
+        self.assertEqual(result["visual_qa_provider"], "Mistral")
+        self.assertEqual(result["visual_qa_model"], "ministral-8b-2512")
+        self.assertEqual(request.call_count, 2)
+        self.assertEqual(request.call_args.args[0], "Mistral")
+
+    def test_mistral_vision_request_uses_base64_image_and_json_mode(self):
+        response = Mock()
+        response.status_code = 200
+        response.json.return_value = {
+            "choices": [{"finish_reason": "stop", "message": {"content": json.dumps(valid_visual_scorecard())}}]
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            frame = Path(folder) / "frame.jpg"
+            frame.write_bytes(b"frame-bytes")
+            with patch.object(producer.requests, "post", return_value=response) as mocked:
+                result = producer._openai_compatible_visual_qa_request(
+                    "Mistral", "https://api.mistral.ai/v1/chat/completions",
+                    "test-mistral-key", "ministral-8b-2512",
+                    "system", "inspect image", [frame],
+                )
+        self.assertTrue(producer._valid_visual_scorecard(result))
+        self.assertEqual(mocked.call_args.args[0], "https://api.mistral.ai/v1/chat/completions")
+        payload = mocked.call_args.kwargs["json"]
+        self.assertEqual(payload["model"], "ministral-8b-2512")
+        self.assertEqual(payload["response_format"], {"type": "json_object"})
+        self.assertIn("data:image/jpeg;base64,", payload["messages"][1]["content"][1]["image_url"]["url"])
+
+    def test_mistral_vision_is_disabled_without_explicit_free_only_opt_in(self):
+        with patch.dict(os.environ, {}, clear=True), \
+             patch.object(producer, "GEMINI_API_KEY", ""), \
+             patch.object(producer, "GROQ_API_KEY", ""), \
+             patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
+             patch.object(producer, "CF_WORKERS_AI_ENABLED", False):
+            with self.assertRaisesRegex(RuntimeError, "No configured free-tier vision providers"):
+                producer.gemini_json_with_images("system", "inspect", [Path("unused.jpg")])
+
+    def test_local_visual_qa_passes_valid_portrait_and_flags_black_frames(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            valid = Path(folder) / "valid.jpg"
+            black = Path(folder) / "black.jpg"
+            Image.new("RGB", (540, 960), (80, 90, 100)).save(valid, quality=90)
+            Image.new("RGB", (540, 960), (0, 0, 0)).save(black, quality=90)
+            passed = producer.deterministic_local_visual_qa([valid, valid])
+            failed = producer.deterministic_local_visual_qa([valid, black])
+        self.assertEqual(passed["status"], "passed")
+        self.assertEqual(passed["engine"], "bsk_local_frame_qa_v1")
+        self.assertEqual(failed["status"], "warning")
+        self.assertTrue(any(item["check"] == "near_black_frame" for item in failed["hard_failures"]))
+
+    def test_gemini_outage_falls_back_to_local_human_review_without_fake_ai_pass(self):
+        from PIL import Image
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            def fake_extract(command, timeout=60):
+                output = Path(command[-1])
+                output.parent.mkdir(parents=True, exist_ok=True)
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(output, format="JPEG", quality=90)
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), \
+                 patch.object(producer, "gemini_json_with_images", side_effect=RuntimeError("Gemini HTTP 503: unavailable")), \
+                 patch.object(producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}):
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 4.0,
+                    segment_durations=[2.0, 2.0],
+                )
+        self.assertEqual(result["status"], "local_pass_human_review")
+        self.assertEqual(result["review_mode"], "deterministic_local_fallback")
+        self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+        self.assertEqual(result["local_visual_diagnostics"]["status"], "passed")
+        self.assertTrue(result["human_review_required"])
+        result["full_video_motion_diagnostics"] = {"status": "passed", "full_video_scanned": True}
+        producer.enforce_visual_qa(result)
+
     def test_second_draft_prompt_includes_previous_structural_feedback(self):
         concept = self.sample_concept()
         feedback = "Beat 1 narration has 18 words; use 7-12 words."
@@ -122,8 +406,20 @@ class FactoryLogicTests(unittest.TestCase):
                 correction_feedback=feedback,
             )
         self.assertEqual(len(result["beats"]), 6)
-        self.assertIn("exactly 6 beats", mocked.call_args.args[1])
-        self.assertIn(feedback, mocked.call_args.args[1])
+        self.assertIn("exactly 6 narrative beats", mocked.call_args.args[1])
+        self.assertIn("narrative_role", mocked.call_args.args[1])
+        self.assertIn("causal_link", mocked.call_args.args[1])
+        prompt = mocked.call_args.args[1]
+        self.assertIn(feedback, prompt)
+        self.assertIn("the production pipeline derives the canonical age/gender-matched profile", prompt)
+        self.assertIn("If you choose a young-adult woman, the pipeline assigns Leda", prompt)
+        self.assertIn("if you choose an adult woman (30–54), it assigns Aoede", prompt)
+        self.assertIn('"video_prompt":"55–80 concrete English words', prompt)
+        schema_cast = prompt.split('"characters": [', 1)[1].split('"pillar":', 1)[0]
+        self.assertNotIn('"voice_profile_id"', schema_cast)
+        self.assertIn("OMIT voice_profile_id entirely", prompt)
+        self.assertIn("Return a beats array containing EXACTLY SIX objects", prompt)
+        self.assertIn("no prologue object, no epilogue object, no seventh beat, and no merged beats", prompt)
 
     def test_transient_provider_outage_stops_redundant_second_candidate(self):
         failure = RuntimeError(
@@ -138,6 +434,32 @@ class FactoryLogicTests(unittest.TestCase):
                 )
         generate.assert_called_once()
 
+    def test_all_free_provider_cooldowns_stop_candidate_retries(self):
+        cooldown_until = producer.time.monotonic() + 3600
+        cooldowns = {
+            "gemini": cooldown_until,
+            "groq": cooldown_until,
+            "mistral": cooldown_until,
+        }
+
+        def generate_without_available_provider(*args, **kwargs):
+            return producer.text_json("system", "prompt")
+
+        with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), \
+             patch.object(producer, "GROQ_API_KEY", "groq-key"), \
+             patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), \
+             patch.object(producer, "CF_WORKERS_AI_ENABLED", False), \
+             patch.dict(producer._PROVIDER_COOLDOWN_UNTIL, cooldowns), \
+             patch.object(producer, "generate_concept", side_effect=generate_without_available_provider) as generate, \
+             patch.object(producer.requests, "post") as request:
+            with self.assertRaisesRegex(RuntimeError, "temporarily unavailable"):
+                producer.acquire_approved_concept(
+                    {"topics": [], "generated_count": 0, "performance": []},
+                    "micro_story", producer.datetime.now(producer.TZ), 0,
+                )
+        generate.assert_called_once()
+        request.assert_not_called()
+
     def test_text_router_falls_back_from_gemini_to_groq(self):
         with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", return_value={"writer": "groq"}) as groq:
             result = producer.text_json("system", "prompt")
@@ -145,7 +467,8 @@ class FactoryLogicTests(unittest.TestCase):
         groq.assert_called_once()
 
     def test_text_router_falls_back_to_mistral_after_groq_failure(self):
-        with patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", side_effect=RuntimeError("429 rate limit")), patch.object(producer, "mistral_json", return_value={"writer": "mistral"}) as mistral:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+             patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "gemini_json", side_effect=RuntimeError("429 quota")), patch.object(producer, "groq_json", side_effect=RuntimeError("429 rate limit")), patch.object(producer, "mistral_json", return_value={"writer": "mistral"}) as mistral:
             result = producer.text_json("system", "prompt")
         self.assertEqual(result["writer"], "mistral")
         mistral.assert_called_once()
@@ -158,7 +481,8 @@ class FactoryLogicTests(unittest.TestCase):
         gemini.assert_not_called()
 
     def test_independent_review_avoids_the_provider_that_wrote_the_draft(self):
-        with patch.object(producer, "_LAST_TEXT_PROVIDER_USED", "groq"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "mistral_json", return_value={"critic": "mistral"}) as mistral, patch.object(producer, "groq_json") as groq:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": "YES"}), \
+             patch.object(producer, "_LAST_TEXT_PROVIDER_USED", "groq"), patch.object(producer, "GROQ_API_KEY", "groq-key"), patch.object(producer, "MISTRAL_API_KEY", "mistral-key"), patch.object(producer, "GEMINI_API_KEY", "gemini-key"), patch.object(producer, "CF_WORKERS_AI_ENABLED", False), patch.object(producer, "mistral_json", return_value={"critic": "mistral"}) as mistral, patch.object(producer, "groq_json") as groq:
             result = producer.independent_review_json("system", "prompt")
         self.assertEqual(result["critic"], "mistral")
         mistral.assert_called_once()
@@ -184,7 +508,7 @@ class FactoryLogicTests(unittest.TestCase):
             repaired = producer.repair_concept_structure(concept)
         self.assertEqual(repaired["beats"][1]["voiceover"], replacement)
         self.assertEqual(repaired["beats"][0]["voiceover"], self.sample_concept()["beats"][0]["voiceover"])
-        self.assertTrue(7 <= len(replacement.split()) <= 12)
+        self.assertTrue(7 <= len(replacement.split()) <= 18)
         mocked.assert_called_once()
 
     def test_structural_repair_rejects_a_still_overlong_ai_rewrite(self):
@@ -195,10 +519,68 @@ class FactoryLogicTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "left Beat 2 at"):
                 producer.repair_concept_structure(concept)
 
+    def test_share_recipient_gate_rejects_missing_or_generic_recipient(self):
+        missing = self.sample_concept()
+        missing.pop("share_recipient", None)
+        with self.assertRaisesRegex(ValueError, "share_recipient"):
+            producer.validate_concept_shape(missing)
+        generic = self.sample_concept()
+        generic["share_recipient"] = "everyone"
+        with self.assertRaisesRegex(ValueError, "too generic"):
+            producer.validate_concept_shape(generic)
+        audience = self.sample_concept()
+        audience["share_recipient"] = "Hindi audience"
+        with self.assertRaisesRegex(ValueError, "too generic"):
+            producer.validate_concept_shape(audience)
+
+    def test_structural_repair_completes_near_threshold_video_prompt_without_extra_ai_call(self):
+        concept = self.sample_concept()
+        original = concept["beats"][2]["video_prompt"]
+        concept["beats"][2]["video_prompt"] = " ".join(original.split()[:53])
+        self.assertEqual(len(concept["beats"][2]["video_prompt"].split()), 53)
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        prompt = repaired["beats"][2]["video_prompt"]
+        self.assertGreaterEqual(len(prompt.split()), 55)
+        self.assertLessEqual(len(prompt.split()), 180)
+        self.assertIn("layered foreground", prompt)
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
+
+    def test_structural_repair_replaces_generic_recipient_without_an_ai_call(self):
+        concept = self.sample_concept()
+        concept["share_recipient"] = "Hindi audience"
+        concept["theme"] += " यह बात उसके छोटे भाई के काम आएगी।"
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["share_recipient"], "अपने भाई को")
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
+
+    def test_structural_repair_infers_story_specific_recipient_from_mother_context(self):
+        concept = self.sample_concept()
+        concept["share_recipient"] = "everyone"
+        concept["share_reason"] = "A daughter wants her mother to understand the small sacrifice."
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["share_recipient"], "अपनी माँ को")
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
+
+    def test_structural_repair_uses_singular_relationship_fallback_without_provider(self):
+        concept = self.sample_concept()
+        concept["share_recipient"] = "Hindi audience"
+        concept["share_reason"] = "A small everyday observation that has no explicit family relationship."
+        with patch.object(producer, "text_json") as mocked:
+            repaired = producer.repair_concept_structure(concept)
+        self.assertEqual(repaired["share_recipient"], "उस दोस्त को")
+        mocked.assert_not_called()
+        producer.validate_concept_shape(repaired)
+
     def test_concept_validation_requires_exactly_six_beats(self):
         concept = self.sample_concept()
         concept["beats"] = concept["beats"][:5]
-        with self.assertRaisesRegex(ValueError, "exactly 6 beats"):
+        with self.assertRaisesRegex(ValueError, "exactly 6 narrative beats"):
             producer.validate_concept_shape(concept)
 
     def test_repeated_lived_in_detail_is_rejected(self):
@@ -306,11 +688,74 @@ class FactoryLogicTests(unittest.TestCase):
     def test_ass_includes_story_overlay_and_scene_counter(self):
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / "test.ass"
-            producer.write_ass(path, "यह एक कहानी है", 3.2, overlay_text="नया संदर्भ", overlay_type="note", scene_index=2, scene_count=6)
+            producer.write_ass(path, "यह एक कहानी है", 3.2, overlay_text="नया संदर्भ", overlay_type="contrast", scene_index=2, scene_count=6)
             content = path.read_text(encoding="utf-8")
             self.assertIn("BINA SHOR KE", content)
             self.assertIn("नया संदर्भ", content)
+            self.assertNotIn("CONTRAST", content)
+            self.assertNotIn("  |  ", content)
             self.assertIn("02 / 06", content)
+
+
+    def test_final_storyboard_is_generated_from_locked_speaker_audio_timeline(self):
+        prompt = "A vertical cinematic animated shot with two friends in a modest Indian kitchen. " + " ".join(
+            ["Show the correct speaker's natural mouth movement, the listener's reaction, expressive eyes, a measured camera move, realistic cloth, warm practical window light and consistent character appearance."] * 4
+        )
+        concept = {
+            "title": "दो दोस्तों की बात",
+            "visual_bible": "Consistent two-person character design, warm muted cinematic lighting.",
+            "characters": [
+                {"character_id": "story_12345678_arjun", "display_name": "अर्जुन", "appearance": "Young man in blue shirt.", "personality": "Impatient", "voice_profile_id": "hi_male_young_puck", "voice_direction": "Young masculine Hindi."},
+                {"character_id": "story_12345678_meera", "display_name": "मीरा", "appearance": "Older woman in green shawl.", "personality": "Patient", "voice_profile_id": "hi_female_older_gacrux", "voice_direction": "Mature feminine Hindi."},
+            ],
+            "voice_first_plan": {"status": "voice_measured_before_video"},
+            "beats": [],
+        }
+        for i in range(6):
+            sid = f"beat_{i+1:02d}_line_01"
+            speaker_id = concept["characters"][i % 2]["character_id"]
+            concept["beats"].append({
+                "narrative_role": ("hook", "context", "conflict", "escalation", "turn", "payoff")[i],
+                "state_change": f"A distinct story development number {i+1} changes the situation",
+                "causal_link": f"The previous beat leads into story development number {i+1}",
+                "visual_query": "two friends kitchen conversation",
+                "visual_direction": "A small misunderstanding becomes clear through a quiet response.",
+                "video_prompt": "Initial prompt, replaced after voice lock.",
+                "speech_segments": [{
+                    "segment_id": sid,
+                    "speaker_id": speaker_id,
+                    "text": "मैंने तुम्हारी बात सुनी थी।",
+                    "duration_seconds": 4.6,
+                }],
+                "voice_timing": {
+                    "timing_source": "measured_tts_wav_before_gpu",
+                    "target_duration_seconds": 5.0,
+                    "target_frames": 120,
+                    "fps": 24,
+                    "segments": [{
+                        "segment_id": sid,
+                        "speaker_id": speaker_id,
+                        "start_seconds": 0.08,
+                        "end_seconds": 4.68,
+                    }],
+                },
+            })
+        response = {"shots": [{"beat_index": i, "video_prompt": prompt} for i in range(1, 7)]}
+        with patch.object(producer, "text_json", return_value=response) as mocked:
+            result = producer.generate_voice_aware_storyboard(concept)
+        self.assertEqual(result["voice_aware_storyboard"]["status"], "generated_after_voice_lock")
+        self.assertEqual(result["beats"][0]["video_prompt"], prompt)
+        self.assertEqual(result["beats"][0]["speech_segments"][0]["text"], "मैंने तुम्हारी बात सुनी थी।")
+        self.assertEqual(result["beats"][0]["voice_timing"]["target_frames"], 120)
+        self.assertIn("actual_audio_duration_seconds", mocked.call_args.args[1])
+        self.assertIn("target_duration_seconds", mocked.call_args.args[1])
+        self.assertIn("narrative_role", mocked.call_args.args[1])
+        self.assertIn("state_change", mocked.call_args.args[1])
+        self.assertIn("causal_link", mocked.call_args.args[1])
+
+    def test_final_storyboard_refuses_to_run_before_voice_lock(self):
+        with self.assertRaisesRegex(RuntimeError, "requires measured TTS audio"):
+            producer.generate_voice_aware_storyboard({"beats": [], "characters": []})
 
     def test_tts_payload_keeps_spoken_text_separate_and_wraps_pcm(self):
         raw_pcm = (b"\x01\x00" * 24000)  # 1 sec, 24 kHz, mono, signed 16-bit samples
@@ -322,10 +767,11 @@ class FactoryLogicTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as folder:
             out = Path(folder) / "voice.wav"
             with patch.object(producer.requests, "post", return_value=response) as mocked:
-                producer.tts_wav("यह केवल बोली जाने वाली पंक्ति है।", out, voice_direction="धीमे बोलें; आखिरी शब्द में हल्की नरमी रखें।")
+                producer.tts_wav("यह केवल बोली जाने वाली पंक्ति है।", out, voice_direction="धीमे बोलें; आखिरी शब्द में हल्की नरमी रखें।", voice_name="Puck")
             payload = mocked.call_args.kwargs["json"]
             self.assertEqual(payload["input"][0]["content"][0]["text"], "यह केवल बोली जाने वाली पंक्ति है।")
             self.assertEqual(payload["response_format"]["mime_type"], "audio/l16")
+            self.assertEqual(payload["generation_config"]["speech_config"][0]["voice"], "Puck")
             style = payload["input"][0]["content"][0]["annotations"][0]["style"]
             self.assertIn("धीमे बोलें", style)
             self.assertTrue(style.startswith("Natural Hindi; warm, grounded, restrained, clear diction."))
@@ -336,9 +782,38 @@ class FactoryLogicTests(unittest.TestCase):
                 self.assertEqual(wav_file.getframerate(), 24000)
                 self.assertEqual(wav_file.getnframes(), 24000)
 
+    def test_tts_client_error_is_not_retried(self):
+        response = Mock()
+        response.status_code = 400
+        response.text = '{"error":{"message":"invalid voice"}}'
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(producer, "TTS_MIN_INTERVAL_SECONDS", 0), \
+             patch.object(producer, "_LAST_TTS_REQUEST_AT", 0), \
+             patch.object(producer.requests, "post", return_value=response) as mocked_post, \
+             patch.object(producer.time, "sleep") as mocked_sleep:
+            with self.assertRaisesRegex(RuntimeError, "non-retryable HTTP 400"):
+                producer.tts_wav("यह परीक्षण पंक्ति है।", Path(folder) / "voice.wav", voice_name="Puck")
+        mocked_post.assert_called_once()
+        mocked_sleep.assert_not_called()
+
+    def test_tts_success_response_without_audio_is_not_retried(self):
+        response = Mock()
+        response.status_code = 200
+        response.text = ""
+        response.json.return_value = {"status": "completed", "steps": []}
+        with tempfile.TemporaryDirectory() as folder, \
+             patch.object(producer, "TTS_MIN_INTERVAL_SECONDS", 0), \
+             patch.object(producer, "_LAST_TTS_REQUEST_AT", 0), \
+             patch.object(producer.requests, "post", return_value=response) as mocked_post, \
+             patch.object(producer.time, "sleep") as mocked_sleep:
+            with self.assertRaisesRegex(ValueError, "No audio block"):
+                producer.tts_wav("यह परीक्षण पंक्ति है।", Path(folder) / "voice.wav", voice_name="Puck")
+        mocked_post.assert_called_once()
+        mocked_sleep.assert_not_called()
+
     def test_tts_cache_reuses_exact_text_and_valid_wav_across_reruns(self):
         text = "एक छोटी कहानी की परीक्षण पंक्ति।"
-        cache_material = text + "\n[voice_direction=]"
+        cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
         digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
@@ -363,6 +838,64 @@ class FactoryLogicTests(unittest.TestCase):
             finally:
                 producer.TTS_CACHE_DIR = old_cache
 
+
+    def test_tts_cache_identity_includes_voice_and_performance_direction(self):
+        text = "यह एक छोटी सी परीक्षण पंक्ति है।"
+        common = text + "\n[voice_direction=calm]"
+        first = producer.hashlib.sha256((common + "\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
+        second = producer.hashlib.sha256((common + "\n[gemini_voice=Gacrux]").encode("utf-8")).hexdigest()
+        third = producer.hashlib.sha256((text + "\n[voice_direction=angry]\n[gemini_voice=Puck]").encode("utf-8")).hexdigest()
+        self.assertNotEqual(first, second)
+        self.assertNotEqual(first, third)
+
+    def test_tts_cache_accepts_valid_nine_second_audio_then_scene_planner_enforces_shot_limit(self):
+        text = "यह नौ सेकंड की सीमा जाँचने वाली परीक्षण पंक्ति है।"
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            old_cache = producer.TTS_CACHE_DIR
+            old_interval = producer.TTS_MIN_INTERVAL_SECONDS
+            old_last = producer._LAST_TTS_REQUEST_AT
+            producer.TTS_CACHE_DIR = root / "cache"
+            producer.TTS_MIN_INTERVAL_SECONDS = 0
+            producer._LAST_TTS_REQUEST_AT = 0
+            try:
+                out = root / "render" / "long-line.wav"
+
+                def fake_tts(line, destination, voice_direction=None, voice_name=None):
+                    destination.parent.mkdir(parents=True, exist_ok=True)
+                    with wave.open(str(destination), "wb") as wav_file:
+                        wav_file.setnchannels(1)
+                        wav_file.setsampwidth(2)
+                        wav_file.setframerate(24000)
+                        wav_file.writeframes(b"\x00\x00" * (24000 * 9))
+
+                with patch.object(producer, "tts_wav", side_effect=fake_tts):
+                    self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
+                self.assertTrue(producer._valid_tts_wav(out))
+                self.assertAlmostEqual(producer.voice_first.wav_duration(out), 9.0, places=3)
+                with self.assertRaisesRegex(ValueError, "Beat voice track requires"):
+                    producer.voice_first.build_scene_timing_plan(
+                        [{"segment_id": "long_line", "speaker_id": "narrator"}],
+                        {"long_line": 9.0},
+                    )
+            finally:
+                producer.TTS_CACHE_DIR = old_cache
+                producer.TTS_MIN_INTERVAL_SECONDS = old_interval
+                producer._LAST_TTS_REQUEST_AT = old_last
+
+    def test_tts_wav_validation_reports_measured_duration_outside_transport_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / "too-long.wav"
+            with wave.open(str(path), "wb") as wav_file:
+                wav_file.setnchannels(1)
+                wav_file.setsampwidth(2)
+                wav_file.setframerate(24000)
+                wav_file.writeframes(b"\x00\x00" * (24000 * 13))
+            reason = producer._tts_wav_validation_error(path)
+            self.assertIn("measured duration 13.000s", reason)
+            self.assertIn("12.00s TTS transport/cache range", reason)
+            self.assertFalse(producer._valid_tts_wav(path))
+
     def test_tts_cache_marks_new_audio_for_cross_run_persistence(self):
         text = "नया ऑडियो कैश परीक्षण।"
         with tempfile.TemporaryDirectory() as folder:
@@ -375,7 +908,7 @@ class FactoryLogicTests(unittest.TestCase):
             producer._LAST_TTS_REQUEST_AT = 0
             try:
                 out = root / "render" / "voice.wav"
-                def fake_tts(line, destination, voice_direction=None):
+                def fake_tts(line, destination, voice_direction=None, voice_name=None):
                     destination.parent.mkdir(parents=True, exist_ok=True)
                     with wave.open(str(destination), "wb") as wav_file:
                         wav_file.setnchannels(1)
@@ -384,7 +917,7 @@ class FactoryLogicTests(unittest.TestCase):
                         wav_file.writeframes(b"\x00\x00" * 24000)
                 with patch.object(producer, "tts_wav", side_effect=fake_tts):
                     self.assertEqual(producer.ensure_tts_wav(text, out), "generated")
-                cache_material = text + "\n[voice_direction=]"
+                cache_material = text + "\n[voice_direction=]\n[gemini_voice=" + producer.TTS_VOICE + "]"
                 digest = producer.hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav").exists())
                 self.assertTrue((producer.TTS_CACHE_DIR / f"{digest}.wav.sha256").exists())
@@ -426,8 +959,199 @@ class FactoryLogicTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "critical visual defect"):
             producer.enforce_visual_qa({"status": "warning", "critical_issue": True})
 
-    def test_visual_qa_outage_keeps_manual_review_path_open(self):
-        producer.enforce_visual_qa({"status": "not_completed", "human_review_required": True})
+    def test_visual_qa_outage_never_fabricates_an_ai_review(self):
+        with self.assertRaisesRegex(RuntimeError, "did not complete successfully"):
+            producer.enforce_visual_qa({"status": "not_completed", "human_review_required": True})
+
+        local_fallback = {
+            "status": "local_pass_human_review",
+            "critical_issue": False,
+            "review_mode": "deterministic_local_fallback",
+            "human_review_required": True,
+            "local_visual_diagnostics": {
+                "status": "passed",
+                "engine": "bsk_local_frame_qa_v1",
+                "frames_scanned": 4,
+                "hard_failures": [],
+            },
+            "metadata_ocr_qa": {"status": "passed", "forbidden_terms_detected": []},
+            "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+        }
+        producer.enforce_visual_qa(local_fallback)
+
+        local_fallback["local_visual_diagnostics"]["status"] = "warning"
+        with self.assertRaisesRegex(RuntimeError, "Local visual QA did not pass"):
+            producer.enforce_visual_qa(local_fallback)
+
+    def test_visual_qa_requires_ocr_and_full_video_motion_to_pass(self):
+        base = {
+            "status": "reviewed",
+            "critical_issue": False,
+            "metadata_ocr_qa": {"status": "passed", "forbidden_terms_detected": []},
+        }
+        with self.assertRaisesRegex(RuntimeError, "Full-video black/freeze diagnostics"):
+            producer.enforce_visual_qa(base)
+        with self.assertRaisesRegex(RuntimeError, "Metadata OCR"):
+            producer.enforce_visual_qa({
+                **base,
+                "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+                "metadata_ocr_qa": {"status": "not_completed"},
+            })
+        producer.enforce_visual_qa({
+            **base,
+            "full_video_motion_diagnostics": {"status": "passed", "full_video_scanned": True},
+        })
+
+    def test_metadata_ocr_rejects_internal_prompt_labels(self):
+        from subprocess import CompletedProcess
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            video = root / "reel.mp4"
+            video.write_bytes(b"video")
+            def fake_extract(command, timeout=240):
+                Path(command[-1]).parent.mkdir(parents=True, exist_ok=True)
+                (Path(command[-1]).parent / "ocr_0001.jpg").write_bytes(b"frame-a")
+                (Path(command[-1]).parent / "ocr_0002.jpg").write_bytes(b"frame-b")
+            outputs = [
+                CompletedProcess([], 0, stdout="normal subtitle text", stderr=""),
+                CompletedProcess([], 0, stdout="KEYWORD STEP appeared on screen", stderr=""),
+            ]
+            with patch.object(producer.shutil, "which", return_value="/usr/bin/tesseract"), \
+                 patch.object(producer, "run_cmd", side_effect=fake_extract), \
+                 patch.object(producer.subprocess, "run", side_effect=outputs):
+                report = producer.metadata_ocr_qa(video, root, 2.0)
+            self.assertEqual(report["status"], "warning")
+            self.assertEqual(report["frames_scanned"], 2)
+            self.assertEqual({x["term"] for x in report["forbidden_terms_detected"]}, {"KEYWORD", "STEP"})
+
+    def test_metadata_ocr_fails_closed_when_tesseract_is_unavailable(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            with patch.object(producer.shutil, "which", return_value=None):
+                report = producer.metadata_ocr_qa(root / "reel.mp4", root, 2.0)
+        self.assertEqual(report["status"], "not_completed")
+
+    def test_visual_qa_requires_character_continuity_and_metadata_dimensions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            def fake_extract(command, timeout=240):
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
+            response = {
+                "scores": {
+                    "text_legibility": 5, "devanagari_rendering": 5,
+                    "anatomy_integrity": 5, "story_visual_match": 5,
+                    "safe_composition": 5, "visual_quality": 4,
+                    "character_continuity": 2, "metadata_text_cleanliness": 1,
+                },
+                "critical_issue": True, "notes": ["Wardrobe drift and internal overlay label visible."],
+                "confidence": "high",
+            }
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
+                producer, "gemini_json_with_images", return_value=response
+            ) as audit, patch.object(
+                producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
+            ):
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 35.0,
+                    segment_durations=[5.8] * 6,
+                )
+            prompt = audit.call_args.args[1]
+            self.assertIn("Compare recurring characters across all frames", prompt)
+            self.assertIn("KEYWORD, STEP, CONTRAST", prompt)
+            self.assertEqual(result["scores"]["character_continuity"], 2)
+            self.assertEqual(result["scores"]["metadata_text_cleanliness"], 1)
+            self.assertEqual(result["status"], "warning")
+
+    def test_visual_qa_does_not_mark_reviewed_when_required_dimensions_are_missing(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            def fake_extract(command, timeout=240):
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
+            incomplete = {
+                "scores": {"text_legibility": 5, "visual_quality": 5},
+                "critical_issue": False, "notes": [], "confidence": "low",
+            }
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
+                producer, "gemini_json_with_images", return_value=incomplete
+            ), patch.object(
+                producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
+            ):
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 35.0,
+                    segment_durations=[5.8] * 6,
+                )
+            self.assertEqual(result["status"], "local_pass_human_review")
+            self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+            self.assertTrue(result["human_review_required"])
+
+    def test_visual_qa_rejects_boolean_out_of_range_and_non_finite_scores(self):
+        required = (
+            "text_legibility", "devanagari_rendering", "anatomy_integrity",
+            "story_visual_match", "safe_composition", "visual_quality",
+            "character_continuity", "metadata_text_cleanliness",
+        )
+        bad_values = (True, 0, 5.1, float("nan"), float("inf"))
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+
+            def fake_extract(command, timeout=240):
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
+
+            for bad_value in bad_values:
+                response = {
+                    "scores": {key: 5 for key in required},
+                    "critical_issue": False,
+                    "notes": [],
+                    "confidence": "high",
+                }
+                response["scores"]["character_continuity"] = bad_value
+                with self.subTest(bad_value=repr(bad_value)), patch.object(
+                    producer, "run_cmd", side_effect=fake_extract
+                ), patch.object(producer, "gemini_json_with_images", return_value=response), patch.object(
+                    producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
+                ):
+                    result = producer.visual_qa(
+                        reel_dir / "reel.mp4", reel_dir, 35.0,
+                        segment_durations=[5.8] * 6,
+                    )
+                self.assertEqual(result["status"], "local_pass_human_review")
+                self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+                self.assertTrue(result["human_review_required"])
+
+    def test_visual_qa_requires_boolean_critical_issue_field(self):
+        required = (
+            "text_legibility", "devanagari_rendering", "anatomy_integrity",
+            "story_visual_match", "safe_composition", "visual_quality",
+            "character_continuity", "metadata_text_cleanliness",
+        )
+        response = {
+            "scores": {key: 5 for key in required},
+            "critical_issue": "false",
+            "notes": [],
+            "confidence": "high",
+        }
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+
+            def fake_extract(command, timeout=240):
+                from PIL import Image
+                Image.new("RGB", (540, 960), (65, 75, 90)).save(Path(command[-1]), format="JPEG", quality=90)
+
+            with patch.object(producer, "run_cmd", side_effect=fake_extract), patch.object(
+                producer, "gemini_json_with_images", return_value=response
+            ), patch.object(
+                producer, "metadata_ocr_qa", return_value={"status": "passed", "forbidden_terms_detected": []}
+            ):
+                result = producer.visual_qa(
+                    reel_dir / "reel.mp4", reel_dir, 35.0,
+                    segment_durations=[5.8] * 6,
+                )
+        self.assertEqual(result["status"], "local_pass_human_review")
+        self.assertEqual(result["visual_ai_review"]["status"], "not_completed")
+        self.assertTrue(result["human_review_required"])
 
     def test_pexels_is_optional_when_free_local_graphics_are_available(self):
         with patch.object(producer, "GEMINI_API_KEY", "test-key"), \
@@ -553,7 +1277,7 @@ class FactoryLogicTests(unittest.TestCase):
             "hook_clarity": 5, "human_specificity": 5, "emotional_resonance": 5,
             "story_progression": 5, "payoff": 5,
             "originality": 5, "creative_contribution_beyond_stock": 5,
-            "share_value": 5, "photoreal_prompt_quality": 5,
+            "share_value": 5, "illustrated_visual_quality": 5,
             "continuity_coherence": 5, "voiceover_rhythm": 5,
             "readability": 5, "platform_safety": 5,
         }}
@@ -574,7 +1298,7 @@ class FactoryLogicTests(unittest.TestCase):
             "hook_clarity": 12, "story_progression": 10, "payoff": 10,
             "originality": 10, "creative_contribution_beyond_stock": 8,
             "share_value": 8, "human_specificity": 9, "emotional_resonance": 9,
-            "photoreal_prompt_quality": 7, "continuity_coherence": 5,
+            "illustrated_visual_quality": 7, "continuity_coherence": 5,
             "voiceover_rhythm": 4, "readability": 3, "platform_safety": 5,
         }
         self.assertEqual(sum(weights.values()), 100)
@@ -599,6 +1323,31 @@ class FactoryLogicTests(unittest.TestCase):
         result = producer._parse_review_message("/approve title=सीमा तय करना", history, approved=True)
         self.assertTrue(result["approved"])
         self.assertEqual(history["topics"][0]["status"], "owner_approved_for_manual_publish")
+        self.assertIsNone(history.get("one_reel_qualification"))
+
+    def test_weekly_qualification_requires_full_visual_qa_evidence(self):
+        history = {"topics": [{
+            "title": "पिता की घड़ी", "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": True, "telegram_delivered": True, "reel_id": "reel_qa_complete",
+            "visual_qa_status": "reviewed", "motion_diagnostics_status": "passed",
+            "metadata_ocr_status": "passed",
+        }]}
+        result = producer._parse_review_message("/approve title=पिता की घड़ी", history, approved=True)
+        self.assertTrue(result["weekly_qualification_created"])
+        qualification = history["one_reel_qualification"]
+        self.assertEqual(qualification["status"], "qualified")
+        self.assertTrue(qualification["visual_qa_status"] == "reviewed")
+        self.assertEqual(qualification["metadata_ocr_status"], "passed")
+
+    def test_weekly_qualification_rejects_missing_ocr_evidence(self):
+        history = {"topics": [{
+            "title": "पिता की घड़ी", "status": "ready_for_manual_publish_not_confirmed_published",
+            "qa_passed": True, "telegram_delivered": True, "reel_id": "reel_qa_missing_ocr",
+            "visual_qa_status": "reviewed", "motion_diagnostics_status": "passed",
+        }]}
+        result = producer._parse_review_message("/approve title=पिता की घड़ी", history, approved=True)
+        self.assertFalse(result["weekly_qualification_created"])
+        self.assertIsNone(history.get("one_reel_qualification"))
 
     def test_review_rejection_does_not_mark_as_published(self):
         history = {"topics": [{"title": "सीमा तय करना", "status": "ready_for_manual_publish_not_confirmed_published"}]}
@@ -645,6 +1394,97 @@ class LocalMediaQATests(unittest.TestCase):
         self.assertEqual(report["status"], "warning")
         self.assertTrue(report["full_video_scanned"])
         self.assertIn("freezedetect", run.call_args.args[0][run.call_args.args[0].index("-vf") + 1])
+
+class SceneAudioFilterTests(unittest.TestCase):
+    def test_silent_scene_bypasses_loudnorm(self):
+        audio_filter = producer._scene_audio_filter(1.0, 0.08, has_speech=False)
+        self.assertEqual(audio_filter, "apad=pad_dur=0.080,anull")
+        self.assertNotIn("loudnorm", audio_filter)
+
+    def test_spoken_scene_keeps_bounded_tempo_and_loudnorm(self):
+        audio_filter = producer._scene_audio_filter(1.02, 0.08, has_speech=True)
+        self.assertEqual(
+            audio_filter,
+            "atempo=1.020000,apad=pad_dur=0.080,loudnorm=I=-16:TP=-1.5:LRA=11",
+        )
+
+    def test_reconcile_actual_voice_timing_replans_from_exact_wav_duration(self):
+        segment = {
+            "segment_id": "beat_02_line_01",
+            "speaker_id": "narrator",
+            "text": "यह परीक्षण संवाद है।",
+            "duration_seconds": 5.72,
+        }
+        planned = producer.voice_first.build_scene_timing_plan(
+            [segment], {"beat_02_line_01": 5.72}
+        )
+        beat = {
+            "speech_segments": [segment],
+            "voice_timing": planned,
+            "target_frames": planned["target_frames"],
+        }
+
+        result = producer.reconcile_actual_voice_timing(
+            beat, {"beat_02_line_01": 5.21}
+        )
+
+        self.assertTrue(result["adjusted"])
+        self.assertAlmostEqual(
+            beat["speech_segments"][0]["duration_seconds"], 5.21, places=3
+        )
+        self.assertAlmostEqual(
+            beat["voice_timing"]["speech_duration_seconds"], 5.21, places=3
+        )
+        self.assertLess(
+            beat["voice_timing"]["target_duration_seconds"],
+            planned["target_duration_seconds"],
+        )
+        self.assertEqual(result["differences"][0]["segment_id"], "beat_02_line_01")
+
+    def test_reconcile_actual_voice_timing_does_not_flag_small_duration_variance(self):
+        segment = {
+            "segment_id": "beat_01_line_01",
+            "speaker_id": "narrator",
+            "text": "यह छोटा परीक्षण है।",
+            "duration_seconds": 3.28,
+        }
+        planned = producer.voice_first.build_scene_timing_plan(
+            [segment], {"beat_01_line_01": 3.28}
+        )
+        beat = {"speech_segments": [segment], "voice_timing": planned}
+        result = producer.reconcile_actual_voice_timing(
+            beat, {"beat_01_line_01": 3.35}
+        )
+        self.assertFalse(result["adjusted"])
+        self.assertAlmostEqual(segment["duration_seconds"], 3.35, places=3)
+
+    def test_persist_visual_qa_report_keeps_frames_and_contact_sheet_reference(self):
+        with tempfile.TemporaryDirectory() as folder:
+            reel_dir = Path(folder)
+            frames_dir = reel_dir / "qa_frames"
+            frames_dir.mkdir()
+            (frames_dir / "frame_1.jpg").write_bytes(b"x" * 2000)
+            (frames_dir / "qa_contact_sheet.jpg").write_bytes(b"y" * 2000)
+            review = {
+                "status": "warning",
+                "critical_issue": True,
+                "scores": {"character_continuity": 1},
+                "notes": ["Visible character identity drift."],
+            }
+            report_path = producer.persist_visual_qa_report(reel_dir, review)
+            saved = json.loads(report_path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["status"], "warning")
+        self.assertEqual(saved["qa_evidence"]["frames"], ["qa_frames/frame_1.jpg"])
+        self.assertEqual(
+            saved["qa_evidence"]["contact_sheet"], "qa_frames/qa_contact_sheet.jpg"
+        )
+
+    def test_scene_audio_filter_rejects_nonfinite_timing(self):
+        with self.assertRaisesRegex(ValueError, "tempo must be finite"):
+            producer._scene_audio_filter(float("nan"), 0.08, has_speech=False)
+        with self.assertRaisesRegex(ValueError, "padding must be finite"):
+            producer._scene_audio_filter(1.0, float("inf"), has_speech=False)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

@@ -12,9 +12,21 @@ on:
           - "preflight"
           - "plan-one"
           - "plan-week"
+          - "live-tts-smoke"
+      confirm_free_tier_only:
+        description: "For live-tts-smoke, confirm the Gemini TTS project/key is Free Tier with paid billing disabled. For plan-one/plan-week, also confirm every enabled text provider is Free Tier or disabled; those modes queue a Kaggle GPU job."
+        required: true
+        type: boolean
+        default: false
   schedule:
     - cron: "37 7 * * 6"
       timezone: "Asia/Kolkata"
+  push:
+    branches:
+      - feature/voice-first-3d-foundation
+    paths:
+      - ".github/dispatch/plan-one.once"
+      - ".github/dispatch/live-tts-smoke.once"
 
 permissions:
   contents: write
@@ -28,10 +40,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     env:
-      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'plan-week' }}
+      RUN_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || (github.event_name == 'push' && contains(github.event.head_commit.message, 'RUN_GEMINI_TTS_SMOKE') && 'live-tts-smoke') || (github.event_name == 'push' && contains(github.event.head_commit.message, 'PLAN_ONE_ONLY') && 'plan-one') || (github.event_name == 'schedule' && 'plan-week') || 'preflight' }}
+      BSK_FREE_TIER_ONLY_ACK: ${{ (github.event_name == 'workflow_dispatch' && inputs.confirm_free_tier_only) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'RUN_GEMINI_TTS_SMOKE')) || (github.event_name == 'push' && contains(github.event.head_commit.message, 'PLAN_ONE_ONLY_FREE_TIER_CONFIRMED')) || (github.event_name != 'workflow_dispatch' && vars.BSK_FREE_TIER_ONLY_CONFIRMED == 'true') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      BSK_MISTRAL_FREE_ONLY: ${{ vars.BSK_MISTRAL_FREE_ONLY }}
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CF_WORKERS_AI_FREE_ONLY: ${{ secrets.CF_WORKERS_AI_FREE_ONLY }}
@@ -46,11 +60,39 @@ jobs:
       GEMINI_TEXT_MODEL: gemini-3.8-flash
       GEMINI_TTS_MODEL: gemini-3.8-flash-lite-tts
       TTS_VOICE: Kore
+      TTS_MIN_INTERVAL_SECONDS: "21"
     steps:
       - name: Checkout private repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Validate branch-scoped one-shot feature trigger
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          test "$GITHUB_REF" = "refs/heads/feature/voice-first-3d-foundation"
+          if [[ "$RUN_MODE" == "live-tts-smoke" ]]; then
+            test "$GITHUB_RUN_ATTEMPT" = "1"
+            git log -1 --format=%B | grep -qx "RUN_GEMINI_TTS_SMOKE"
+            test -f .github/dispatch/live-tts-smoke.once
+            grep -qx "GEMINI_TTS_FREE_TIER_CONFIRMED" .github/dispatch/live-tts-smoke.once
+          elif [[ "$RUN_MODE" == "plan-one" ]]; then
+            git log -1 --format=%B | grep -qx "PLAN_ONE_ONLY_FREE_TIER_CONFIRMED"
+            test -f .github/dispatch/plan-one.once
+            grep -qx "PLAN_ONE_ONLY" .github/dispatch/plan-one.once
+            grep -qx "FREE_TIER_ONLY_CONFIRMED" .github/dispatch/plan-one.once
+          else
+            echo "No live one-shot sentinel changed; push is restricted to offline preflight."
+          fi
+
+      - name: Restore previously measured voice WAVs
+        uses: actions/cache/restore@v4
+        with:
+          path: data/tts_cache
+          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            bsk-tts-${{ runner.os }}-
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -58,19 +100,56 @@ jobs:
           python-version: "3.11"
 
       - name: Install FFmpeg and Devanagari fonts
+        if: env.RUN_MODE != 'live-tts-smoke'
         run: |
           sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          sudo apt-get install --no-install-recommends -y ffmpeg fonts-noto-core
           ffmpeg -filters 2>/dev/null | grep -q subtitles
           fc-match "Noto Sans Devanagari"
 
       - name: Install free workflow dependencies
         run: |
           python -m pip install --disable-pip-version-check -r requirements.txt
-          python -m pip install --disable-pip-version-check kaggle
+          if [[ "$RUN_MODE" != "live-tts-smoke" ]]; then
+            python -m pip install --disable-pip-version-check --upgrade --no-cache-dir "six>=1.16.0,<2" kaggle
+            python - <<'PY'
+          import sys
+          import six
+          from kaggle.cli import main
+          print(f"Kaggle CLI import preflight passed: python={sys.executable}, six={six.__version__}")
+          PY
+          fi
 
       - name: Run logic tests
         run: python -m unittest discover -s tests -v
+
+      - name: Require explicit Free-Tier confirmation before live AI and GPU work
+        if: env.RUN_MODE == 'live-tts-smoke' || env.RUN_MODE == 'plan-one' || env.RUN_MODE == 'plan-week'
+        shell: bash
+        run: |
+          if [[ "$BSK_FREE_TIER_ONLY_ACK" != "true" ]]; then
+            if [[ "$RUN_MODE" == "live-tts-smoke" ]]; then
+              echo "Stopped before the Gemini API call. Confirm the Gemini TTS project/key is Free Tier with paid billing disabled."
+            elif [[ "$GITHUB_EVENT_NAME" == "workflow_dispatch" ]]; then
+              echo "Stopped before any live provider request or GPU dispatch. Confirm every enabled text provider and the Gemini TTS project/key are Free Tier with paid billing disabled, then tick confirm_free_tier_only."
+            else
+              echo "Stopped before any live provider request or GPU dispatch. Push and scheduled plan runs require Actions repository variable BSK_FREE_TIER_ONLY_CONFIRMED=true after confirming every enabled text provider and the Gemini TTS project/key are Free Tier with paid billing disabled."
+            fi
+            exit 1
+          fi
+
+      - name: Generate and validate two real Hindi TTS speaker WAVs
+        if: env.RUN_MODE == 'live-tts-smoke'
+        run: python scripts/tts_smoke_test.py --confirm-free-tier-only --output-dir artifacts/tts-smoke
+
+      - name: Upload live TTS samples for human listening review
+        if: always() && env.RUN_MODE == 'live-tts-smoke'
+        uses: actions/upload-artifact@v4
+        with:
+          name: bina-shor-ke-live-tts-${{ github.run_number }}
+          path: artifacts/tts-smoke/
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Offline preflight — no network, API, or GPU use
         if: env.RUN_MODE == 'preflight'
@@ -94,10 +173,30 @@ jobs:
           name: bsk-director-${{ github.run_number }}
           path: |
             data/pending_gpu_job.json
+            data/image_toolchain_lock.json
             kaggle_kernel/studio_kaggle.py
             kaggle_kernel/kernel-metadata.json
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Detect and save voice WAVs generated before GPU dispatch
+        id: voice_cache_changed
+        if: always() && (env.RUN_MODE == 'plan-one' || env.RUN_MODE == 'plan-week')
+        shell: bash
+        run: |
+          if [ -f data/tts_cache/.dirty ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            rm -f data/tts_cache/.dirty
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Save measured speaker WAV cache for the separate GPU finalizer workflow
+        if: always() && steps.voice_cache_changed.outputs.changed == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: data/tts_cache
+          key: bsk-tts-${{ runner.os }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Persist anti-repeat history and job state
         if: always() && (env.RUN_MODE == 'plan-week' || env.RUN_MODE == 'plan-one')
@@ -105,8 +204,30 @@ jobs:
         run: |
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
-          git add data/history.json data/telegram_state.json data/pending_gpu_job.json
+          git add data/history.json data/telegram_state.json data/pending_gpu_job.json data/characters/registry.json
+          if [ -f data/image_toolchain_lock.json ]; then
+            git add data/image_toolchain_lock.json
+          fi
+          if [ -d data/job_archive ]; then
+            git add data/job_archive/
+          fi
           if ! git diff --cached --quiet; then
             git commit -m "Record BSK plan and GPU dispatch state [skip ci]"
             git push
           fi
+
+      - name: Consume one-shot live TTS trigger
+        if: always() && github.event_name == 'push' && env.RUN_MODE == 'live-tts-smoke'
+        continue-on-error: true
+        shell: bash
+        run: |
+          if [[ ! -f .github/dispatch/live-tts-smoke.once ]]; then
+            echo "One-shot TTS trigger is already absent."
+            exit 0
+          fi
+          git config user.name "bina-shor-ke-studio[bot]"
+          git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
+          git rm .github/dispatch/live-tts-smoke.once
+          git commit -m "Consume one-shot live TTS trigger [skip ci]"
+          git push
+

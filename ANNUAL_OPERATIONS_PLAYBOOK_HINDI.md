@@ -1,42 +1,43 @@
-# BINA SHOR KE — साल भर चलाने का Operations Playbook
+# BINA SHOR KE — Annual Operations Playbook (Primary 2.5D)
+
+## हर Reel के लिए
+1. Original Hindi story with a concrete human detail, believable contradiction, causal chain and meaningful payoff.
+2. Generate/validate script and dialogue; lock voice direction and actual WAV durations before visuals.
+3. Generate FLUX stills (one per source beat), create Depth Anything maps and deterministic camera-driven 2.5D clips.
+4. Validate hashes, audio/subtitle sync, final duration, resolution/FPS, VLM scorecard, OCR and full-video motion diagnostics.
+5. Send only a fully QA-passed package to Telegram. Watch/listen to the whole Reel. Owner approval is required before any manual upload.
+6. Record actual platform performance only after publication; missing metrics remain unknown, never zero.
 
 ## हर सप्ताह
-1. शनिवार की Director workflow से पहले देखें कि कोई पुराना GPU batch pending नहीं है।
-2. शुरुआत में `plan-one` ही चलाएँ। पहला live one-Reel benchmark और फोन पर पूरी समीक्षा पास होने के बाद ही `plan-week` की अनुमति दें।
-3. Telegram में आया हर Reel पूरा देखें और सुनें। खराब motion, चेहरा/हाथ/सामान बदलना, टूटे subtitles, गलत उच्चारण, कमजोर hook/payoff या बनावटी भावुकता हो तो publish न करें।
-4. Telegram में `/approve title=Exact Title` भेजें; खराब हो तो `/reject title=Exact Title`। Approved Reel को Facebook पर manually upload करें, फिर `/published` और करीब 24 घंटे बाद वास्तविक `/insights` भरें।
+- Start with one image-first `plan-one` Reel only.
+- Confirm it used FLUX still generation + Depth Anything parallax, not Wan video generation.
+- Verify full visual/audio QA, all four Telegram delivery steps and owner approval.
+- Do not run `plan-week` until the separate image-first GPU benchmark is measured and the conservative three-Reel estimate is <=8h.
+- Prior Wan2.2 benchmark (10.32h for three Reels) does not qualify or disqualify the new FLUX renderer; it is a different compute path.
+- No quota bypass, parallel account trick, paid fallback or automatic social publishing.
 
 ## हर महीने
-- Scheduled poll पहले lightweight Kaggle status check करता है; GPU active होने पर full media/ASR dependencies install नहीं होतीं। Terminal status पर ही finalizer चलता है।
-- GitHub → Actions → quality-gates में latest result देखें।
-- Dependabot PR को merge करने से पहले tests और release notes पढ़ें। किसी model/runtime update के बाद पहले plan-one ही चलाएँ।
-- Gemini, Groq, Mistral और Kaggle के वास्तविक account limits देखें। Quota खत्म हो तो रुकें; paid plan न चालू करें।
-- `data/history.json`, `data/performance_log.csv`, `data/telegram_state.json` और `data/toolchain_lock.json` की private backup रखें।
-- कम से कम 5 measured Reels वाले groups के बिना audience strategy न बदलें। एक experimentation slot हमेशा रखें।
+- Review current-head GitHub Actions tests and logs. Check the current PR head, not a stale successful run.
+- Review Kaggle GPU availability, VRAM/disk preflight, runtime timings and model revision locks.
+- Back up `data/history.json`, `data/performance_log.csv`, `data/telegram_state.json`, `data/toolchain_lock.json`, `data/image_toolchain_lock.json` (once created), and `data/pending_gpu_job.json` privately.
+- Review Telegram delivery and feedback-sync receipts. Don't infer delivery from an offline test.
+- Audit model repo revisions, exact quantized derivative notices, ComfyUI/GGUF compatibility and VAE checksum.
 
 ## हर तीन महीने
-- Meta की current original-content और AI disclosure policy देखें।
-- Video, TTS, quantized model, ComfyUI nodes और font/source licenses दोबारा जाँचें।
-- GitHub repository collaborators, Actions permissions, secrets और data backup की जाँच करें।
-- अगर current Wan quality/runtime गिरा हो, अलग branch पर 10 fixed prompts के साथ HunyuanVideo-1.5 का controlled test करें। Base workflow को उसी दिन न बदलें।
-- Indic-Speak/Indic Parler जैसे TTS विकल्पों को कम से कम 20 real Hindi scripts पर सुनकर compare करें; सिर्फ़ benchmark score के आधार पर voice न बदलें।
+- Review platform originality and AI disclosure requirements.
+- Review model/library licences and third-party notices before any commercial use.
+- Compare style variation: palette, lighting and camera grammar should differ by story genre to reduce aesthetic fatigue.
+- Run the controlled six-Reel experiment and analyse shares/sends, saves, watch time, completion and follows per view. Don't alter the factory based on one Reel.
+- Compare AI Hindi TTS against a short human voice recording; only change the voice system after a measured paired test and owner review.
+- Review character consistency across the sample. Prompt repetition is not equivalent to image-conditioned reference locking.
 
-## Failure पर
-- अगर सिर्फ़ narration/video timing पर Reel reject हुई हो, तो GPU output COMPLETE होने की पुष्टि के बाद `rebuild-rejected-timing` एक बार चलाएँ। यह पुराने scenes reuse करता है; visual defect या missing/short scene पर इसे न चलाएँ।
-- `dispatch_unknown`: Kaggle की private kernel run/version history जाँचें। Run मौजूद है तो poll workflow में `resolve-dispatch-running`; कोई नया run शुरू नहीं हुआ है तभी `resolve-dispatch-not-started`। अंदाज़ से न चुनें।
-- `finalize_failed`: transient issue ठीक करके `retry-finalize` चलाएँ।
-- `qa_rejected`: पुराना output publish न करें और retry-finalize न चलाएँ; नया `plan-one` बनाएँ।
-- GPU/quota failure: duplicate push नहीं; logs देखें और free quota reset/availability का इंतज़ार/manual requalification करें। कोई paid fallback नहीं।
+## Failure and recovery
+- GPU failure: use the saved private checkpoint only if the exact job identity, hashes and expected output are verified. FLUX stills are PNG; old Wan jobs are MP4. Never mix them.
+- OCR/VLM/motion QA incomplete or unavailable: delivery remains blocked; don't mark it as manual pass.
+- Character drift, wrong clothing, mangled anatomy, broken Devanagari or leaked internal labels: reject/regenerate the affected assets, then rerun all relevant QA.
+- Incomplete image-first model lock or missing GPU measurement: one-Reel qualification remains pending; weekly production stays locked.
+- Failed/ambiguous Kaggle dispatch: verify private kernel history before choosing any recovery action. Never create a duplicate GPU run based on assumption.
+- Hard infrastructure loss may make an unfinished remote output unrecoverable; checkpointing is best-effort, not a guarantee.
 
-## v3.6 Telegram command reliability
-- अलग lightweight workflow हर 6 घंटे में pinned owner के Telegram commands process करता है, चाहे GPU batch active हो या न हो. इससे `/published` और `/insights` को अगले weekly plan तक रोके रखने की v3.5 कमी दूर होती है.
-- Telegram pending updates 24 घंटे से अधिक नहीं रखता; scheduled runs delay हो सकते हैं, इसलिए आवश्यक command के बाद manual sync भी उपलब्ध है.
-- Bot पर webhook active न रखें; Telegram `getUpdates` और webhook साथ नहीं चल सकते.
-
-## v3.5 AutoQA और scene recovery
-- हर Reel पर local Whisper ASR narration को script से compare करता है; FFmpeg पूरी video में black/freeze intervals scan करता है; Gemini vision QA हर beat से दो frame sample करता है. इनके outputs advisory signals हैं, human approval का विकल्प नहीं.
-- Kaggle worker per-scene atomic MP4 + SHA-256 manifest रखता है. Failure पर partial output अगर Kaggle से download हो सके तभी private dataset checkpoint बनता है. Hard infrastructure loss में recovery file न मिले तो नया render आवश्यक होगा.
-- Automatic resume का conservative estimate <=4h, manual <=8h और कुल दो resume attempts तक सीमित है.
-
-## Premium filter
-**Quality > cadence. Original human insight > twist. Natural Hindi > heavy vocabulary. Consistent brand > random trends.** हर कहानी में अलग lived detail, अलग human contradiction और believable cost होना चाहिए। Ending में दर्शक को अर्थ खुद महसूस हो; कहानी भाषण न बने।
+## Production principles
+**Quality > cadence. Story causality > random twist. Natural Hindi > heavy vocabulary. Character continuity > one-off spectacle. Saves/shares and actual retention > vanity likes. Human judgement remains the final release gate.**

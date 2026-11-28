@@ -1,0 +1,312 @@
+{
+  "job_id": "20261031_115742",
+  "created_at_ist": "2026-10-31T11:59:19+05:30",
+  "status": "finalize_failed",
+  "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
+  "manifest": {
+    "job_id": "20261031_115742",
+    "created_at_ist": "2026-10-31T11:59:19+05:30",
+    "status": "dispatching",
+    "toolchain_lock": {},
+    "model": "Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader",
+    "reels": [
+      {
+        "reel_id": "reel_01_115742",
+        "title": "सूखी छतरी",
+        "pillar": "micro_story",
+        "visual_bible": "महानगर का साधारण 1BHK फ्लैट, पिस्ता-हरे रंग की फीकी दीवारें, मानसून की नम भूरी रोशनी, मूक घरेलू वस्तुएं और 35mm लेंस की शांत हैंडहेल्ड सिनेमैटोग्राफी।",
+        "beats": [
+          {
+            "video_prompt": "Vertical 9:16 medium shot, eye-level, 35mm lens. Inside a modestly furnished rented hallway with pale pistachio distemper walls. A young South Asian man in an ironed blue formal shirt pauses near the entrance. Outside the wire-mesh door, heavy grey monsoon clouds hover in the daylight. His right hand reaches down toward a wooden wall peg, lifting a folded matte black umbrella with a curved wooden handle. The camera gently tracks his hand in a slow handheld motion. Natural, soft overcast light spills from the open transom. Muted cool tones, subtle fabric creasing, domestic clutter in soft background blur. No text, subtitles, logo or watermark.",
+            "visual_direction": "जल्दबाजी में बिना पूछे किसी और की चीज उठा लेने की साधारण क्रिया स्थापित करता है।",
+            "scene_index": 1
+          },
+          {
+            "video_prompt": "Vertical 9:16 close-up shot, 50mm lens. The same man steps into an apartment building stairwell, sliding the black umbrella securely through the side strap of his grey nylon office backpack. His fingers adjust the strap with casual haste. Dim ambient daylight falls through concrete breezeblocks, casting geometric soft shadows on the mottled grey floor. Camera stays steady with subtle breathing movement, focusing on the taut fabric of the bag and the clean, dry wooden crook handle of the umbrella. Restrained colour grade with desaturated tones and natural dust motes in the background. No text, subtitles, logo or watermark.",
+            "visual_direction": "उसकी अपनी सुविधा को प्राथमिकता देने और बात को टालने की आदत दिखाता है।",
+            "scene_index": 2
+          },
+          {
+            "video_prompt": "Vertical 9:16 low-angle medium shot, 35mm lens. A wide grey city footpath outside an office complex. The young man walks forward, his dry black leather shoes stepping onto completely dry, pale asphalt. Overhead, dark monsoon clouds drift without releasing rain, diffusing an even, flat silver-grey daylight across the concrete surroundings. He carries the unused, bone-dry black umbrella tucked under one arm. Slow backward dolly keeping him in frame from the chest down. The pavement has no puddles; the atmosphere is dry and heavy with unshed humidity. Desaturated urban palette. No text, subtitles, logo or watermark.",
+            "visual_direction": "छतरी लेने की निरर्थकता और मौसम का अप्रत्याशित सूखापन उजागर करता है।",
+            "scene_index": 3
+          },
+          {
+            "video_prompt": "Vertical 9:16 close-up shot tilting down, 50mm lens. The wooden entrance door of the rented flat stands ajar. On the tiled floor sits an old Hindi newspaper, damp and rippled, holding a pair of soaked grey canvas sneakers with dark wet water stains along the fabric. Faint muddy water has seeped around the rubber soles onto the paper. Soft evening light from an interior bulb mixes with the dim dusk falling through the hallway. The camera tilts slowly down from the brass latch to settle firmly on the wet shoes. Realistic paper wrinkles, moist fabric texture, muted domestic evening tones. No text, subtitles, logo or watermark.",
+            "visual_direction": "एक घरेलू वस्तु के जरिए अनचाहे नुकसान का खुलासा करता है।",
+            "scene_index": 4
+          },
+          {
+            "video_prompt": "Vertical 9:16 medium shot from behind, 50mm lens. Through an open glass balcony door, another young South Asian man stands against the balcony railing under a wet evening sky. His back is to the camera, wearing an undershirt and rolled-up trousers. His hands firmly wring out a soaked formal white shirt over the balcony edge, water dripping steadily onto the iron railing below. The city skyline in the background is blurred and glistening with recent heavy rain. Warm indoor tungsten light outlines his silhouette while the balcony remains in cool slate-blue dusk. Still, observant camera with subtle handheld realism. No text, subtitles, logo or watermark.",
+            "visual_direction": "दूसरे इंसान पर पड़े चुपचाप असर को बिना किसी नाटकीयता के सामने लाता है।",
+            "scene_index": 5
+          },
+          {
+            "video_prompt": "Vertical 9:16 medium shot, 35mm lens. In the entryway of the apartment, the first man’s hand places the bone-dry black umbrella back onto the wooden wall peg where it originally hung. He lets his hand fall to his side and stands motionless for a second, looking toward the quiet, dimly lit living room where a ceiling fan spins slowly above an empty table. Warm tungsten light casts long, soft shadows against the pale green wall. Camera pulls back very slowly into a wide composition, holding the stillness of the space. Restrained cinematic grade, soft grain, authentic quiet home interior. No text, subtitles, logo or watermark.",
+            "visual_direction": "कहानी को वस्तु की वापसी पर खत्म करता है, लेकिन टूटे हुए सहज तालमेल को रेखांकित करता है।",
+            "scene_index": 6
+          }
+        ]
+      }
+    ]
+  },
+  "reels": [
+    {
+      "reel_id": "reel_01_115742",
+      "title": "सूखी छतरी",
+      "pillar": "micro_story",
+      "theme": "बिना पूछे ली गई एक छोटी सी सहूलियत कैसे दो दोस्तों के बीच अनकही दूरी बना देती है।",
+      "planned_publish_at": "2026-11-01T20:37:00+05:30",
+      "planned_publish_label": "Sun 01 Nov, 08:37 PM IST",
+      "concept": {
+        "title": "सूखी छतरी",
+        "pillar": "micro_story",
+        "series_name": "एक पल, एक फैसला",
+        "theme": "बिना पूछे ली गई एक छोटी सी सहूलियत कैसे दो दोस्तों के बीच अनकही दूरी बना देती है।",
+        "audience_reason": "शहरी फ्लैट-शेयरिंग और रोजमर्रा की साझेदारी में हर किसी ने बिना पूछे चीजें लेने की यह असहज खामोशी महसूस की है।",
+        "share_reason": "दर्शक इसे अपने रूममेट या करीबी दोस्त को बिना किसी ताने के, एक शांत आत्मनिरीक्षण की तरह भेज सकेंगे।",
+        "narrative_engine": "A small choice has a quiet but visible cost.",
+        "emotional_aftertaste": "एक हल्की सी झिझक और यह अहसास कि माफी न मांगना उस गलती से भी ज्यादा भारी हो जाता है।",
+        "human_detail": "दरवाजे पर गीले अखबार के ऊपर सूखने के लिए रखे हुए कीचड़ सने कैनवस के जूते।",
+        "character_contradiction": "वह खुद को बारिश से बचाना चाहता था, लेकिन लौटने पर एक सीधी बात कहने की हिम्मत नहीं जुटा सका।",
+        "cost_of_choice": "छतरी भले सूखी वापस आ गई, लेकिन कमरे का सहज अपनापन उस शाम के लिए खत्म हो गया।",
+        "hook": "बिना पूछे बस एक चीज़ उठाई थी।",
+        "visual_bible": "महानगर का साधारण 1BHK फ्लैट, पिस्ता-हरे रंग की फीकी दीवारें, मानसून की नम भूरी रोशनी, मूक घरेलू वस्तुएं और 35mm लेंस की शांत हैंडहेल्ड सिनेमैटोग्राफी।",
+        "beats": [
+          {
+            "voiceover": "बाहर बादल देखकर उसने बिना पूछे सुमित की छतरी उठा ली।",
+            "voice_direction": "सहज और थोड़ा बेपरवाह, जैसे कोई बड़ी बात न हो",
+            "screen_text": "बिना पूछे बस एक चीज़ उठाई थी।",
+            "visual_query": "man picking black umbrella hallway doorway",
+            "visual_direction": "जल्दबाजी में बिना पूछे किसी और की चीज उठा लेने की साधारण क्रिया स्थापित करता है।",
+            "video_prompt": "Vertical 9:16 medium shot, eye-level, 35mm lens. Inside a modestly furnished rented hallway with pale pistachio distemper walls. A young South Asian man in an ironed blue formal shirt pauses near the entrance. Outside the wire-mesh door, heavy grey monsoon clouds hover in the daylight. His right hand reaches down toward a wooden wall peg, lifting a folded matte black umbrella with a curved wooden handle. The camera gently tracks his hand in a slow handheld motion. Natural, soft overcast light spills from the open transom. Muted cool tones, subtle fabric creasing, domestic clutter in soft background blur. No text, subtitles, logo or watermark.",
+            "overlay_type": "note",
+            "overlay_text": "सुबह 08:45",
+            "scene_index": 1
+          },
+          {
+            "voiceover": "सोचा था शाम को भीगने से पहले वापस रख देगा।",
+            "voice_direction": "धीमी सफाई, मन में खुद को दिया गया बहाना",
+            "screen_text": "एक आसान बहाना\nजो खुद को दिया",
+            "visual_query": "umbrella strapped into office backpack stairwell",
+            "visual_direction": "उसकी अपनी सुविधा को प्राथमिकता देने और बात को टालने की आदत दिखाता है।",
+            "video_prompt": "Vertical 9:16 close-up shot, 50mm lens. The same man steps into an apartment building stairwell, sliding the black umbrella securely through the side strap of his grey nylon office backpack. His fingers adjust the strap with casual haste. Dim ambient daylight falls through concrete breezeblocks, casting geometric soft shadows on the mottled grey floor. Camera stays steady with subtle breathing movement, focusing on the taut fabric of the bag and the clean, dry wooden crook handle of the umbrella. Restrained colour grade with desaturated tones and natural dust motes in the background. No text, subtitles, logo or watermark.",
+            "overlay_type": "keyword",
+            "overlay_text": "खुद की सहूलियत",
+            "scene_index": 2
+          },
+          {
+            "voiceover": "दफ़्तर के रास्ते में एक भी बूंद नहीं गिरी।",
+            "voice_direction": "सपाट लहजा, कुदरत की बेमतलब विडंबना",
+            "screen_text": "आसमान भी कभी\nमज़ाक करता है",
+            "visual_query": "dry city pavement walking office entrance",
+            "visual_direction": "छतरी लेने की निरर्थकता और मौसम का अप्रत्याशित सूखापन उजागर करता है।",
+            "video_prompt": "Vertical 9:16 low-angle medium shot, 35mm lens. A wide grey city footpath outside an office complex. The young man walks forward, his dry black leather shoes stepping onto completely dry, pale asphalt. Overhead, dark monsoon clouds drift without releasing rain, diffusing an even, flat silver-grey daylight across the concrete surroundings. He carries the unused, bone-dry black umbrella tucked under one arm. Slow backward dolly keeping him in frame from the chest down. The pavement has no puddles; the atmosphere is dry and heavy with unshed humidity. Desaturated urban palette. No text, subtitles, logo or watermark.",
+            "overlay_type": "contrast",
+            "overlay_text": "बारिश नहीं आई",
+            "scene_index": 3
+          },
+          {
+            "voiceover": "शाम को घर लौटा, तो दरवाज़े पर गीले जूते रखे थे।",
+            "voice_direction": "अचानक रुकावट, बात समझ आने का हल्का झटका",
+            "screen_text": "दरवाज़े पर रखा\nएक अनदेखा सच",
+            "visual_query": "wet muddy sneakers drying on newspaper",
+            "visual_direction": "एक घरेलू वस्तु के जरिए अनचाहे नुकसान का खुलासा करता है।",
+            "video_prompt": "Vertical 9:16 close-up shot tilting down, 50mm lens. The wooden entrance door of the rented flat stands ajar. On the tiled floor sits an old Hindi newspaper, damp and rippled, holding a pair of soaked grey canvas sneakers with dark wet water stains along the fabric. Faint muddy water has seeped around the rubber soles onto the paper. Soft evening light from an interior bulb mixes with the dim dusk falling through the hallway. The camera tilts slowly down from the brass latch to settle firmly on the wet shoes. Realistic paper wrinkles, moist fabric texture, muted domestic evening tones. No text, subtitles, logo or watermark.",
+            "overlay_type": "message",
+            "overlay_text": "दोपहर की बौछार",
+            "scene_index": 4
+          },
+          {
+            "voiceover": "सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।",
+            "voice_direction": "दबा हुआ संकोच, बिना किसी चीख-पुकार का दृश्य",
+            "screen_text": "कुछ सवाल\nपूछे नहीं जाते",
+            "visual_query": "man wringing wet shirt apartment balcony",
+            "visual_direction": "दूसरे इंसान पर पड़े चुपचाप असर को बिना किसी नाटकीयता के सामने लाता है।",
+            "video_prompt": "Vertical 9:16 medium shot from behind, 50mm lens. Through an open glass balcony door, another young South Asian man stands against the balcony railing under a wet evening sky. His back is to the camera, wearing an undershirt and rolled-up trousers. His hands firmly wring out a soaked formal white shirt over the balcony edge, water dripping steadily onto the iron railing below. The city skyline in the background is blurred and glistening with recent heavy rain. Warm indoor tungsten light outlines his silhouette while the balcony remains in cool slate-blue dusk. Still, observant camera with subtle handheld realism. No text, subtitles, logo or watermark.",
+            "overlay_type": "contrast",
+            "overlay_text": "बिना शिकायत",
+            "scene_index": 5
+          },
+          {
+            "voiceover": "उसने छतरी टाँगी, मगर कमरा चुप रहा।",
+            "voice_direction": "शांत, ठहराव भरा अंत, अनकही दूरी का अहसास",
+            "screen_text": "चीज़ वापस मिल गई\nसहजता नहीं",
+            "visual_query": "dry umbrella hanging wooden peg quiet room",
+            "visual_direction": "कहानी को वस्तु की वापसी पर खत्म करता है, लेकिन टूटे हुए सहज तालमेल को रेखांकित करता है।",
+            "video_prompt": "Vertical 9:16 medium shot, 35mm lens. In the entryway of the apartment, the first man’s hand places the bone-dry black umbrella back onto the wooden wall peg where it originally hung. He lets his hand fall to his side and stands motionless for a second, looking toward the quiet, dimly lit living room where a ceiling fan spins slowly above an empty table. Warm tungsten light casts long, soft shadows against the pale green wall. Camera pulls back very slowly into a wide composition, holding the stillness of the space. Restrained cinematic grade, soft grain, authentic quiet home interior. No text, subtitles, logo or watermark.",
+            "overlay_type": "note",
+            "overlay_text": "खाली खामोशी",
+            "scene_index": 6
+          }
+        ],
+        "caption": "कभी-कभी हम किसी की जरूरत सिर्फ इसलिए नजरअंदाज कर देते हैं क्योंकि पूछने में थोड़ी झिझक होती है। चीज तो अपनी जगह लौट आती है, पर वो बेफिक्र बातचीत नहीं।",
+        "hashtags": [
+          "#BinaShorKe",
+          "#EverydayStories",
+          "#HumanChoices",
+          "#MicroStory"
+        ],
+        "cover_text": "सूखी छतरी, भीगी शाम",
+        "posting_note": "यह रील टेस्ट करती है कि क्या बिना किसी जोरदार झगड़े के सिर्फ एक भीगे जूते और सूखी छतरी के जरिए दर्शक अनकही गलती की चुभन महसूस कर पाते हैं।",
+        "planned_publish_at": "2026-11-01T20:37:00+05:30",
+        "planned_publish_label": "Sun 01 Nov, 08:37 PM IST",
+        "editorial_review": {
+          "scores": {
+            "hook_clarity": 4,
+            "specificity": 4,
+            "human_specificity": 5,
+            "emotional_resonance": 4,
+            "story_progression": 4,
+            "payoff": 4,
+            "readability": 4,
+            "originality": 4,
+            "creative_contribution_beyond_stock": 4,
+            "visual_match": 5,
+            "photoreal_prompt_quality": 5,
+            "motion_feasibility": 5,
+            "continuity_coherence": 5,
+            "voiceover_rhythm": 4,
+            "caption_quality": 4,
+            "share_value": 4,
+            "platform_safety": 5
+          },
+          "average_score": 4.35,
+          "approved": true,
+          "revision_notes": [
+            "Voice‑over lines are clear but a touch too expository; consider trimming \"सोचा था शाम को भीगने से पहले वापस रख देगा\" to a more internal, felt line.",
+            "Introduce a tiny visual link early – e.g., a faint water‑stain on the umbrella’s handle – that later mirrors the wet shoes, tightening the cause‑effect thread.",
+            "Vary one shot with a slightly wider lens (24mm) for the balcony scene to give spatial context without breaking the handheld aesthetic."
+          ],
+          "main_risk": "If the caption is shared without context, some viewers may read it as a moral lecture; keep the wording observational rather than prescriptive.",
+          "department_notes": {},
+          "passes": 1
+        },
+        "originality_safeguards": {
+          "original_script_and_story_arc": true,
+          "custom_story_specific_overlays_required": true,
+          "recent_title_theme_similarity_check": "passed",
+          "source_clip_reuse_check": "active",
+          "not_a_Meta_eligibility_guarantee": true
+        },
+        "reel_id": "reel_01_115742"
+      },
+      "beats": [
+        {
+          "video_prompt": "Vertical 9:16 medium shot, eye-level, 35mm lens. Inside a modestly furnished rented hallway with pale pistachio distemper walls. A young South Asian man in an ironed blue formal shirt pauses near the entrance. Outside the wire-mesh door, heavy grey monsoon clouds hover in the daylight. His right hand reaches down toward a wooden wall peg, lifting a folded matte black umbrella with a curved wooden handle. The camera gently tracks his hand in a slow handheld motion. Natural, soft overcast light spills from the open transom. Muted cool tones, subtle fabric creasing, domestic clutter in soft background blur. No text, subtitles, logo or watermark.",
+          "visual_direction": "जल्दबाजी में बिना पूछे किसी और की चीज उठा लेने की साधारण क्रिया स्थापित करता है।",
+          "scene_index": 1
+        },
+        {
+          "video_prompt": "Vertical 9:16 close-up shot, 50mm lens. The same man steps into an apartment building stairwell, sliding the black umbrella securely through the side strap of his grey nylon office backpack. His fingers adjust the strap with casual haste. Dim ambient daylight falls through concrete breezeblocks, casting geometric soft shadows on the mottled grey floor. Camera stays steady with subtle breathing movement, focusing on the taut fabric of the bag and the clean, dry wooden crook handle of the umbrella. Restrained colour grade with desaturated tones and natural dust motes in the background. No text, subtitles, logo or watermark.",
+          "visual_direction": "उसकी अपनी सुविधा को प्राथमिकता देने और बात को टालने की आदत दिखाता है।",
+          "scene_index": 2
+        },
+        {
+          "video_prompt": "Vertical 9:16 low-angle medium shot, 35mm lens. A wide grey city footpath outside an office complex. The young man walks forward, his dry black leather shoes stepping onto completely dry, pale asphalt. Overhead, dark monsoon clouds drift without releasing rain, diffusing an even, flat silver-grey daylight across the concrete surroundings. He carries the unused, bone-dry black umbrella tucked under one arm. Slow backward dolly keeping him in frame from the chest down. The pavement has no puddles; the atmosphere is dry and heavy with unshed humidity. Desaturated urban palette. No text, subtitles, logo or watermark.",
+          "visual_direction": "छतरी लेने की निरर्थकता और मौसम का अप्रत्याशित सूखापन उजागर करता है।",
+          "scene_index": 3
+        },
+        {
+          "video_prompt": "Vertical 9:16 close-up shot tilting down, 50mm lens. The wooden entrance door of the rented flat stands ajar. On the tiled floor sits an old Hindi newspaper, damp and rippled, holding a pair of soaked grey canvas sneakers with dark wet water stains along the fabric. Faint muddy water has seeped around the rubber soles onto the paper. Soft evening light from an interior bulb mixes with the dim dusk falling through the hallway. The camera tilts slowly down from the brass latch to settle firmly on the wet shoes. Realistic paper wrinkles, moist fabric texture, muted domestic evening tones. No text, subtitles, logo or watermark.",
+          "visual_direction": "एक घरेलू वस्तु के जरिए अनचाहे नुकसान का खुलासा करता है।",
+          "scene_index": 4
+        },
+        {
+          "video_prompt": "Vertical 9:16 medium shot from behind, 50mm lens. Through an open glass balcony door, another young South Asian man stands against the balcony railing under a wet evening sky. His back is to the camera, wearing an undershirt and rolled-up trousers. His hands firmly wring out a soaked formal white shirt over the balcony edge, water dripping steadily onto the iron railing below. The city skyline in the background is blurred and glistening with recent heavy rain. Warm indoor tungsten light outlines his silhouette while the balcony remains in cool slate-blue dusk. Still, observant camera with subtle handheld realism. No text, subtitles, logo or watermark.",
+          "visual_direction": "दूसरे इंसान पर पड़े चुपचाप असर को बिना किसी नाटकीयता के सामने लाता है।",
+          "scene_index": 5
+        },
+        {
+          "video_prompt": "Vertical 9:16 medium shot, 35mm lens. In the entryway of the apartment, the first man’s hand places the bone-dry black umbrella back onto the wooden wall peg where it originally hung. He lets his hand fall to his side and stands motionless for a second, looking toward the quiet, dimly lit living room where a ceiling fan spins slowly above an empty table. Warm tungsten light casts long, soft shadows against the pale green wall. Camera pulls back very slowly into a wide composition, holding the stillness of the space. Restrained cinematic grade, soft grain, authentic quiet home interior. No text, subtitles, logo or watermark.",
+          "visual_direction": "कहानी को वस्तु की वापसी पर खत्म करता है, लेकिन टूटे हुए सहज तालमेल को रेखांकित करता है।",
+          "scene_index": 6
+        }
+      ],
+      "delivery_status": "planned",
+      "output_directory": "output/20261031_1826_1_reel-1"
+    }
+  ],
+  "policy": {
+    "paid_fallback": false,
+    "auto_facebook_publish": false,
+    "max_reels": 1
+  },
+  "dispatched_at_ist": "2026-10-31T14:07:11+05:30",
+  "dispatch_output": "Kernel version 2 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
+  "gpu_error": "{\n  \"status\": \"failed\",\n  \"error_type\": \"RuntimeError\",\n  \"error\": \"ComfyUI node KSampler schema changed; unsupported inputs=['control_after_generate']; missing required inputs=[]; supported=['cfg', 'denoise', 'latent_image', 'model', 'negative', 'positive', 'sampler_name', 'scheduler', 'seed', 'steps']\",\n  \"stage\": \"kaggle_gpu_render\",\n  \"manifest_id\": \"20261031_115742\"\n}",
+  "gpu_retry_attempts": 1,
+  "gpu_retry_dispatched_at_ist": "2026-10-31T14:07:11+05:30",
+  "gpu_retry_reason": "ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.",
+  "active_finalizing_reel_id": "reel_01_115742",
+  "rhythm_repair_attempts": 1,
+  "rhythm_repair": {
+    "status": "partial_failed_at_scene_5",
+    "scene_index": 1,
+    "reported_original_ratio": 1.39,
+    "max_audio_tempo": 1.03,
+    "max_video_speed_ratio": 1.38,
+    "method": "pitch-preserving FFmpeg atempo on narration only; reuse completed Kaggle scene MP4s",
+    "requested_at_ist": "2026-11-01T17:08:08+05:30",
+    "new_kaggle_gpu_dispatch": false,
+    "followup_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.67x); it is outside the bounded voice-timing repair window."
+  },
+  "scene_voiceover_repair_attempts": 1,
+  "scene_voiceover_repair": {
+    "status": "completed_with_followup_scene6_repair",
+    "scene_index": 5,
+    "reported_original_ratio": 1.67,
+    "original_voiceover": "सुमित चुपचाप बालकनी में अपनी भीगी कमीज़ निचोड़ रहा था।",
+    "replacement_voiceover": "सुमित ने चुपचाप अपनी भीगी कमीज़ निचोड़ दी।",
+    "replacement_word_count": 8,
+    "method": "regenerate Scene 5 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA",
+    "requested_at_ist": "2026-11-01T17:45:51+05:30",
+    "new_kaggle_gpu_dispatch": false
+  },
+  "scene6_voiceover_repair_attempts": 1,
+  "scene6_voiceover_repair": {
+    "status": "completed_with_followup_rewrite",
+    "scene_index": 6,
+    "reported_original_ratio": 1.62,
+    "original_voiceover": "उसने सूखी छतरी टांग दी, मगर कमरा चुप ही रहा।",
+    "replacement_voiceover": "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।",
+    "replacement_word_count": 8,
+    "method": "regenerate Scene 6 Hindi TTS only; preserve all six completed Kaggle MP4 scenes; rerun full final QA",
+    "requested_at_ist": "2026-11-01T17:57:28+05:30",
+    "new_kaggle_gpu_dispatch": false
+  },
+  "scene6_voiceover_followup_attempts": 1,
+  "scene6_voiceover_followup": {
+    "status": "qa_rejected_again",
+    "scene_index": 6,
+    "reported_original_ratio": 1.54,
+    "original_voiceover": "उसने सूखी छतरी टाँगी, मगर कमरा चुप रहा।",
+    "replacement_voiceover": "उसने छतरी टाँगी, मगर कमरा चुप रहा।",
+    "replacement_word_count": 7,
+    "method": "regenerate Scene 6 Hindi TTS only; reuse all six completed Kaggle MP4s; rerun full final QA; no GPU dispatch",
+    "requested_at_ist": "2026-11-01T18:28:51+05:30",
+    "new_kaggle_gpu_dispatch": false,
+    "final_qa_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.52x); it is outside the bounded voice-timing repair window."
+  },
+  "timing_rebuild_attempts": 1,
+  "timing_rebuild": {
+    "status": "finalize_failed",
+    "reel_id": "reel_01_115742",
+    "original_qa_rejection_reason": "RuntimeError: AI scene would require excessive speed change (1.52x); it is outside the bounded voice-timing repair window.",
+    "requested_at_ist": "2026-11-18T08:39:11+05:30",
+    "new_kaggle_gpu_dispatch": false,
+    "method": "reuse the completed six-scene Kaggle output; apply bounded video timing and audio padding in finalization",
+    "finished_at_ist": "2026-11-18T08:40:24+05:30",
+    "final_qa_rejection_reason": ""
+  },
+  "finalize_error": "RuntimeError: AI scene needs a 1.34s end hold, above the 1.20s quality limit; regenerate a longer scene or shorten the narration.",
+  "finalize_failed_at_ist": "2026-11-18T08:40:23+05:30",
+  "archive_metadata": {
+    "archived_at_ist": "2026-11-18T22:31:08+05:30",
+    "archive_reason": "terminal_qa_rejection_after_completed_gpu_render",
+    "final_qa_rejection_reason": "RuntimeError: AI scene needs a 1.34s end hold, above the 1.20s quality limit; regenerate a longer scene or shorten the narration.",
+    "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
+    "verified_kaggle_status": "COMPLETE",
+    "verified_kaggle_output": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker has status \"KernelWorkerStatus.COMPLETE\"\n\n"
+  }
+}

@@ -48,7 +48,11 @@ class ProviderFallbackIntegrationTests(unittest.TestCase):
         producer._PROVIDER_COOLDOWN_UNTIL.clear()
         producer._PROVIDER_DISABLED_THIS_RUN.clear()
         producer._LAST_TEXT_PROVIDER_USED = None
-        self.env = patch.dict(os.environ, {"BSK_TEXT_PROVIDER": "gemini"}, clear=False)
+        self.env = patch.dict(
+            os.environ,
+            {"BSK_TEXT_PROVIDER": "gemini", "BSK_MISTRAL_FREE_ONLY": "YES"},
+            clear=False,
+        )
         self.env.start()
         self.keys = patch.multiple(
             producer,
@@ -74,6 +78,11 @@ class ProviderFallbackIntegrationTests(unittest.TestCase):
     def _gemini_repeated_failure(self, error: Exception) -> list[Exception]:
         # gemini_json performs three bounded attempts before returning to text_json.
         return [error, error, error]
+
+    def test_text_router_disables_mistral_without_explicit_free_only_confirmation(self) -> None:
+        with patch.dict(os.environ, {"BSK_MISTRAL_FREE_ONLY": ""}):
+            providers = producer._text_provider_order()
+        self.assertNotIn("mistral", [name for name, _ in providers])
 
     def test_gemini_503_routes_to_groq_and_does_not_call_mistral(self) -> None:
         groq_response = _chat_response('{"status":"ok","provider":"groq"}')

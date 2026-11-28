@@ -1,10 +1,10 @@
-# BINA SHOR KE — v3.7 P0 Reliability Factory
+# BINA SHOR KE — v3.7 Primary 2.5D Reliability Factory
 
 यह v3.6 पर आधारित v3.7 P0 Reliability build है। पुराने setup का backup रखें और इस release को अलग branch/copy में qualify करें। मुख्य लक्ष्य वही है: बिना paid fallback के हर सप्ताह 3 original, premium Hindi Reels बनाने की कोशिश; पहले live one-Reel qualification जरूरी है।
 
-## ऐतिहासिक v3.5 architecture overview (v3.7 में P0 reliability fixes जोड़े गए हैं)
+## वर्तमान architecture: voice-first, image-first 2.5D (v3.7 feature branch)
 
-यह private GitHub project weekly planning, original Hindi story writing, role-based editorial review, free-tier Hindi AI narration, open-weight AI video generation on Kaggle's free GPU, branded post-production, visual/technical QA और Telegram delivery को automate करने के लिए बनाया गया है। **यह Facebook पर auto-publish नहीं करता**—अंतिम human check और upload तुम्हारे control में रहेगा।
+यह private GitHub project original Hindi story writing, voice-first timing, illustrated FLUX still generation, Depth Anything V2 depth maps, deterministic 2.5D parallax, branded post-production, fail-closed QA और private Telegram review को automate करने के लिए बनाया जा रहा है। **Primary visual architecture 100% 2.5D parallax है; default path में Wan video generation नहीं है।** Wan2.2 केवल पुराने manifests की backward-compatible legacy route है। Facebook पर auto-publish नहीं होता।
 
 > **साफ़ सीमा:** इस package को offline tests पर verify किया गया है; तुम्हारे Google/GitHub/Kaggle/Telegram accounts पर live API/GPU run अभी नहीं हुआ है। Free GPU availability, quotas और generated video quality की guarantee नहीं है। Workflow paid fallback नहीं लेगा; unavailable quota/hardware पर fail/alert करेगा।
 
@@ -18,21 +18,21 @@
 
 Men's style इस Page का मुख्य niche नहीं है; वह कभी-कभी useful insight के रूप में आ सकता है। यही breadth universal appeal देती है, जबकि repeated storytelling format brand को recognizable रखता है।
 
-## 2. Production architecture
+## 2. Production architecture — image-first 2.5D
 
 1. **Primary Director (Gemini Free Tier):** title/theme history, pillar balance, posting slot, script, hook, beat-by-beat shot prompts, caption/hashtags और genuine share-reason बनाता है.
 2. **Multi-provider writer fallback:** Gemini के transient outage/quota पर configured होने पर Groq, फिर Mistral Free, फिर केवल explicit opt-in पर Cloudflare Workers AI. किसी भी paid provider का endpoint या automatic billing fallback नहीं है.
 3. **Independent Editorial Critic:** पहले Groq, फिर Mistral, फिर enabled Cloudflare, और अंत में Gemini. इसलिए Groq/Mistral key जोड़ने पर reviewer primary Gemini model से अलग provider family में critique करता है; बिना backup key के यह अलग model/provider की guarantee नहीं देता.
-4. **Photoreal video worker (Wan2.2 TI2V-5B Q4_K_M GGUF + ComfyUI on Kaggle GPU):** हर Reel के 5–6 छोटे scenes अलग बनते हैं; एक shot में एक physically plausible action, practical lighting, natural texture और consistent visual bible. कोई paid video API call नहीं.
-5. **Post-production (GitHub runner):** Hindi AI narration, scene cuts, subtitles, restrained brand overlays, locally synthesized quiet sound bed, cover, credits और 1080×1920 MP4. Generated visual is 704×1280; final 1080×1920 is an upscale, not native extra detail. AI source cadence 24 fps preserve होती है.
-6. **QA:** editorial score + schema/duplication checks, voice/audio validation, MP4 dimensions/codecs/fps/duration/size checks, up to 18 beat-stratified visual samples when Gemini vision quota allows, full-video FFmpeg black/freeze diagnostics, and local Hindi Whisper transcript QA, safe failure handling and manual-review checklist. अब human-specificity और emotional-resonance अलग mandatory scores हैं; generic moral/quote ending, unnatural Hindi और forced melodrama पर revision gate लगेगा.
+4. **Primary image-first visual worker (FLUX.1 Schnell Q4_K_S GGUF + ComfyUI on Kaggle GPU):** हर source beat के लिए एक 704×1280 illustrated PNG still बनती है। Wan video clip बनाकर keyframe निकालने की जरूरत नहीं.
+5. **2.5D motion worker (Depth Anything V2 + OpenCV/FFmpeg):** हर still से depth map, eased camera push/drift और parallax MP4 बनता है। Default editorial coverage 100% depth-parallax है; 1080×1920, 30 FPS master तैयार होता है। पुरानी Wan 24 FPS route केवल legacy manifests के लिए है.
+6. **QA:** editorial score + strict schema, voice/audio validation, MP4 dimensions/codecs/fps/duration/size checks, sampled VLM frame review, full-video black/freeze diagnostics, 1 FPS Tesseract OCR (Hindi + English) for leaked prompt labels, and local Hindi Whisper transcript QA. VLM/OCR/motion QA unavailable या incomplete होने पर delivery रुकती है; human review अनिवार्य है.
 7. **Telegram delivery:** MP4, cover, copy-ready caption, hashtags, suggested slot, visual prompts, credits और QA report. Facebook posting remains manual.
 8. **Adaptive feedback:** अलग `Telegram Feedback Sync` workflow हर 6 घंटे में `/approve`, `/reject`, `/published` और `/insights` commands को private history में सुरक्षित करता है—GPU batch के बिना भी. `/insights` metrics पर्याप्त sample होने पर pillar mix और lunch/evening test slots को धीरे-धीरे adapt करते हैं. यह Meta Insights API integration नहीं है.
 
 ## 3. Zero-spend controls
 
 - Primary text: `gemini-3.8-flash`; optional independent/recovery text providers: `openai/gpt-oss-120b` via Groq Free, `ministral-8b-latest` as the Mistral Studio Free-mode candidate (model access must be checked in the account), and Cloudflare `@cf/meta/llama-3.1-8b-instruct` only after explicit opt-in. Hindi voice: `gemini-3.8-flash-lite-tts`. These free quotas are limited and can change; fallback means a different free provider, not unlimited capacity. No automatic paid provider is configured.
-- Video: public Wan2.2 open-weight checkpoint + GGUF quantized build on Kaggle's free GPU quota. On the first successful full generation, the workflow stores exact ComfyUI, GGUF and model-revision hashes in `data/toolchain_lock.json`; later batches reuse them rather than silently following a moving main branch. If a pinned commit can no longer be fetched, the workflow stops and alerts. Review upstream and derivative licenses/NOTICE before commercial use. GPU queue, session duration, available disk and weekly quota can change; the worker checks GPU/disk and exits if unsuitable.
+- Primary visuals: FLUX.1 Schnell Q4_K_S GGUF + FLUX CLIP-L/T5 encoders + FLUX AE VAE, plus Depth Anything V2 Small on Kaggle CUDA. First successful complete image-first Reel stores immutable ComfyUI/GGUF/model/runtime revisions in `data/image_toolchain_lock.json`. The legacy Wan model/ComfyUI lock stays separate in `data/toolchain_lock.json`; do not copy or reuse the old Wan benchmark as proof for FLUX. Review upstream and quantization licenses/notices before commercial use. Current primary preflight requires at least 12 GiB VRAM and 18 GiB free disk; actual Kaggle model load/render still needs a live qualification run.
 - Automation: GitHub Free private-repo standard runner included minutes only. In GitHub Billing, disable paid Actions overage / set the relevant budget to $0; if free quota ends, let runs stop.
 - TTS calls are conservatively paced (about one request every 21 seconds). Each beat carries a restrained actor direction (pace, warmth, pause and emotional restraint) into Gemini speech metadata; cache keys include both exact narration and voice direction, so a changed performance is not accidentally reused. Validated WAV files are cached across GitHub workflow reruns. The cache is private workflow cache data, not committed to the repository.
 - Telegram Bot API is the delivery route; WhatsApp Cloud API is deliberately excluded from the zero-cost baseline because account/setup/usage terms may change.
@@ -106,15 +106,15 @@ GitHub → repository → **Actions** → `BINA SHOR KE — Director and AI Reel
 - Tests validate code logic and the local FFmpeg/Devanagari render path.
 - Any file named `SMOKE_TEST_ONLY_DO_NOT_PUBLISH.mp4` is a technical smoke test, not a real Reel.
 
-### Run 2 — one real test Reel
+### Run 2 — one real image-first 2.5D test Reel
 
-Run the same workflow with `plan-one`. This uses Gemini's free tier, pushes one private Kaggle GPU job and finally sends the ready-for-review package to Telegram when the 2-hour poller sees the completed result. It can take a long time while models download and scenes render. If quota/hardware/API is unavailable, it should alert and stop—never switch to paid.
+Run the same workflow with `plan-one`. This uses Gemini Free Tier for script/voice, pushes one private Kaggle GPU job, generates FLUX stills, derives Depth Anything parallax and finalises a 30 FPS master. The ready-for-review package is sent to Telegram only after technical, visual, OCR and motion QA gates pass. This first image-first Reel must record its separate measured GPU benchmark. If quota/hardware/API is unavailable, it alerts and stops—never switches to Wan or paid generation as a silent fallback.
 
 **Do not run the full batch until the test Reel arrives and you have reviewed the audio, motion and subtitles.**
 
 ### Run 3 — weekly batch
 
-Select `plan-week` only after `plan-one` succeeds, all technical QA checks pass, all four Telegram delivery items (video, cover, review message, publish kit) arrive, and you send `/approve title=Exact Reel Title`. The workflow processes pending Telegram approval updates before checking the weekly gate. GPU benchmark qualification remains a separate requirement. The scheduled planning run is Saturday at **07:37 IST**, leaving time to generate next week's planned Sunday/Tuesday/Thursday Reels. A separate poll workflow checks the free GPU job every two hours. GitHub schedules can be delayed; publication time is not guaranteed.
+Select `plan-week` only after `plan-one` succeeds, all technical QA checks pass, all four Telegram delivery items (video, cover, review message, publish kit) arrive, and you send `/approve title=Exact Reel Title`. The workflow processes pending Telegram approval updates before checking the weekly gate. A separate image-first FLUX + depth benchmark (estimated 3-Reel batch <=8h) is mandatory; the old Wan 10.32h benchmark cannot qualify it. The scheduled planning run is Saturday at **07:37 IST**, leaving time to generate next week's planned Sunday/Tuesday/Thursday Reels. A separate poll workflow checks the free GPU job every two hours. GitHub schedules can be delayed; publication time is not guaranteed.
 
 The standard planned slots begin with an alternating lunch/evening experiment: 13:07 IST and 20:37 IST. After at least five metric-bearing posts per window, the planner can favour the better internal score for two of three slots while retaining one exploration slot. This is a small-sample experiment, not a universal “best time”.
 
@@ -152,16 +152,17 @@ Use actual numbers; `watch` is average watch time in seconds and `completion` is
 - A current batch remains locked while running so a second weekly plan cannot accidentally duplicate it.
 - The free GPU worker validates model nodes, required inputs, GPU, disk and complete scene output. It fails rather than using CPU or a paid model if the required path is missing.
 - `poll` runs every two hours. If Telegram/TTS finalization fails transiently, run `retry-finalize`; already-sent Telegram items are checkpointed.
-- Each finished GPU scene is atomically written and entered into a SHA-256 checkpoint manifest. If Kaggle exposes partial output after a failed run, the finalizer attempts to save verified scenes to a private Kaggle dataset and restore them on a bounded resume. This is best-effort: a hard infrastructure loss may expose no files to recover.
+- Each finished FLUX PNG still and parallax MP4 is atomically inventoried with SHA-256, byte size and dimensions/duration. If Kaggle exposes partial output after a failed run, verified PNG stills can be saved to a private Kaggle dataset and hash-checked on restore; missing parallax clips can be regenerated from those stills. Legacy Wan MP4 checkpoint recovery remains backward-compatible. This is best-effort: hard infrastructure loss may expose no files to recover.
 - An automatic resume is allowed only when a conservative remaining-time estimate is at most 4 hours. Otherwise, Telegram explains the manual `resume-checkpoint` action (maximum 8 hours, two total attempts). Ambiguous push outcomes are locked until owner confirmation to prevent duplicate GPU jobs.
 - If the video fails a hard visual/rhythm QA gate, the status is `qa_rejected`. Do not publish that file and do not use `retry-finalize` (it would reuse the same scenes). After checking the alert, run `plan-one` for a fresh test or `plan-week` for a fresh batch; failed concepts remain in history to reduce repeats.
 - If Kaggle quota/session ends or model/node APIs change, inspect the GPU log/manifest. No automatic paid fallback is attempted. If dispatch status becomes ambiguous, inspect Kaggle → Code → your private kernel → version/run history. Only after confirming the new run exists choose `resolve-dispatch-running`; only after confirming it did not start choose `resolve-dispatch-not-started`. Do not guess: these owner-confirmation options exist to avoid duplicate GPU jobs.
-- The first complete generation locks ComfyUI/GGUF source commits, model revisions and key GPU runtime package versions. To deliberately qualify an upgrade later, edit `data/toolchain_lock.json` in GitHub's web editor to set `status` to `unlocked`, set both commit fields to `null`, and set `model_revisions` to `{}`; commit that change, then run `plan-one`. Do not run `plan-week` until the new test is received and manually approved. The next successful generation saves new source/model/runtime hashes.
+- Image-first FLUX source/model/runtime revisions are stored separately in `data/image_toolchain_lock.json`; the legacy Wan lock remains in `data/toolchain_lock.json`. Do not manually edit the lock to bypass a revision/benchmark mismatch. A deliberate requalification must be implemented as a reviewed source change and verified by a new `plan-one` run. Weekly production stays locked until the image-first one-Reel benchmark and owner approval are actually recorded.
 
 ## 8. License and model quality notes
 
-- The Wan2.2 TI2V 5B GGUF model card lists Apache-2.0 and includes a derivative notice for quantization/conversion. Review both upstream and the precise quantization repo's `LICENSE`/`NOTICE` before any commercial use: https://huggingface.co/timfromhcs/Wan2.2-TI2V-5B-GGUF
-- The upstream visual model supports T2V/I2V in a 720p-oriented portrait landscape. Our scene render is 704×1280 at 24 fps; final delivery is upscaled to 1080×1920. Upscaling does not create native model detail.
+- Primary visuals use FLUX.1 Schnell (Apache-2.0), the city96 Q4_K_S GGUF quantization, CLIP-L/T5 text encoders and Depth Anything V2 (Apache-2.0). The AE VAE is downloaded from the public `nick911/flux1-schnell-normal` mirror, which identifies it as an unmodified copy of the BFL Schnell VAE and publishes the original SHA-256; the worker enforces that digest after download. Review each exact model/quantization/encoder licence and NOTICE before commercial use: https://huggingface.co/city96/FLUX.1-schnell-gguf and https://huggingface.co/nick911/flux1-schnell-normal
+- Wan2.2 TI2V 5B GGUF is a backward-compatible legacy route only. Review both upstream and derivative `LICENSE`/`NOTICE` before using an old manifest commercially: https://huggingface.co/timfromhcs/Wan2.2-TI2V-5B-GGUF
+- Source stills are 704×1280; the final master is upscaled/assembled at 1080×1920, 30 FPS. Upscaling does not create native model detail.
 - Model-generated scenes may still contain artifacts. The intended strategy is slow, motivated camera movement; one action per scene; anonymous/object-led shots where possible; custom Hindi subtitles in post; consistent visual bible; restrained colour grade and sound. Do not claim it is equal to Higgsfield or guaranteed not to look AI-generated.
 - Meta's current originality guidance can deprioritize low-value/recycled/unoriginal content. Original scripts and custom edits help, but neither our score nor AI disclosure certifies recommendation or monetization eligibility.
 
@@ -173,7 +174,7 @@ Use actual numbers; `watch` is average watch time in seconds and `completion` is
 - `.github/dependabot.yml`: monthly dependency/action update PRs, manually reviewed.
 - `scripts/producer.py`: topic history, multi-provider text routing, independent critique/revision, line-specific Hindi TTS direction, post-production, QA, Telegram commands and performance adaptation.
 - `scripts/studio_pipeline.py`: secure plan/dispatch, Kaggle polling, delivery checkpointing and fail-safe state transitions.
-- `scripts/kaggle_gpu_runner.py`: private Kaggle ComfyUI + Wan2.2 worker with atomic per-scene files and hash manifest.
+- `scripts/kaggle_gpu_runner.py`: private Kaggle ComfyUI worker. Primary mode generates FLUX stills + Depth Anything V2 parallax; legacy mode retains Wan2.2 for older manifests. Both use atomic files and hash manifests.
 - `scripts/model_lab.py` + `data/model_lab/`: offline candidate scorecards; no model downloads or live API calls.
 - `tests/`: offline logic and orchestration checks.
 - `data/history.json`: topic anti-repeat and measured performance state.
@@ -185,12 +186,12 @@ Use actual numbers; `watch` is average watch time in seconds and `completion` is
 - **Every Reel:** watch the entire MP4 once on a phone; check hook, natural Hindi pronunciation, subtitles, continuity, motion artifacts, ending, and whether the story feels earned. Reject a weak Reel rather than filling the weekly quota.
 - **Every week:** publish no more than the planned 3 Reels; submit `/published` and accurate 24-hour `/insights` only after a real upload. Keep one slot as a deliberate exploration slot.
 - **Every month:** review the quality-gates workflow and Dependabot PRs; compare the best and worst 5 Replays/retention records; check Gemini/Groq/Mistral account limits and Kaggle quota; inspect storage growth and stale pending states. Do not merge dependency/model updates without a successful `plan-one` qualification.
-- **Every quarter:** re-check Meta originality/AI disclosure rules, every model and quantized derivative license, provider free-plan conditions, and the GitHub/Kaggle usage policy. Back up `data/history.json`, `data/performance_log.csv`, `data/telegram_state.json`, and `data/toolchain_lock.json` privately.
+- **Every quarter:** re-check Meta originality/AI disclosure rules, every model and quantized derivative license, provider free-plan conditions, and the GitHub/Kaggle usage policy. Back up `data/history.json`, `data/performance_log.csv`, `data/telegram_state.json`, `data/toolchain_lock.json` and `data/image_toolchain_lock.json` privately.
 - **After any model, ComfyUI node, workflow, or package update:** run CI → `preflight` → `plan-one` → full human review. Only then permit a weekly three-Reel batch.
 
 ## 11. Premium quality strategy and known boundaries
 
-The current system is a controlled production pipeline, not a human film crew. Wan2.2 makes independent text-conditioned shots, so a visual bible reduces but cannot guarantee character/prop continuity. Final 1080×1920 export is an upscale from 704×1280 native generation, not true native 1080p detail. Beat-stratified visual QA now samples up to 18 frames, while FFmpeg scans the full video for black/frozen intervals. These are advisory checks; subtle temporal artifacts and cinematic quality still require one complete playback.
+The current system is a controlled production pipeline, not a human film crew. The primary image-first path generates one FLUX still per story beat and turns each into a moving Depth Anything parallax clip; the current plan expands six source beats into 12–16 editorial cuts by retiming/cropping those source clips. It does **not yet generate 12–16 independent still images**. Character text descriptions and VLM continuity review reduce drift but are not equivalent to true image-conditioned reference-sheet locking. Final 1080×1920 export is an upscale from 704×1280 source stills/parallax, not native 1080p model detail. VLM samples up to 18 frames; OCR samples the timeline at 1 FPS; FFmpeg scans the full video for black/frozen intervals. These checks do not replace one complete human playback.
 
 Keep the 3-Reel batch locked behind the one-Reel measured runtime and 8-hour estimate. Kaggle notebook sessions have a 12-hour maximum and a 20 GB auto-saved `/kaggle/working` area; GPU availability and weekly allocation can vary. A Kaggle failure does not establish that the model is impossible—it may be quota, queue, runtime, RAM/VRAM, network, or dependency drift. Do not retry blindly.
 
@@ -210,7 +211,9 @@ HunyuanVideo-1.5 is worth a future isolated comparison because its repository de
 - Kaggle free GPU usage: https://www.kaggle.com/docs/efficient-gpu-usage
 - ComfyUI: https://github.com/Comfy-Org/ComfyUI
 - ComfyUI GGUF node: https://github.com/city96/ComfyUI-GGUF
-- Wan2.2 TI2V 5B GGUF + NOTICE: https://huggingface.co/timfromhcs/Wan2.2-TI2V-5B-GGUF
+- FLUX.1 Schnell Q4_K_S GGUF: https://huggingface.co/city96/FLUX.1-schnell-gguf
+- Public FLUX AE VAE byte mirror (SHA-256 verified in worker): https://huggingface.co/nick911/flux1-schnell-normal
+- Wan2.2 TI2V 5B GGUF + NOTICE (legacy only): https://huggingface.co/timfromhcs/Wan2.2-TI2V-5B-GGUF
 - GitHub Actions billing: https://docs.github.com/en/billing/concepts/product-billing/github-actions
 - GitHub secrets: https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets
 - Telegram Bot API: https://core.telegram.org/bots/api
@@ -228,7 +231,7 @@ HunyuanVideo-1.5 is worth a future isolated comparison because its repository de
 
 - **Added:** Groq `openai/gpt-oss-120b` as the preferred independent critic and optional writer fallback; Mistral `ministral-8b-latest` as another independent fallback; Cloudflare Workers AI `@cf/meta/llama-3.1-8b-instruct` as opt-in fallback only. Groq and Mistral keys are optional; Cloudflare is deliberately disabled by default.
 - **Kept:** Gemini for primary text and Hindi TTS, because its current speech-generation API supports Hindi and per-line style metadata. TTS continues to fail closed rather than switching to an unverified language/voice endpoint.
-- **Not added to the core GPU workflow:** FLUX.1 schnell or another still-image model. They require another substantial model download and GPU/RAM/disk budget in the same constrained Kaggle session; adding them before a measured one-Reel benchmark would risk the working video pipeline. The existing Pillow/FFmpeg image engine remains the reliable fallback.
+- **Historical v3.5 candidate note — superseded:** FLUX.1 schnell was previously only a candidate scorecard. Current v3.7 feature branch implements it as the primary image-first generator, pending live GPU/model benchmark and full Reel QA.
 - **Not added:** Hugging Face Inference Providers as a free API fallback, because current Free users have no included monthly inference credits. Cerebras is not included because its current published pricing flow is not an unambiguous no-payment-method recurring free tier.
 - **Not added to production as TTS alternatives:** Indic-Speak is a research-only candidate; style control is preview-quality and it needs a local GPU inference stage. Gemini remains the qualified voice for now.
 - Story direction now rotates across twelve narrative devices; every concept must provide a lived-in detail, character contradiction, cost of choice and emotional aftertaste. The critic tests human specificity, earned emotional resonance, natural spoken Hindi and meaningful subtext, and rejects generic moral/quote endings, emotional manipulation and tragedy-as-shortcut.

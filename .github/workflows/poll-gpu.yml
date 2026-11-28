@@ -20,6 +20,15 @@ on:
           - "resume-checkpoint"
           - "resolve-dispatch-running"
           - "resolve-dispatch-not-started"
+  # Scheduled workflows run from the repository default branch only. This narrow
+  # feature-branch hook performs one poll when this workflow is intentionally updated;
+  # its default action is `poll`; only the explicit timeout-retry commit marker
+  # selects `retry-gpu`. Pending-state commits do not match this path, so no loop forms.
+  push:
+    branches:
+      - feature/voice-first-3d-foundation
+    paths:
+      - ".github/workflows/poll-gpu.yml"
   schedule:
     - cron: "0 */2 * * *"
       timezone: "Asia/Kolkata"
@@ -33,13 +42,15 @@ concurrency:
 
 jobs:
   finalize:
+    if: github.event_name != 'pull_request' || (github.event.pull_request.number == 10 && github.event.pull_request.head.ref == 'feature/voice-first-3d-foundation')
     runs-on: ubuntu-latest
     timeout-minutes: 180
     env:
-      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || 'poll' }}
+      POLL_ACTION: ${{ github.event_name == 'workflow_dispatch' && inputs.action || (github.event_name == 'push' && contains(github.event.head_commit.message, '[bsk-timeout-retry]') && 'retry-gpu' || 'poll') }}
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
       MISTRAL_API_KEY: ${{ secrets.MISTRAL_API_KEY }}
+      BSK_MISTRAL_FREE_ONLY: ${{ vars.BSK_MISTRAL_FREE_ONLY }}
       CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
       CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
       CF_WORKERS_AI_FREE_ONLY: ${{ secrets.CF_WORKERS_AI_FREE_ONLY }}
@@ -62,7 +73,18 @@ jobs:
       - name: Checkout private repository
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref }}
           fetch-depth: 0
+
+      - name: Refresh queued feature-branch dispatch to latest state
+        if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/feature/voice-first-3d-foundation'
+        shell: bash
+        run: |
+          # workflow_dispatch keeps the event SHA while waiting for the concurrency lock.
+          # Refresh here so a queued retry reads state persisted by the preceding run.
+          git fetch --no-tags origin "$GITHUB_REF"
+          git reset --hard FETCH_HEAD
+          echo "Feature branch refreshed to $(git rev-parse --short HEAD)"
 
       - name: Check whether a GPU batch actually needs polling (stdlib only)
         id: pending
@@ -189,19 +211,44 @@ jobs:
               and state["reels"][0].get("reel_id") == state.get("active_finalizing_reel_id")
               and state["reels"][0].get("delivery_status") != "delivered"
           )
-          gpu_error_text = json.dumps(state.get("gpu_error", ""), ensure_ascii=False).lower()
+          gpu_error_raw = state.get("gpu_error", "")
+          try:
+              gpu_error_payload = json.loads(gpu_error_raw) if isinstance(gpu_error_raw, str) else gpu_error_raw
+          except (TypeError, ValueError):
+              gpu_error_payload = {}
+          gpu_error_text = json.dumps(gpu_error_raw, ensure_ascii=False).lower()
           known_ksampler_failure = ("ksampler schema changed" in gpu_error_text
                                     or "control_after_generate" in gpu_error_text)
+          known_hf_revision_failure = (
+              "revisionnotfounderror" in gpu_error_text
+              and ("invalid rev id: text_encoders" in gpu_error_text
+                   or "invalid rev id: vae" in gpu_error_text)
+          )
+          known_comfyui_timeout = (
+              isinstance(gpu_error_payload, dict)
+              and gpu_error_payload.get("error_type") == "TimeoutError"
+              and "ComfyUI scene generation timed out after 2700s" in str(gpu_error_payload.get("error", ""))
+              and gpu_error_payload.get("stage") == "kaggle_gpu_render"
+              and gpu_error_payload.get("manifest_id") == state.get("job_id")
+          )
+          gpu_retry_attempts = int(state.get("gpu_retry_attempts", 0) or 0)
+          first_retry_ok = gpu_retry_attempts == 0 and (known_ksampler_failure or known_hf_revision_failure)
+          timeout_retry_ok = gpu_retry_attempts == 1 and known_comfyui_timeout
           retry_gpu_ok = (state.get("status") == "gpu_failed"
-                          and known_ksampler_failure
+                          and (first_retry_ok or timeout_retry_ok)
                           and not state.get("resume_dataset_id")
                           and int(state.get("resume_scene_count", 0) or 0) == 0
                           and not state.get("checkpoint_save_error")
-                          and int(state.get("gpu_retry_attempts", 0) or 0) < 1)
+                          and gpu_retry_attempts < 2)
           resolve_states = {"dispatch_unknown"}
           resume_states = {"gpu_checkpoint_saved"}
           if action == "retry-finalize":
               allowed = retry_states
+              # Finalization retry is globally one-shot. A recorded critical visual
+              # rejection is terminal and must never reuse the rejected scenes.
+              if (int(state.get("retry_finalization_count", 0) or 0) >= 1
+                      or "critical visual defect" in qa_reason):
+                  allowed = set()
           elif action == "repair-rhythm":
               allowed = {"qa_rejected"} if rhythm_repair_ok else set()
           elif action == "repair-scene-voiceover":
@@ -231,6 +278,10 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-asr.txt
 
       - name: Quick remote Kaggle status check (minimal CLI only)
         id: remote
@@ -243,6 +294,10 @@ jobs:
           chmod 600 "$HOME/.kaggle/kaggle.json"
           kernel_id="${KAGGLE_USERNAME}/${KAGGLE_KERNEL_SLUG:-bina-shor-ke-studio-video}"
           remote_status="$(kaggle kernels status "$kernel_id" 2>&1 || true)"
+          # Emit a machine-readable timestamp for every remote status observation.
+          status_checked_at_utc="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "status_checked_at_utc=${status_checked_at_utc}" >> "$GITHUB_OUTPUT"
+          echo "KAGGLE_STATUS_CHECKED_AT_UTC=${status_checked_at_utc}"
           echo "$remote_status"
           if printf '%s' "$remote_status" | grep -Eqi 'RUNNING|QUEUED|COMPILING|CREATED'; then
             echo 'finalize_required=false' >> "$GITHUB_OUTPUT"
@@ -278,12 +333,51 @@ jobs:
           restore-keys: |
             bsk-tts-${{ runner.os }}-
 
-      - name: Install FFmpeg and Devanagari fonts
+      - name: Install only missing FFmpeg and Devanagari prerequisites
         if: steps.work.outputs.finalize == 'true'
+        shell: bash
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y ffmpeg fonts-noto-core fonts-noto-extra
+          set -euo pipefail
+          packages=()
+          if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1 || ! ffmpeg -filters 2>/dev/null | grep -q subtitles; then
+            packages+=(ffmpeg)
+          fi
+          required_fonts=(
+            /usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf
+            /usr/share/fonts/truetype/noto/NotoSansDevanagari-Bold.ttf
+            /usr/share/fonts/truetype/noto/NotoSans-Regular.ttf
+            /usr/share/fonts/truetype/noto/NotoSans-Bold.ttf
+          )
+          missing_fonts=false
+          for font in "${required_fonts[@]}"; do
+            if [ ! -s "$font" ]; then
+              missing_fonts=true
+              break
+            fi
+          done
+          if [ "$missing_fonts" = true ]; then
+            packages+=(fonts-noto-core)
+          fi
+          if ! command -v tesseract >/dev/null 2>&1 \
+          || ! tesseract --list-langs 2>/dev/null | grep -qx eng \
+          || ! tesseract --list-langs 2>/dev/null | grep -qx hin; then
+            packages+=(tesseract-ocr tesseract-ocr-hin)
+          fi
+          if [ "${#packages[@]}" -gt 0 ]; then
+            echo "Installing missing prerequisites only: ${packages[*]}"
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends "${packages[@]}"
+          else
+            echo "FFmpeg subtitle filter and required Noto fonts already available; skipping apt update/install."
+          fi
+          command -v ffmpeg
+          command -v ffprobe
+          command -v tesseract
+          tesseract --list-langs 2>/dev/null | grep -qx hin
           ffmpeg -filters 2>/dev/null | grep -q subtitles
+          for font in "${required_fonts[@]}"; do
+            test -s "$font" || { echo "Required Devanagari font missing after setup: $font" >&2; exit 1; }
+          done
 
       - name: Restore local Hindi narration ASR model cache
         if: steps.work.outputs.finalize == 'true'
@@ -332,7 +426,7 @@ jobs:
         if: steps.work.outputs.finalize == 'true' && env.POLL_ACTION == 'rebuild-rejected-timing'
         run: python scripts/studio_pipeline.py rebuild-rejected-timing
 
-      - name: Retry the same Reel after the KSampler schema fix
+      - name: Retry the same Reel after a narrowly classified worker fix
         if: steps.work.outputs.required == 'true' && env.POLL_ACTION == 'retry-gpu'
         run: python scripts/studio_pipeline.py retry-gpu
 
@@ -360,9 +454,13 @@ jobs:
             output/**/credits.txt
             output/**/quality_report.json
             output/**/ai_visual_prompts.txt
+            output/**/visual_qa_report.json
+            output/**/metadata_ocr_report.json
+            output/**/qa_frames/**
             data/pending_gpu_job.json
             data/history.json
             data/performance_log.csv
+            data/image_toolchain_lock.json
           retention-days: 7
           if-no-files-found: ignore
 
@@ -387,12 +485,35 @@ jobs:
 
       - name: Persist delivery and performance state
         if: always() && steps.work.outputs.required == 'true'
-        continue-on-error: true
+        shell: bash
         run: |
+          set -euo pipefail
+          branch="${GITHUB_REF_NAME}"
           git config user.name "bina-shor-ke-studio[bot]"
           git config user.email "bina-shor-ke-studio[bot]@users.noreply.github.com"
           git add data/pending_gpu_job.json data/history.json data/telegram_state.json data/performance_log.csv data/toolchain_lock.json
+          if [ -f data/image_toolchain_lock.json ]; then
+            git add data/image_toolchain_lock.json
+          fi
           if ! git diff --cached --quiet; then
             git commit -m "Update BSK GPU delivery and QA state [skip ci]"
-            git push
+            pushed=false
+            for attempt in 1 2 3; do
+              git fetch --no-tags origin "$branch"
+              if ! git rebase FETCH_HEAD; then
+                git rebase --abort || true
+                echo "State persistence rebase conflict; refusing to discard QA/delivery state." >&2
+                exit 1
+              fi
+              if git push origin "HEAD:refs/heads/$branch"; then
+                pushed=true
+                echo "Persisted BSK state after $attempt push attempt(s)."
+                break
+              fi
+              echo "State push raced with another commit (attempt $attempt/3); refetching." >&2
+            done
+            if [ "$pushed" != true ]; then
+              echo "Could not persist BSK state after three fetch/rebase/push attempts." >&2
+              exit 1
+            fi
           fi

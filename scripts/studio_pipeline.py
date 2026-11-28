@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""Orchestrate BINA SHOR KE: editorial planning -> Kaggle Wan GPU -> final QA -> Telegram.
-No Facebook publishing; paid fallbacks are intentionally disabled.
+"""Orchestrate BINA SHOR KE: voice-first planning -> FLUX stills -> 2.5D parallax -> QA -> Telegram.
+Legacy Wan manifests remain isolated for backward compatibility; no paid fallback or auto-publishing.
 """
 from __future__ import annotations
 import argparse
@@ -17,15 +17,19 @@ import time
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
+from PIL import Image
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA = ROOT / 'data'
 OUT = ROOT / 'output'
 PENDING = DATA / 'pending_gpu_job.json'
 TOOLCHAIN_LOCK = DATA / 'toolchain_lock.json'
+IMAGE_TOOLCHAIN_LOCK = DATA / 'image_toolchain_lock.json'
 TZ = ZoneInfo('Asia/Kolkata')
 sys.path.insert(0, str(ROOT / 'scripts'))
 import producer  # noqa: E402
+import voice_first  # noqa: E402
+import character_library  # noqa: E402
 
 DEFAULT_KAGGLE_SLUG = 'bina-shor-ke-studio-video'
 
@@ -35,10 +39,118 @@ def configured_kaggle_slug(value=None) -> str:
 
 KAGGLE_SLUG = configured_kaggle_slug()
 
+# Invoke Kaggle through the exact interpreter running this pipeline. This avoids
+# PATH/shebang drift between pip's Python and a stale global `kaggle` launcher.
+KAGGLE_CLI_BOOTSTRAP = (
+    "import sys; from kaggle.cli import main; "
+    "sys.argv = ['kaggle', *sys.argv[1:]]; main()"
+)
+
+
+def kaggle_cli_command(*arguments: str) -> list[str]:
+    return [sys.executable, '-c', KAGGLE_CLI_BOOTSTRAP, *arguments]
+
+
 ACTIVE_GPU_STATES = {
     'dispatching', 'dispatch_unknown', 'gpu_running', 'gpu_complete',
     'finalizing', 'finalize_failed', 'gpu_checkpoint_saved',
 }
+
+
+def terminal_finalization_qa_reason(pending: dict) -> str:
+    """Return only evidence-backed terminal QA rejections; transient outages stay retryable."""
+    status = str(pending.get('status') or '')
+    qa_reason = str(pending.get('qa_rejection_reason') or '').strip()
+    if status in {'qa_rejected', 'finalize_failed'} and 'critical visual defect' in qa_reason.lower():
+        return qa_reason
+    if status != 'finalize_failed':
+        return ''
+    error = str(pending.get('finalize_error') or '').strip()
+    if 'critical visual defect' in error.lower():
+        return error
+    if (
+        'AI scene needs' in error
+        and 'end hold' in error
+        and 'above the 1.20s quality limit' in error
+    ):
+        return error
+    # "Rendered-frame QA did not complete" (including Gemini 503) is transient,
+    # not proof of a visual rejection; it must remain eligible for the one safe retry.
+    return ''
+
+
+def archive_completed_qa_rejection(pending: dict, reason: str) -> dict:
+    """Archive a terminal QA-rejected batch only after Kaggle confirms its GPU run is COMPLETE.
+
+    Unknown/transient finalization errors are deliberately not eligible. This preserves the
+    retry-finalize path for recoverable failures and never releases an active/ambiguous GPU job.
+    """
+    status = str(pending.get('status') or '')
+    if status not in {'finalize_failed', 'qa_rejected'} or not reason:
+        raise RuntimeError('Only a classified terminal finalization QA rejection can be archived.')
+    if terminal_finalization_qa_reason(pending) != reason:
+        raise RuntimeError('Refusing to archive a QA reason that is not supported by the saved terminal state.')
+    job_id = str(pending.get('job_id') or '').strip()
+    if not re.fullmatch(r'[A-Za-z0-9_.-]{1,100}', job_id):
+        raise RuntimeError('Cannot archive terminal QA batch: job_id is missing or invalid.')
+    kernel_id = str(pending.get('kaggle_kernel_id') or '').strip()
+    if not kernel_id or '/' not in kernel_id:
+        raise RuntimeError('Cannot archive terminal QA batch: saved Kaggle kernel identity is missing.')
+    manifest_reels = (pending.get('manifest') or {}).get('reels')
+    if not isinstance(manifest_reels, list) or not manifest_reels:
+        raise RuntimeError('Cannot archive terminal QA batch: saved manifest has no Reel list.')
+    if any(not isinstance(reel, dict) or len(reel.get('beats') or []) != 6 for reel in manifest_reels):
+        raise RuntimeError('Cannot archive terminal QA batch: manifest does not contain six scenes for every Reel.')
+
+    remote_status, remote_output = kaggle_status(kernel_id)
+    if remote_status != 'COMPLETE':
+        detail = str(remote_output or '').strip()[-700:]
+        raise RuntimeError(
+            f'Old batch {job_id} is not proven terminal in Kaggle (status={remote_status}); '
+            f'keeping the pending lock. Inspect the original Kaggle run before starting another GPU job. {detail}'
+        )
+
+    archive_dir = DATA / 'job_archive'
+    archive_path = archive_dir / f'{job_id}.json'
+    if archive_path.exists():
+        existing = load_json(archive_path, {}) or {}
+        if existing.get('job_id') != job_id or existing.get('status') not in {'finalize_failed', 'qa_rejected'}:
+            raise RuntimeError(f'Archive path already contains a different record: {archive_path}')
+        existing_reason = str(
+            (existing.get('archive_metadata') or {}).get('final_qa_rejection_reason')
+            or existing.get('qa_rejection_reason')
+            or ''
+        ).strip()
+        if existing_reason and existing_reason != reason:
+            raise RuntimeError(f'Archive path already records a different QA rejection: {archive_path}')
+    else:
+        archived = json.loads(json.dumps(pending, ensure_ascii=False))
+        archived['archive_metadata'] = {
+            'archived_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+            'archive_reason': 'terminal_qa_rejection_after_completed_gpu_render',
+            'final_qa_rejection_reason': reason,
+            'kaggle_kernel_id': kernel_id,
+            'verified_kaggle_status': remote_status,
+            'verified_kaggle_output': str(remote_output or '')[-1200:],
+        }
+        write_json(archive_path, archived)
+
+    pending['status'] = 'qa_rejected'
+    pending['qa_rejection_reason'] = reason
+    try:
+        archive_location = archive_path.relative_to(ROOT).as_posix()
+    except ValueError:
+        archive_location = str(archive_path)
+    pending['finalization_resolution'] = {
+        'status': 'archived_terminal_qa_rejection',
+        'resolved_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+        'archive_path': archive_location,
+        'kaggle_kernel_id': kernel_id,
+        'verified_kaggle_status': remote_status,
+        'new_gpu_dispatch_required': False,
+    }
+    write_json(PENDING, pending)
+    return pending
 
 
 def log(msg: str):
@@ -128,9 +240,27 @@ def ensure_reel_qa_passed(build: dict) -> None:
     technical = build.get('technical', {}) if isinstance(build, dict) else {}
     if not isinstance(technical, dict) or technical.get('technical_checks_passed') is not True:
         raise RuntimeError('Final Reel technical QA did not pass; refusing Telegram delivery and weekly qualification.')
-    visual = technical.get('rendered_frame_visual_qa', {})
-    if isinstance(visual, dict) and visual.get('status') == 'warning':
-        raise RuntimeError('Rendered-frame visual QA reported a critical warning; refusing Telegram delivery and weekly qualification.')
+    visual = technical.get('rendered_frame_visual_qa')
+    if not isinstance(visual, dict) or visual.get('status') != 'reviewed':
+        status = visual.get('status', 'missing') if isinstance(visual, dict) else 'missing'
+        raise RuntimeError(
+            f'Rendered-frame visual QA is {status}; only a completed reviewed result can pass. '
+            'A QA outage or incomplete scorecard is not a pass.'
+        )
+    if visual.get('critical_issue') is not False or visual.get('missing_required_scores'):
+        raise RuntimeError('Rendered-frame visual QA is missing required scores or reports a critical issue.')
+    motion = visual.get('full_video_motion_diagnostics')
+    if not isinstance(motion, dict) or motion.get('status') != 'passed' or motion.get('full_video_scanned') is not True:
+        status = motion.get('status', 'missing') if isinstance(motion, dict) else 'missing'
+        raise RuntimeError(
+            f'Full-video motion diagnostics are {status}; black/frozen-frame scan must complete and pass.'
+        )
+    ocr = visual.get('metadata_ocr_qa')
+    if not isinstance(ocr, dict) or ocr.get('status') != 'passed':
+        status = ocr.get('status', 'missing') if isinstance(ocr, dict) else 'missing'
+        raise RuntimeError(
+            f'On-screen metadata OCR is {status}; OCR must complete with zero forbidden prompt labels.'
+        )
 
 def ensure_complete_telegram_delivery(steps: dict) -> None:
     required = ('video', 'cover', 'message', 'publish_kit')
@@ -159,22 +289,101 @@ def require_weekly_qualification(history: dict, saved_lock: dict) -> None:
     benchmark = saved_lock.get('gpu_benchmark') if isinstance(saved_lock, dict) else None
     if not isinstance(benchmark, dict) or benchmark.get('qualified') is not True:
         raise RuntimeError(
-            'Weekly 3-Reel production is also locked until the one-Reel GPU benchmark qualifies. '
-            'Owner approval alone cannot replace the measured GPU runtime check.'
+            'Weekly 3-Reel production is locked until the image-first FLUX + depth-parallax '
+            'GPU benchmark qualifies. The old Wan benchmark is not valid evidence for the new renderer.'
         )
     estimated_hours = float(benchmark.get('estimated_3_reel_hours', 999))
     if estimated_hours > 8.0:
         raise RuntimeError(
             f'Weekly batch is not qualified for the Kaggle 12-hour session: conservative estimate is '
-            f'{estimated_hours:.1f} hours. Keep one-Reel jobs only; no paid fallback will be used.'
+            f'{estimated_hours:.1f} hours for the image-first renderer. Keep one-Reel jobs only; no paid fallback will be used.'
         )
+
+
+def prepare_voice_first_plan(concept: dict, reel_id: str) -> dict:
+    """Generate and measure every character turn before spending any video-GPU time."""
+    # Bind every generated cast to this Reel instance. Repeated story titles should not
+    # accidentally reuse another Reel's saved character identity.
+    concept['story_instance_id'] = reel_id
+    voice_first.normalise_screenplay(concept)
+    characters = concept.get('characters', [])
+    if not characters:
+        raise RuntimeError('Voice-first screenplay has no cast; refusing GPU dispatch.')
+    # Character metadata is persisted only after the complete voice-first storyboard passes.
+    with tempfile.TemporaryDirectory(prefix='bsk-voice-preflight-') as temp_root:
+        temp_root = Path(temp_root)
+        for beat_index, beat in enumerate(concept['beats'], start=1):
+            segments = beat.get('speech_segments')
+            if not isinstance(segments, list):
+                raise RuntimeError(f'Beat {beat_index} has no structured speech_segments array.')
+            measured = {}
+            for line_index, segment in enumerate(segments, start=1):
+                segment_id = str(segment.get('segment_id') or f'beat_{beat_index:02d}_line_{line_index:02d}')
+                segment['segment_id'] = segment_id
+                voice_name = str(segment.get('gemini_voice') or producer.TTS_VOICE)
+                voice_direction = voice_first.segment_voice_direction(segment)
+                destination = temp_root / f'{reel_id}_{segment_id}_{segment.get("speaker_id", "speaker")}.wav'
+                # Cache key includes transcript, performance direction and voice identity.
+                producer.ensure_tts_wav(
+                    str(segment['text']), destination,
+                    voice_direction=voice_direction, voice_name=voice_name,
+                )
+                duration = voice_first.wav_duration(destination)
+                segment['duration_seconds'] = round(duration, 4)
+                measured[segment_id] = duration
+                log(f'[{concept.get("title", reel_id)}] Voice locked: {segment_id} / {voice_name} / {duration:.2f}s')
+            timing = voice_first.build_scene_timing_plan(segments, measured)
+            beat['voice_timing'] = timing
+            beat['target_frames'] = timing['target_frames']
+            log(
+                f'[{concept.get("title", reel_id)}] Scene {beat_index} timing locked: '
+                f'{timing["target_frames"]} frames / {timing["target_duration_seconds"]:.2f}s; '
+                f'{len(segments)} speaker turn(s), no dialogue truncation.'
+            )
+    concept['voice_first_plan'] = {
+        'status': 'voice_measured_before_video',
+        'audio_model': producer.GEMINI_TTS_MODEL,
+        'cache_key_version': 2,
+        'scene_count': len(concept['beats']),
+        'dialogue_truncated': False,
+        'video_duration_source': 'measured_voice_audio',
+    }
+    return concept
+
+
+def persist_character_cast(concept: dict) -> int:
+    """Persist only cast records belonging to a fully voice-locked storyboard."""
+    characters = concept.get('characters', [])
+    for character in characters:
+        character_library.upsert_character(character)
+    return len(characters)
+
+
+def require_free_tier_confirmation() -> None:
+    """Block live AI planning/TTS and GPU dispatch unless the owner confirms free-tier billing."""
+    confirmed = os.getenv('BSK_FREE_TIER_ONLY_ACK', '').strip().lower()
+    if confirmed != 'true':
+        raise RuntimeError(
+            'Live plan-one/plan-week is blocked before AI provider requests or Kaggle dispatch. '
+            'Set BSK_FREE_TIER_ONLY_ACK=true only after confirming every configured AI provider '
+            'and the Gemini TTS project/key are Free Tier with paid billing disabled.'
+        )
+
 
 def plan_week(reel_count: int = 3) -> int:
     if reel_count not in (1, 3):
         raise ValueError('This zero-spend workflow supports a one-Reel test or a 3-Reel weekly batch only.')
+    require_free_tier_confirmation()
     producer.require_env()
     configure_kaggle_cli()
     prior = load_json(PENDING, {}) or {}
+    terminal_qa_reason = terminal_finalization_qa_reason(prior)
+    if terminal_qa_reason:
+        prior = archive_completed_qa_rejection(prior, terminal_qa_reason)
+        log(
+            f"Archived old batch {prior.get('job_id')} as a terminal QA rejection after Kaggle "
+            "confirmed COMPLETE. Its existing scenes will not be reused; a fresh one-Reel plan may proceed."
+        )
     if prior.get('status') in ACTIVE_GPU_STATES:
         raise RuntimeError(f"There is already an unfinished GPU batch ({prior.get('job_id')}, status={prior.get('status')}). The system will not queue a duplicate batch; run poll-finalize or inspect the previous Kaggle job first.")
 
@@ -200,7 +409,8 @@ def plan_week(reel_count: int = 3) -> int:
         log(f'Feedback sync skipped; planning still uses saved history: {exc}')
 
     if reel_count == 3:
-        require_weekly_qualification(history, saved_lock)
+        image_lock = load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {}
+        require_weekly_qualification(history, image_lock)
 
     rotation = int(history.get('generated_count', 0)) // 3
     slots = producer.next_post_slots(reel_count, rotation=rotation, history=history)
@@ -213,6 +423,11 @@ def plan_week(reel_count: int = 3) -> int:
         concept, review = producer.acquire_approved_concept(local_history, pillar, slot, i)
         reel_id = f"reel_{i+1:02d}_{job_id[-6:]}"
         concept['reel_id'] = reel_id
+        concept = prepare_voice_first_plan(concept, reel_id)
+        # Create the final shot prompts only after all speaker WAV durations are measured.
+        concept = producer.generate_voice_aware_storyboard(concept)
+        persisted_cast = persist_character_cast(concept)
+        log(f'Persisted {persisted_cast} character metadata record(s) after voice/storyboard validation.')
         concept['editorial_review'] = concept.get('editorial_review') or {
             'scores': review.get('scores', {}), 'approved': review.get('approved', False)
         }
@@ -220,22 +435,42 @@ def plan_week(reel_count: int = 3) -> int:
         for j, beat in enumerate(beats, start=1):
             # Model text rendering is unreliable. On-screen Hindi text is always added by FFmpeg after generation.
             prompt = str(beat.get('video_prompt', '')).strip()
-            if len(prompt) < 45:
-                raise RuntimeError(f"Reel {i+1}, scene {j}: missing a useful cinematic video prompt. No GPU run was queued.")
+            prompt_words = len(prompt.split())
+            if not 55 <= prompt_words <= 180 or len(prompt) > 1600:
+                raise RuntimeError(
+                    f"Reel {i+1}, scene {j}: final voice-aware shot prompt is invalid "
+                    f"({prompt_words} words / {len(prompt)} characters). No GPU run was queued."
+                )
             beat['scene_index'] = j
         planned.append({
             'reel_id': reel_id,
             'title': concept['title'],
             'pillar': pillar,
+            'story_type': concept.get('story_type', 'emotional'),
+            'visual_pipeline': concept.get('visual_pipeline', 'legacy_wan_video'),
+            'visual_bible': concept.get('visual_bible', ''),
             'theme': concept['theme'],
             'planned_publish_at': slot.isoformat(),
             'planned_publish_label': slot.strftime('%a %d %b, %I:%M %p IST'),
             'concept': concept,
-            'beats': [{'video_prompt': b['video_prompt'], 'visual_direction': b['visual_direction'], 'scene_index': b['scene_index']} for b in beats],
+            'beats': [{
+                'video_prompt': b['video_prompt'],
+                'narrative_role': b['narrative_role'],
+                'state_change': b['state_change'],
+                'causal_link': b['causal_link'],
+                'visual_direction': b['visual_direction'],
+                'scene_index': b['scene_index'],
+                'voice_timing': b['voice_timing'],
+                'target_frames': b['target_frames'],
+                'editorial_shots': b.get('editorial_shots', []),
+            } for b in beats],
             'delivery_status': 'planned',
         })
         local_history.setdefault('topics', []).append({
             'title': concept['title'], 'theme': concept['theme'], 'pillar': pillar,
+            'story_type': concept.get('story_type', 'emotional'),
+            'share_recipient': concept.get('share_recipient', ''),
+            'share_reason': concept.get('share_reason', ''),
             'narrative_engine': concept.get('narrative_engine', ''),
             'emotional_aftertaste': concept.get('emotional_aftertaste', ''),
             'human_detail': concept.get('human_detail', ''),
@@ -253,10 +488,21 @@ def plan_week(reel_count: int = 3) -> int:
         'created_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
         'status': 'dispatching',
         'toolchain_lock': toolchain_lock,
-        'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF via ComfyUI native graph + ComfyUI-GGUF loader',
+        'image_toolchain_lock': load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {},
+        'screenplay_schema_version': 2,
+        'audio_before_video': True,
+        'visual_pipeline': producer.story_engine.PRIMARY_25D_PIPELINE,
+        'generation_mode': 'still_image_first',
+        'editorial_shot_count': sum(int((r['concept'].get('editorial_shot_plan') or {}).get('editorial_shot_count', 0)) for r in planned),
+        'model': 'FLUX.1-schnell Q4_K_S GGUF (4-step still generation) + Depth Anything V2 Small + deterministic 2.5D parallax; no Wan video generation in the primary path',
         'reels': [{
             'reel_id': r['reel_id'], 'title': r['title'], 'pillar': r['pillar'],
-            'visual_bible': r['concept'].get('visual_bible', ''), 'beats': r['beats']
+            'visual_bible': r['concept'].get('visual_bible', ''),
+            'characters': r['concept'].get('characters', []),
+            'story_type': r['concept'].get('story_type', 'emotional'),
+            'visual_pipeline': r['concept'].get('visual_pipeline', 'legacy_wan_video'),
+            'visual_style_profile': r['concept'].get('visual_style_profile', {}),
+            'beats': r['beats']
         } for r in planned],
     }
     write_json(PENDING, {
@@ -269,7 +515,7 @@ def plan_week(reel_count: int = 3) -> int:
         kernel_dir = build_kaggle_kernel(manifest)
         configure_kaggle_cli()
         push_started = True
-        result = subprocess.run(['kaggle', 'kernels', 'push', '-p', str(kernel_dir)], text=True, capture_output=True, timeout=900)
+        result = subprocess.run(kaggle_cli_command('kernels', 'push', '-p', str(kernel_dir)), text=True, capture_output=True, timeout=900)
         console = (result.stdout or '') + '\n' + (result.stderr or '')
         if result.returncode:
             raise RuntimeError('Kaggle kernel push returned a non-zero exit code: ' + console[-3000:])
@@ -317,7 +563,7 @@ def plan_week(reel_count: int = 3) -> int:
 
 def kaggle_status(kernel_id: str) -> tuple[str, str]:
     configure_kaggle_cli()
-    p = subprocess.run(['kaggle', 'kernels', 'status', kernel_id], text=True, capture_output=True, timeout=180)
+    p = subprocess.run(kaggle_cli_command('kernels', 'status', kernel_id), text=True, capture_output=True, timeout=180)
     output = (p.stdout or '') + '\n' + (p.stderr or '')
     if p.returncode:
         lower = output.lower()
@@ -365,59 +611,125 @@ def _sha256(path: Path) -> str:
 
 
 def collect_checkpoint_clips(root: Path, pending: dict) -> list[dict]:
-    """Find valid scene files from a possibly failed Kaggle output bundle."""
+    """Inventory verified MP4 clips or first-class 2.5D PNG stills from a failed Kaggle run."""
     checkpoint_path = root / 'gpu_checkpoint_manifest.json'
     saved = load_json(checkpoint_path, {}) if checkpoint_path.exists() else {}
     saved_items = {
         (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
         for x in saved.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
     }
-    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) if (root / 'gpu_output_manifest.json').exists() else {}
+    worker_path = root / 'gpu_output_manifest.json'
+    worker_manifest = load_json(worker_path, {}) if worker_path.exists() else {}
     worker_items = {
         (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
         for x in worker_manifest.get('scenes', []) if x.get('reel_id') and x.get('scene_index')
     }
-    collected = []
+    worker_parallax_items = {
+        (str(x.get('reel_id')), int(x.get('scene_index', 0))): x
+        for x in worker_manifest.get('parallax_scenes', []) if x.get('reel_id') and x.get('scene_index')
+    }
+    primary_image_first = (
+        worker_manifest.get('generation_mode') == 'still_image_first'
+        or any(
+            str(reel.get('concept', {}).get('visual_pipeline', '')) == producer.story_engine.PRIMARY_25D_PIPELINE
+            for reel in pending.get('reels', [])
+        )
+    )
+    collected: list[dict] = []
     for reel in pending.get('reels', []):
         reel_id = str(reel.get('reel_id', ''))
         if not re.fullmatch(r'[A-Za-z0-9_-]{1,80}', reel_id):
             continue
         for index in range(1, len(reel.get('beats', [])) + 1):
-            candidates = [root / reel_id / f'scene_{index:02d}.mp4']
-            candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.mp4'))
-            candidates.extend(x for x in root.rglob(f'scene_{index:02d}.mp4') if reel_id in str(x))
-            source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
-            if source is None:
-                continue
-            try:
-                duration = producer.probe_duration(source)
-            except Exception:
-                continue
-            if not 2.5 <= duration <= 8.0:
-                continue
             key = (reel_id, index)
             old = saved_items.get(key, worker_items.get(key, {}))
-            collected.append({
-                'reel_id': reel_id, 'scene_index': index, 'file': f'{reel_id}__scene_{index:02d}.mp4',
-                'source_path': str(source), 'bytes': source.stat().st_size, 'sha256': _sha256(source),
-                'duration_seconds': round(duration, 3),
-                'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
-                'prompt_id': old.get('prompt_id'),
-            })
-    # One scene may appear in the direct location and a flattened CLI output; retain one row per key.
-    deduped = {}
+            if primary_image_first:
+                candidates = [root / reel_id / f'scene_{index:02d}.png']
+                candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.png'))
+                candidates.extend(x for x in root.rglob(f'scene_{index:02d}.png') if reel_id in str(x))
+                source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
+                if source is None:
+                    continue
+                try:
+                    with Image.open(source) as image:
+                        image.verify()
+                    with Image.open(source) as image:
+                        width, height = image.size
+                except Exception:
+                    continue
+                if (width, height) != (704, 1280):
+                    continue
+                parallax_row = worker_parallax_items.get(key, {})
+                collected.append({
+                    'reel_id': reel_id, 'scene_index': index,
+                    'file': f'{reel_id}__scene_{index:02d}.png',
+                    'source_path': str(source), 'bytes': source.stat().st_size,
+                    'sha256': _sha256(source), 'media_type': 'image/png',
+                    'width': width, 'height': height,
+                    'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
+                    'parallax_elapsed_seconds': float(parallax_row.get('generation_elapsed_seconds', 0) or 0),
+                    'prompt_id': old.get('prompt_id'),
+                })
+            else:
+                candidates = [root / reel_id / f'scene_{index:02d}.mp4']
+                candidates.extend(root.rglob(f'{reel_id}__scene_{index:02d}.mp4'))
+                candidates.extend(x for x in root.rglob(f'scene_{index:02d}.mp4') if reel_id in str(x))
+                source = next((x for x in candidates if x.is_file() and x.stat().st_size >= 100_000), None)
+                if source is None:
+                    continue
+                try:
+                    duration = producer.probe_duration(source)
+                except Exception:
+                    continue
+                if not 2.5 <= duration <= 8.0:
+                    continue
+                collected.append({
+                    'reel_id': reel_id, 'scene_index': index,
+                    'file': f'{reel_id}__scene_{index:02d}.mp4',
+                    'source_path': str(source), 'bytes': source.stat().st_size,
+                    'sha256': _sha256(source), 'media_type': 'video/mp4',
+                    'duration_seconds': round(duration, 3),
+                    'generation_elapsed_seconds': float(old.get('generation_elapsed_seconds', 0) or 0),
+                    'prompt_id': old.get('prompt_id'),
+                })
+    # One asset may exist both in the worker inventory and a flattened CLI output; retain one per scene.
+    deduped: dict[tuple[str, int], dict] = {}
     for item in collected:
         deduped[(item['reel_id'], item['scene_index'])] = item
     return list(deduped.values())
 
-
 def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
+    """Conservative free-GPU recovery estimate; image-first resumes must rebuild parallax from PNG stills."""
     expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
+    if expected <= 0:
+        return 999.0
+    primary_image_first = any(
+        str(x.get('concept', {}).get('visual_pipeline', '')) == producer.story_engine.PRIMARY_25D_PIPELINE
+        for x in pending.get('reels', [])
+    )
+    if primary_image_first:
+        # Private image-first checkpoints preserve PNG stills only, not parallax MP4s.
+        # The resumed worker regenerates all parallax clips, including those finished
+        # before the interrupted session, so estimate the entire parallax phase again.
+        times = [
+            float(x.get('parallax_elapsed_seconds', 0) or 0)
+            for x in scenes if float(x.get('parallax_elapsed_seconds', 0) or 0) > 0
+        ]
+        minimum_samples = min(5, expected)
+        if len(times) < minimum_samples:
+            return 999.0
+        median = statistics.median(times)
+        # 2x observed per-scene parallax time plus a full hour for Comfy/model restore.
+        return round((expected * median * 2.0 + 3600) / 3600, 2)
+
     present = {(x['reel_id'], x['scene_index']) for x in scenes}
     missing = max(0, expected - len(present))
     if missing == 0:
-        return 1.5  # ComfyUI/model bootstrap can still consume substantial time
-    times = [float(x.get('generation_elapsed_seconds', 0)) for x in scenes if float(x.get('generation_elapsed_seconds', 0)) > 0]
+        return 1.5  # Model/bootstrap restoration can still consume substantial time
+    times = [
+        float(x.get('generation_elapsed_seconds', 0))
+        for x in scenes if float(x.get('generation_elapsed_seconds', 0)) > 0
+    ]
     if not times:
         lock = load_json(TOOLCHAIN_LOCK, {}) or {}
         benchmark = lock.get('gpu_benchmark') if isinstance(lock, dict) else {}
@@ -431,7 +743,7 @@ def estimate_resume_hours(pending: dict, scenes: list[dict]) -> float:
 
 
 def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
-    """Upload only verified MP4 scene checkpoints to a private Kaggle dataset."""
+    """Upload hash-verified scene checkpoints (FLUX stills or legacy MP4) privately to Kaggle."""
     scenes = collect_checkpoint_clips(root, pending)
     if not scenes:
         return None
@@ -442,6 +754,24 @@ def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
     dataset_slug = str((pending.get('resume_dataset_id') or '').split('/')[-1] or f'bsk-resume-{job_token}')
     dataset_id = f'{username}/{dataset_slug}'
     expected = sum(len(x.get('beats', [])) for x in pending.get('reels', []))
+    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) or {}
+    checkpoint_manifest = load_json(root / 'gpu_checkpoint_manifest.json', {}) or {}
+    generation_mode = str(worker_manifest.get('generation_mode') or checkpoint_manifest.get('generation_mode') or '')
+    toolchain = checkpoint_manifest.get('toolchain') if isinstance(checkpoint_manifest.get('toolchain'), dict) else {}
+    if generation_mode == 'still_image_first':
+        required_model_keys = ('unet', 'clip_l', 't5xxl', 'vae', 'depth')
+        if (
+            not re.fullmatch(r'[0-9a-f]{40}', str(toolchain.get('comfyui_commit', '')))
+            or not re.fullmatch(r'[0-9a-f]{40}', str(toolchain.get('comfyui_gguf_commit', '')))
+            or not isinstance(toolchain.get('model_revisions'), dict)
+            or not all(re.fullmatch(r'[0-9a-f]{40}', str((toolchain.get('model_revisions') or {}).get(key, ''))) for key in required_model_keys)
+            or not isinstance(toolchain.get('runtime_packages'), dict)
+            or not toolchain.get('runtime_packages')
+        ):
+            raise RuntimeError(
+                'Image-first checkpoint lacks exact ComfyUI/GGUF/model/runtime revision pins; '
+                'saving it as resumable could mix model builds. Keep the original job diagnostics and do not auto-resume.'
+            )
     with tempfile.TemporaryDirectory(prefix='bsk-private-checkpoint-') as folder:
         stage = Path(folder)
         total_bytes = 0
@@ -458,8 +788,10 @@ def persist_private_resume_dataset(root: Path, pending: dict) -> dict | None:
         if total_bytes > 8 * 1024**3:
             raise RuntimeError('Recovered clips exceed the 8 GiB safety cap; refusing to upload a large checkpoint dataset.')
         write_json(stage / 'checkpoint_manifest.json', {
-            'schema_version': 1, 'job_id': pending.get('job_id'), 'expected_scenes': expected,
+            'schema_version': 2, 'job_id': pending.get('job_id'), 'expected_scenes': expected,
             'completed_scenes': len(scene_rows), 'scenes': scene_rows,
+            'generation_mode': generation_mode,
+            'toolchain': toolchain,
             'privacy': 'Kaggle dataset created without --public; intended to remain private.',
         })
         metadata = {
@@ -554,6 +886,42 @@ def handle_gpu_failure(root: Path | None, pending: dict, reason: str) -> bool:
         write_json(PENDING, pending)
         alert_failure('BINA SHOR KE GPU job failed and Kaggle exposed no output bundle to recover. No paid fallback or duplicate GPU job was started. ' + reason[:1200])
         return False
+    # Preserve the exact image-first model/ComfyUI/runtime snapshot in the manifest
+    # that is pushed for resume. Never retry missing stills with moving model revisions.
+    worker_manifest = load_json(root / 'gpu_output_manifest.json', {}) or {}
+    if worker_manifest.get('generation_mode') == 'still_image_first':
+        model_revisions = worker_manifest.get('model_revisions') if isinstance(worker_manifest.get('model_revisions'), dict) else {}
+        runtime_packages = worker_manifest.get('runtime_packages') if isinstance(worker_manifest.get('runtime_packages'), dict) else {}
+        required_keys = ('unet', 'clip_l', 't5xxl', 'vae', 'depth')
+        image_lock = {
+            'status': 'locked',
+            'generation_mode': 'still_image_first',
+            'model_family': 'FLUX.1-schnell-Q4_K_S-GGUF',
+            'comfyui_commit': worker_manifest.get('comfyui_commit'),
+            'comfyui_gguf_commit': worker_manifest.get('comfyui_gguf_commit'),
+            'model_revisions': model_revisions,
+            'runtime_packages': runtime_packages,
+            'source_job_id': pending.get('job_id'),
+            'note': 'Resume-only snapshot captured from the interrupted original job; not a successful performance qualification.',
+        }
+        complete_lock = (
+            re.fullmatch(r'[0-9a-f]{40}', str(image_lock['comfyui_commit'] or ''))
+            and re.fullmatch(r'[0-9a-f]{40}', str(image_lock['comfyui_gguf_commit'] or ''))
+            and all(re.fullmatch(r'[0-9a-f]{40}', str(model_revisions.get(key, ''))) for key in required_keys)
+            and bool(runtime_packages)
+        )
+        if complete_lock:
+            pending['manifest'] = dict(pending.get('manifest') or {})
+            pending['manifest']['image_toolchain_lock'] = image_lock
+            pending['resume_image_toolchain_lock'] = image_lock
+            write_json(PENDING, pending)
+        else:
+            pending['status'] = 'gpu_checkpoint_saved'
+            pending['gpu_error'] = reason[:5000]
+            pending['resume_blocked_reason'] = 'Interrupted image-first job has no complete immutable toolchain manifest; safe same-build resume cannot be guaranteed.'
+            write_json(PENDING, pending)
+            alert_failure('Image-first GPU stopped, but its exact model/runtime snapshot is incomplete. Checkpoint resume was blocked to prevent mixed model builds; no second GPU job was started.')
+            return False
     try:
         checkpoint = persist_private_resume_dataset(root, pending)
     except Exception as exc:
@@ -606,15 +974,46 @@ def verify_or_lock_toolchain(gpu_manifest: dict, job_id: str | None = None) -> d
         for key in ('unet', 'clip', 'vae'):
             if (existing.get('model_revisions') or {}).get(key) != observed['model_revisions'].get(key):
                 raise RuntimeError(f'Model revision drift detected for {key}; refusing to silently change the proven model weights.')
-        if existing.get('runtime_packages'):
-            if existing.get('runtime_packages') != observed['runtime_packages']:
-                changed = sorted(set(existing['runtime_packages']) | set(observed['runtime_packages']))
-                changed = [name for name in changed if existing['runtime_packages'].get(name) != observed['runtime_packages'].get(name)]
-                raise RuntimeError('GPU runtime dependency drift detected; refusing to silently continue with changed package versions: ' + ', '.join(changed))
-        elif observed['runtime_packages']:
-            existing['runtime_packages'] = observed['runtime_packages']
-            existing['runtime_packages_locked_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        locked_depth = (existing.get('model_revisions') or {}).get('depth')
+        observed_depth = observed['model_revisions'].get('depth')
+        if locked_depth and observed_depth != locked_depth:
+            raise RuntimeError('Depth Anything model revision drift detected; refusing to silently change the proven depth estimator.')
+        depth_revision_addition = bool(observed_depth and not locked_depth)
+        if depth_revision_addition:
+            existing.setdefault('model_revisions', {})['depth'] = observed_depth
+            existing['depth_model_locked_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+        locked_packages = existing.get('runtime_packages') or {}
+        if not isinstance(locked_packages, dict):
+            raise RuntimeError('GPU runtime package lock is malformed; refusing to continue without a reproducible dependency baseline.')
+        changed = sorted(
+            name for name, locked_version in locked_packages.items()
+            if observed['runtime_packages'].get(name) != locked_version
+        )
+        if changed:
+            raise RuntimeError(
+                'GPU runtime dependency drift detected; refusing to change or omit previously locked packages: '
+                + ', '.join(changed)
+            )
+        package_additions = {
+            name: version for name, version in observed['runtime_packages'].items()
+            if name not in locked_packages
+        }
+        lock_updated = depth_revision_addition
+        if package_additions:
+            # Additive migration only: preserve every previously qualified version.
+            existing.setdefault('runtime_packages', {}).update(package_additions)
+            existing['runtime_packages_extended_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+            prior_additions = existing.get('runtime_package_additions', [])
+            if not isinstance(prior_additions, list) or not all(isinstance(item, str) for item in prior_additions):
+                prior_additions = []
+            existing['runtime_package_additions'] = sorted(set(prior_additions) | set(package_additions))
+            lock_updated = True
+        if lock_updated:
             write_json(TOOLCHAIN_LOCK, existing)
+            if depth_revision_addition:
+                log('Added the first immutable Depth Anything V2 revision to the existing Wan toolchain lock.')
+            if package_additions:
+                log('Extended the existing GPU runtime lock with newly required packages: ' + ', '.join(sorted(package_additions)))
         scene_times = [float(x.get('generation_elapsed_seconds', 0)) for x in gpu_manifest.get('scenes', []) if float(x.get('generation_elapsed_seconds', 0)) > 0]
         if not existing.get('gpu_benchmark') and scene_times and len(scene_times) >= 5:
             startup = max(0.0, float(gpu_manifest.get('total_elapsed_seconds', 0)) - sum(scene_times))
@@ -651,6 +1050,79 @@ def verify_or_lock_toolchain(gpu_manifest: dict, job_id: str | None = None) -> d
     write_json(TOOLCHAIN_LOCK, locked)
     log('Locked the first successful ComfyUI/GGUF/model revisions for reproducible future runs.')
     return locked
+
+
+def verify_or_lock_image_toolchain(gpu_manifest: dict, job_id: str | None = None) -> dict:
+    """Pin FLUX still generation, its text encoders, VAE and depth model separately from legacy Wan."""
+    observed = {
+        'comfyui_commit': str(gpu_manifest.get('comfyui_commit', '')).strip(),
+        'comfyui_gguf_commit': str(gpu_manifest.get('comfyui_gguf_commit', '')).strip(),
+        'model_revisions': gpu_manifest.get('model_revisions'),
+        'runtime_packages': gpu_manifest.get('runtime_packages') if isinstance(gpu_manifest.get('runtime_packages'), dict) else {},
+    }
+    required_models = ('unet', 'clip_l', 't5xxl', 'vae', 'depth')
+    if not re.fullmatch(r'[0-9a-f]{40}', observed['comfyui_commit']):
+        raise RuntimeError('Image-first manifest lacks an immutable ComfyUI commit SHA.')
+    if not re.fullmatch(r'[0-9a-f]{40}', observed['comfyui_gguf_commit']):
+        raise RuntimeError('Image-first manifest lacks an immutable ComfyUI-GGUF commit SHA.')
+    if not isinstance(observed['model_revisions'], dict) or any(
+        not re.fullmatch(r'[0-9a-f]{40}', str(observed['model_revisions'].get(key, '')))
+        for key in required_models
+    ):
+        raise RuntimeError('Image-first manifest lacks one or more immutable FLUX/text-encoder/VAE/depth model revisions.')
+
+    existing = load_json(IMAGE_TOOLCHAIN_LOCK, {}) or {}
+    if existing.get('status') == 'locked':
+        for key in ('comfyui_commit', 'comfyui_gguf_commit'):
+            if existing.get(key) != observed[key]:
+                raise RuntimeError(f'Image toolchain drift detected for {key}; refusing silent upstream changes.')
+        for key in required_models:
+            if (existing.get('model_revisions') or {}).get(key) != observed['model_revisions'].get(key):
+                raise RuntimeError(f'Image model revision drift detected for {key}; refusing silent model changes.')
+        locked_packages = existing.get('runtime_packages') or {}
+        changed = sorted(
+            name for name, version in locked_packages.items()
+            if observed['runtime_packages'].get(name) != version
+        )
+        if changed:
+            raise RuntimeError('Image GPU runtime dependency drift detected: ' + ', '.join(changed))
+    else:
+        existing = {
+            'status': 'locked',
+            'generation_mode': 'still_image_first',
+            'model_family': 'FLUX.1-schnell-Q4_K_S-GGUF',
+            'comfyui_commit': observed['comfyui_commit'],
+            'comfyui_gguf_commit': observed['comfyui_gguf_commit'],
+            'model_revisions': observed['model_revisions'],
+            'runtime_packages': observed['runtime_packages'],
+            'locked_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
+            'source_job_id': job_id or gpu_manifest.get('job_id'),
+            'note': 'Separate immutable image-first toolchain lock. Does not overwrite or reinterpret the legacy Wan toolchain.',
+        }
+
+    elapsed = float(gpu_manifest.get('total_elapsed_seconds', 0) or 0)
+    scene_times = [
+        float(item.get('generation_elapsed_seconds', 0))
+        for item in gpu_manifest.get('scenes', [])
+        if float(item.get('generation_elapsed_seconds', 0) or 0) > 0
+    ]
+    if gpu_manifest.get('status') == 'complete' and elapsed > 0 and len(scene_times) >= 5:
+        # Conservative estimate: one clean 6-scene image+parallax run, repeated
+        # three times, with 50% safety margin. This is not a runtime guarantee.
+        estimate = elapsed * 3.0 * 1.5 / 3600.0
+        existing['gpu_benchmark'] = {
+            'qualified': estimate <= 8.0,
+            'sample_scene_count': len(scene_times),
+            'sample_scene_mean_seconds': round(statistics.mean(scene_times), 2),
+            'measured_one_reel_seconds': round(elapsed, 2),
+            'estimated_3_reel_hours': round(estimate, 2),
+            'safety_factor': 1.5,
+            'note': 'Measured end-to-end FLUX still + depth + checkpoint runtime from one completed Reel; repeat runs may vary.',
+        }
+        existing['last_benchmark_job_id'] = job_id or gpu_manifest.get('job_id')
+        existing['last_benchmark_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
+    write_json(IMAGE_TOOLCHAIN_LOCK, existing)
+    return existing
 
 
 def _poll_and_finalize_impl() -> int:
@@ -706,14 +1178,27 @@ def _poll_and_finalize_impl() -> int:
             return 0 if resumed else 1
 
         expected = sum(len(r['beats']) for r in pending.get('reels', []))
-        existing = list(root.rglob('scene_*.mp4'))
-        if len(existing) < expected:
-            resumed = handle_gpu_failure(root, pending, f'Expected {expected} AI scene clips, received {len(existing)}.')
-            return 0 if resumed else 1
-        verify_or_lock_toolchain(gpu_manifest, pending.get('job_id'))
+        primary_image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
+        existing_videos = list(root.rglob('scene_*.mp4'))
+        existing_images = list(root.rglob('scene_*.png'))
+        if primary_image_first:
+            parallax_videos = [p for p in existing_videos if re.fullmatch(r'scene_\d{2}_25d\.mp4', p.name)]
+            if len(existing_images) < expected or len(parallax_videos) < expected:
+                resumed = handle_gpu_failure(
+                    root, pending,
+                    f'Image-first job expected {expected} FLUX PNG stills and {expected} depth-parallax videos; '
+                    f'received {len(existing_images)} stills and {len(parallax_videos)} parallax videos.'
+                )
+                return 0 if resumed else 1
+            verify_or_lock_image_toolchain(gpu_manifest, pending.get('job_id'))
+        else:
+            if len(existing_videos) < expected:
+                resumed = handle_gpu_failure(root, pending, f'Expected {expected} AI scene clips, received {len(existing_videos)}.')
+                return 0 if resumed else 1
+            verify_or_lock_toolchain(gpu_manifest, pending.get('job_id'))
+
         pending['status'] = 'finalizing'
         write_json(PENDING, pending)
-        clips_by_path = {str(p.relative_to(root)): p for p in existing}
         all_missing = []
         stamp_prefix = datetime.now(TZ).strftime('%Y%m%d_%H%M')
         for ordinal, reel in enumerate(pending['reels'], start=1):
@@ -734,28 +1219,124 @@ def _poll_and_finalize_impl() -> int:
             needed = len(concept['beats'])
             missing = []
             for i in range(1, needed + 1):
-                candidates = [p for p in existing if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}.mp4']
+                extension = 'png' if primary_image_first else 'mp4'
+                source_name = f'scene_{i:02d}.{extension}'
+                candidates = [
+                    p for p in (existing_images if primary_image_first else existing_videos)
+                    if reel['reel_id'] in p.parts and p.name == source_name
+                ]
                 if not candidates:
-                    # Kaggle can flatten output folders in some CLI versions; identify scenes by parent manifest name plus scene number.
-                    candidates = [p for p in existing if p.name == f'scene_{i:02d}.mp4' and reel['reel_id'] in str(p)]
-                if not candidates:
-                    missing.append(i)
+                    candidates = [
+                        p for p in (existing_images if primary_image_first else existing_videos)
+                        if p.name == source_name and reel['reel_id'] in str(p)
+                    ]
+                if len(candidates) != 1:
+                    missing.append(f'{i}_source_missing_or_ambiguous')
                     continue
-                shutil.copy2(candidates[0], ai_dir / f'scene_{i:02d}.mp4')
+                source = candidates[0]
+                if primary_image_first:
+                    image_rows = [
+                        item for item in gpu_manifest.get('scenes', [])
+                        if str(item.get('reel_id')) == str(reel['reel_id'])
+                        and int(item.get('scene_index', 0)) == i
+                        and item.get('media_type') == 'image/png'
+                    ]
+                    if len(image_rows) != 1:
+                        missing.append(f'{i}_still_manifest_missing_or_ambiguous')
+                        continue
+                    row = image_rows[0]
+                    expected_bytes = int(row.get('bytes', -1))
+                    expected_sha = str(row.get('sha256', '')).lower()
+                    if (
+                        expected_bytes <= 100_000
+                        or not re.fullmatch(r'[0-9a-f]{64}', expected_sha)
+                        or source.stat().st_size != expected_bytes
+                        or _sha256(source) != expected_sha
+                    ):
+                        missing.append(f'{i}_still_hash_or_size_mismatch')
+                        continue
+                    with Image.open(source) as image:
+                        image.verify()
+                    with Image.open(source) as image:
+                        if image.size != (704, 1280):
+                            missing.append(f'{i}_still_dimensions_invalid')
+                            continue
+                    still_dest = ai_dir / f'scene_{i:02d}.png'
+                    shutil.copy2(source, still_dest)
+                    if _sha256(still_dest) != expected_sha:
+                        still_dest.unlink(missing_ok=True)
+                        missing.append(f'{i}_still_copy_hash_mismatch')
+                        continue
+                else:
+                    shutil.copy2(source, ai_dir / f'scene_{i:02d}.mp4')
+
+                if producer.story_engine.is_25d_pipeline(concept.get('visual_pipeline')):
+                    depth_candidates = [
+                        p for p in existing_videos
+                        if reel['reel_id'] in p.parts and p.name == f'scene_{i:02d}_25d.mp4'
+                    ]
+                    if not depth_candidates:
+                        depth_candidates = [
+                            p for p in existing_videos
+                            if p.name == f'scene_{i:02d}_25d.mp4' and reel['reel_id'] in str(p)
+                        ]
+                    depth_rows = [
+                        item for item in gpu_manifest.get('parallax_scenes', [])
+                        if str(item.get('reel_id')) == str(reel['reel_id'])
+                        and int(item.get('scene_index', 0)) == i
+                    ]
+                    if len(depth_candidates) != 1 or len(depth_rows) != 1:
+                        missing.append(f'{i}_25d_missing_or_ambiguous')
+                    else:
+                        depth_source = depth_candidates[0]
+                        depth_meta = depth_rows[0]
+                        expected_bytes = int(depth_meta.get('bytes', -1))
+                        expected_sha = str(depth_meta.get('sha256', '')).lower()
+                        if (
+                            expected_bytes <= 100_000
+                            or not re.fullmatch(r'[0-9a-f]{64}', expected_sha)
+                            or depth_source.stat().st_size != expected_bytes
+                            or _sha256(depth_source) != expected_sha
+                        ):
+                            missing.append(f'{i}_25d_hash_or_size_mismatch')
+                        else:
+                            depth_dest = ai_dir / f'scene_{i:02d}_25d.mp4'
+                            shutil.copy2(depth_source, depth_dest)
+                            if _sha256(depth_dest) != expected_sha:
+                                depth_dest.unlink(missing_ok=True)
+                                missing.append(f'{i}_25d_copy_hash_mismatch')
             if missing:
                 all_missing.append(f"{reel['reel_id']}: scenes {missing}")
                 continue
             (reel_dir / 'concept.json').write_text(json.dumps(concept, ensure_ascii=False, indent=2), encoding='utf-8')
+            if isinstance(concept.get('editorial_shot_plan'), dict):
+                write_json(reel_dir / 'editorial_shot_plan.json', concept['editorial_shot_plan'])
             os.environ['REQUIRE_AI_VIDEO'] = '1'
             build = producer.render_reel(concept, reel_dir, set(), set())
             slot = datetime.fromisoformat(reel['planned_publish_at'])
             quality = producer.write_pack(concept, build, reel_dir, slot)
             ensure_reel_qa_passed(build)
+            image_first = gpu_manifest.get('generation_mode') == 'still_image_first'
             quality['video_generation'] = {
-                'model': 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
+                'model': 'FLUX.1-schnell Q4_K_S GGUF still generation + Depth Anything V2 (ComfyUI)' if image_first else 'Wan2.2 TI2V-5B Q4_K_M GGUF (ComfyUI)',
                 'scene_count': needed,
+                'source_video_generation_count': 0 if image_first else needed,
+                'source_still_image_generation_count': needed if image_first else 0,
+                'parallax_video_count': needed if image_first else int((concept.get('editorial_shot_plan') or {}).get('depth_parallax_shot_count', 0)),
+                'generation_mode': 'still_image_first' if image_first else 'wan_video_first_legacy',
+                'editorial_shot_count': int((concept.get('editorial_shot_plan') or {}).get('editorial_shot_count', needed)),
+                'visual_pipeline': concept.get('visual_pipeline', 'legacy_wan_video'),
+                'depth_model': {
+                    'name': 'depth-anything/Depth-Anything-V2-Small-hf',
+                    'revision': gpu_manifest.get('depth_model_revision'),
+                    'license': 'Apache-2.0',
+                },
                 'paid_generation_api_used': False,
-                'visual_quality_claim': 'AI-generated; photoreal appearance varies by prompt/seed; manual review required; not a guarantee of human indistinguishability.',
+                'visual_quality_claim': (
+                    'Six FLUX-generated illustrated stills, pinned Depth Anything V2 maps and deterministic 100% 2.5D editorial coverage; no Wan video calls in the primary image-first path. Human review remains mandatory.'
+                    if image_first else
+                    'Illustrated Wan2.2 source clips plus pinned Depth Anything V2 keyframe parallax and deterministic editorial coverage; human review required; no guarantee of aesthetic approval.'
+                ),
                 'human_review_before_publish': True,
             }
             write_json(reel_dir / 'quality_report.json', quality)
@@ -785,7 +1366,15 @@ def _poll_and_finalize_impl() -> int:
                 'status': 'ready_for_manual_publish_not_confirmed_published',
                 'reel_id': reel['reel_id'], 'job_id': pending.get('job_id'),
                 # render_reel returns only after its hard technical and visual QA gates pass.
-                'qa_passed': bool(build.get('technical', {}).get('technical_checks_passed') is True),
+                'qa_passed': bool(
+                    build.get('technical', {}).get('technical_checks_passed') is True
+                    and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status') == 'reviewed'
+                    and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status') == 'passed'
+                    and build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status') == 'passed'
+                ),
+                'visual_qa_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('status'),
+                'motion_diagnostics_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('full_video_motion_diagnostics', {}).get('status'),
+                'metadata_ocr_status': build.get('technical', {}).get('rendered_frame_visual_qa', {}).get('metadata_ocr_qa', {}).get('status'),
                 'telegram_delivered': all(reel['delivery_steps'].get(step) is True for step in ('video', 'cover', 'message', 'publish_kit')),
                 'qa_completed_at_ist': datetime.now(TZ).isoformat(timespec='seconds'),
             }
@@ -886,24 +1475,87 @@ def resolve_dispatch_unknown(confirm_running: bool) -> int:
 
 
 def retry_failed_gpu() -> int:
-    """Retry the same manifest once after the known ComfyUI KSampler schema failure."""
+    """Retry the same Reel once for a narrowly classified worker compatibility failure."""
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') != 'gpu_failed':
         raise RuntimeError(f"GPU retry requires status=gpu_failed (current={pending.get('status', 'none')}). Run poll once first if the old Kaggle job has not yet been collected.")
-    if int(pending.get('gpu_retry_attempts', 0)) >= 1:
-        raise RuntimeError('The one allowed KSampler compatibility retry has already been used; inspect Kaggle logs before any further GPU run.')
+    retry_attempts = int(pending.get('gpu_retry_attempts', 0) or 0)
+    if retry_attempts >= 2:
+        raise RuntimeError('The two bounded same-Reel GPU retries have been used; inspect Kaggle worker diagnostics before any new batch.')
     if pending.get('resume_dataset_id') or int(pending.get('resume_scene_count', 0) or 0) > 0:
         raise RuntimeError('Verified scene checkpoints exist. Use resume-checkpoint instead of retry-gpu so completed scenes are reused.')
     if pending.get('checkpoint_save_error'):
         raise RuntimeError('Checkpoint persistence failed. Do not retry the GPU blindly; inspect the saved Kaggle output and checkpoint error first.')
-    failure_text = json.dumps(pending.get('gpu_error', ''), ensure_ascii=False).lower()
-    if 'ksampler schema changed' not in failure_text and 'control_after_generate' not in failure_text:
-        raise RuntimeError('This retry is restricted to the observed KSampler schema incompatibility. The saved GPU error does not match that failure.')
+
+    raw_error = pending.get('gpu_error', '')
+    try:
+        error_payload = json.loads(raw_error) if isinstance(raw_error, str) else raw_error
+    except (TypeError, ValueError):
+        error_payload = {}
+    failure_text = json.dumps(raw_error, ensure_ascii=False).lower()
+    known_ksampler_failure = (
+        'ksampler schema changed' in failure_text or 'control_after_generate' in failure_text
+    )
+    known_hf_revision_failure = (
+        'revisionnotfounderror' in failure_text
+        and (
+            'invalid rev id: text_encoders' in failure_text
+            or 'invalid rev id: vae' in failure_text
+        )
+    )
+    known_comfyui_timeout = (
+        isinstance(error_payload, dict)
+        and error_payload.get('error_type') == 'TimeoutError'
+        and 'ComfyUI scene generation timed out after 2700s' in str(error_payload.get('error', ''))
+        and error_payload.get('stage') == 'kaggle_gpu_render'
+        and error_payload.get('manifest_id') == pending.get('job_id')
+    )
+    allowed_first_retry = retry_attempts == 0 and (known_ksampler_failure or known_hf_revision_failure)
+    allowed_timeout_retry = retry_attempts == 1 and known_comfyui_timeout
+    if not (allowed_first_retry or allowed_timeout_retry):
+        raise RuntimeError(
+            'GPU retry is restricted to the first classified KSampler/Hugging Face compatibility fix, '
+            'or one additional same-manifest retry for the exact recorded 2700-second ComfyUI timeout '
+            'after queue-aware diagnostics are installed. Other failures and attempt counts are refused.'
+        )
+
     manifest = pending.get('manifest')
     if not isinstance(manifest, dict) or manifest.get('job_id') != pending.get('job_id') or not manifest.get('reels'):
         raise RuntimeError('Saved manifest is incomplete or does not match the pending job. Refusing to create a different Reel.')
     if any(reel.get('delivery_status') == 'delivered' for reel in pending.get('reels', [])):
         raise RuntimeError('At least one Reel from this manifest is already delivered. Refusing to retry the whole GPU manifest.')
+
+    # Reconcile the worker manifest with the correct immutable model snapshot lock.
+    # Primary image-first retries must never borrow the old Wan UNet/CLIP/VAE lock.
+    image_first_retry = manifest.get('generation_mode') == 'still_image_first'
+    lock_path = IMAGE_TOOLCHAIN_LOCK if image_first_retry else TOOLCHAIN_LOCK
+    saved_lock = load_json(lock_path, {}) or {}
+    if saved_lock.get('status') != 'locked':
+        raise RuntimeError('The selected GPU toolchain lock is missing or not locked. Refusing a retry.')
+    saved_model_revisions = saved_lock.get('model_revisions')
+    required_model_keys = ('unet', 'clip_l', 't5xxl', 'vae', 'depth') if image_first_retry else ('unet', 'clip', 'vae')
+    if not isinstance(saved_model_revisions, dict) or not all(
+        re.fullmatch(r'[0-9a-f]{40}', str(saved_model_revisions.get(key, '')))
+        for key in required_model_keys
+    ):
+        raise RuntimeError(
+            'The saved Hugging Face model lock is invalid. Every selected model revision must be a 40-character snapshot SHA.'
+        )
+    previous_manifest_key = 'image_toolchain_lock' if image_first_retry else 'toolchain_lock'
+    previous_manifest_lock = manifest.get(previous_manifest_key) if isinstance(manifest.get(previous_manifest_key), dict) else {}
+    for key in ('comfyui_commit', 'comfyui_gguf_commit'):
+        previous = previous_manifest_lock.get(key)
+        current = saved_lock.get(key)
+        if previous and previous != current:
+            raise RuntimeError(f'Toolchain source mismatch for {key}; refusing to change ComfyUI code during a GPU retry.')
+    lock_payload = {
+        'comfyui_commit': saved_lock['comfyui_commit'],
+        'comfyui_gguf_commit': saved_lock['comfyui_gguf_commit'],
+        'model_revisions': {key: saved_model_revisions[key] for key in required_model_keys},
+    }
+    manifest[previous_manifest_key] = lock_payload
+    pending['manifest'] = manifest
+    write_json(PENDING, pending)
 
     configure_kaggle_cli()
     recorded_kernel_id = str(pending.get('kaggle_kernel_id', '')).strip()
@@ -915,9 +1567,16 @@ def retry_failed_gpu() -> int:
         raise RuntimeError(f"The previous Kaggle run is not confirmed terminal (status={remote_status}). No new GPU run was dispatched. {remote_output[-600:]}")
 
     kernel_dir = build_kaggle_kernel(manifest)
+    retry_reason = (
+        'Queue-aware ComfyUI prompt tracking, 90-minute scene timeout and preserved worker diagnostics; original Reel manifest retained.'
+        if allowed_timeout_retry
+        else 'Corrected immutable Hugging Face snapshot SHA pins for image-first or legacy model revisions; original Reel manifest retained.'
+        if known_hf_revision_failure
+        else 'ComfyUI KSampler API schema compatibility fix; original Reel manifest retained.'
+    )
     try:
         result = subprocess.run(
-            ['kaggle', 'kernels', 'push', '-p', str(kernel_dir)],
+            kaggle_cli_command('kernels', 'push', '-p', str(kernel_dir)),
             text=True, capture_output=True, timeout=900,
         )
         console = (result.stdout or '') + '\n' + (result.stderr or '')
@@ -939,13 +1598,14 @@ def retry_failed_gpu() -> int:
             pending['gpu_retry_dispatch_attempt_pending'] = True
             pending['gpu_retry_dispatch_error'] = console[-2500:]
             pending['gpu_retry_remote_status'] = after_status
+            pending['gpu_retry_reason'] = retry_reason
             write_json(PENDING, pending)
             alert_failure('BINA SHOR KE corrected GPU retry returned an ambiguous result. No second retry was sent. Inspect Kaggle run history, then use resolve-dispatch-running or resolve-dispatch-not-started.')
             return 1
 
     pending['gpu_retry_attempts'] = int(pending.get('gpu_retry_attempts', 0)) + 1
     pending['gpu_retry_dispatched_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
-    pending['gpu_retry_reason'] = 'ComfyUI KSampler API schema compatibility fix; original manifest and Reel story retained.'
+    pending['gpu_retry_reason'] = retry_reason
     pending['status'] = 'gpu_running'
     pending['dispatched_at_ist'] = pending['gpu_retry_dispatched_at_ist']
     pending['dispatch_output'] = console[-2000:]
@@ -1445,10 +2105,23 @@ def retry_finalize() -> int:
     pending = load_json(PENDING, {}) or {}
     if pending.get('status') not in {'finalize_failed', 'finalizing', 'gpu_failed'}:
         raise RuntimeError(f"There is no failed or interrupted finalization to retry (status={pending.get('status', 'none')}).")
-    # A GPU output failure itself cannot be repaired by re-running the finalizer. Only retry when Kaggle completed.
-    status, raw = kaggle_status(pending.get('kaggle_kernel_id', ''))
+    if int(pending.get('retry_finalization_count', 0) or 0) >= 1:
+        raise RuntimeError('The one permitted finalization retry has already been used; refusing a second retry.')
+    qa_reason = str(pending.get('qa_rejection_reason') or '').lower()
+    if 'critical visual defect' in qa_reason:
+        raise RuntimeError('A critical visual QA rejection is terminal; archive the rejected job and create a fresh plan instead of retrying it.')
+    kernel_id = str(pending.get('kaggle_kernel_id') or '').strip()
+    if not kernel_id or '/' not in kernel_id:
+        raise RuntimeError('Saved Kaggle kernel identity is missing or invalid; refusing to retry finalization.')
+    # Query Kaggle only after the one-shot and terminal-QA guards above have passed.
+    status, raw = kaggle_status(kernel_id)
+    # A GPU output failure itself cannot be repaired by re-running the finalizer.
     if status != 'COMPLETE':
-        raise RuntimeError(f"Kaggle kernel is not COMPLETE (status={status}). Inspect the GPU worker and use plan-week only after resolving the prior batch. {raw[-800:]}")
+        detail = str(raw or '').strip()[-800:]
+        raise RuntimeError(
+            f"Kaggle kernel is not COMPLETE (status={status}). "
+            f"Inspect the GPU worker before retrying finalization. {detail}"
+        )
     pending['status'] = 'gpu_running'
     pending['retry_finalization_count'] = int(pending.get('retry_finalization_count', 0)) + 1
     pending['retry_requested_at_ist'] = datetime.now(TZ).isoformat(timespec='seconds')
@@ -1470,9 +2143,50 @@ def self_test() -> int:
         spec.loader.exec_module(module)
     finally:
         tmp_runner.unlink(missing_ok=True)
-    build_api_workflow = module.build_api_workflow
+    # Validate the actual default image-first FLUX still graph, not just the legacy Wan graph.
+    flux_schema = {
+        'UnetLoaderGGUF': ['unet_name'],
+        'DualCLIPLoader': ['clip_name1', 'clip_name2', 'type', 'device'],
+        'VAELoader': ['vae_name'],
+        'EmptySD3LatentImage': ['width', 'height', 'batch_size'],
+        'CLIPTextEncodeFlux': ['clip', 'clip_l', 't5xxl', 'guidance'],
+        'ConditioningZeroOut': ['conditioning'],
+        'KSampler': ['seed', 'steps', 'cfg', 'sampler_name', 'scheduler', 'denoise', 'model', 'positive', 'negative', 'latent_image'],
+        'VAEDecode': ['samples', 'vae'],
+        'SaveImage': ['images', 'filename_prefix'],
+    }
+    flux_object_info = {
+        node: {'input': {'required': {key: [] for key in keys}, 'optional': {}}}
+        for node, keys in flux_schema.items()
+    }
+    demo = {
+        'reel_id': 'reel_01_test',
+        'visual_bible': 'Consistent illustrated Indian street setting, warm practical light, charcoal jacket.',
+        'visual_style_profile': {'palette': 'monsoon teal and warm amber', 'lighting': 'soft window light'},
+        'characters': [],
+        'beats': [],
+    }
+    beat = {
+        'video_prompt': 'Illustrated close-up of a hand placing a phone face down on a scratched wooden desk under a warm practical lamp.',
+        'narrative_role': 'hook',
+        'state_change': 'The hand deliberately turns the phone face down.',
+        'causal_link': 'The action reveals the character choosing not to answer.',
+    }
+    flux_graph = module.build_flux_image_workflow(
+        flux_object_info, beat, demo, 1, 'bsk/reel_01_test/scene_01'
+    )
+    if (
+        len(flux_graph) != 9
+        or flux_graph['27']['inputs']['width'] != 704
+        or flux_graph['27']['inputs']['height'] != 1280
+        or flux_graph['31']['inputs']['steps'] != 4
+        or flux_graph['9']['class_type'] != 'SaveImage'
+    ):
+        raise RuntimeError('Offline primary FLUX image-first graph validation failed.')
+
+    # Keep the old Wan graph covered for previously saved legacy manifests only.
     mock_object_info = {}
-    schema = {
+    legacy_schema = {
         'UnetLoaderGGUF': ['unet_name'],
         'CLIPLoader': ['clip_name', 'type', 'device'], 'VAELoader': ['vae_name'],
         'ModelSamplingSD3': ['model', 'shift'], 'CLIPTextEncode': ['text', 'clip'],
@@ -1481,19 +2195,24 @@ def self_test() -> int:
         'VAEDecode': ['samples', 'vae'], 'CreateVideo': ['images', 'fps'],
         'SaveVideo': ['video', 'filename_prefix', 'format', 'codec'],
     }
-    for node, keys in schema.items():
+    for node, keys in legacy_schema.items():
         required_keys = [k for k in keys if not (node == 'Wan22ImageToVideoLatent' and k == 'start_image')]
         optional_keys = ['start_image'] if node == 'Wan22ImageToVideoLatent' else []
         mock_object_info[node] = {'input': {'required': {k: [] for k in required_keys}, 'optional': {k: [] for k in optional_keys}}}
-    demo = {'reel_id': 'reel_01_test', 'visual_bible': 'Natural practical light, consistent charcoal jacket, anonymous partial profile.', 'beats': []}
-    beat = {'video_prompt': 'Photoreal vertical close-up of a phone placed on a scratched wooden desk, hand slowly turns it face down, warm practical lamp light, subtle handheld movement, realistic texture, no readable text or logos.'}
-    graph = build_api_workflow(mock_object_info, beat, demo, 1, 'bsk/reel_01_test/scene_01')
-    if len(graph) != 11 or graph['55']['inputs']['length'] != 81 or graph['55']['inputs']['width'] != 704 or graph['55']['inputs']['height'] != 1280:
-        raise RuntimeError('Offline GPU graph validation failed.')
+    legacy_graph = module.build_api_workflow(
+        mock_object_info, beat, demo, 1, 'bsk/reel_01_test/legacy_scene_01'
+    )
+    if (
+        len(legacy_graph) != 11
+        or legacy_graph['55']['inputs']['length'] != 81
+        or legacy_graph['55']['inputs']['width'] != 704
+        or legacy_graph['55']['inputs']['height'] != 1280
+    ):
+        raise RuntimeError('Offline legacy Wan graph compatibility validation failed.')
     pending = load_json(PENDING, {})
-    if pending and pending.get('status') in {'dispatching', 'gpu_running'} and not pending.get('manifest', {}).get('reels'):
+    if pending and pending.get('status') in ACTIVE_GPU_STATES and not pending.get('manifest', {}).get('reels'):
         raise RuntimeError('Pending state exists without a Reel manifest.')
-    log('OFFLINE STUDIO PREFLIGHT PASSED: graph schema, 720p portrait dimensions, 81-frame (~3.4s) clip, pending state shape. No API keys/network/GPU used.')
+    log('OFFLINE STUDIO PREFLIGHT PASSED: primary FLUX 704x1280 image graph, four-step sampler, SaveImage output, legacy Wan compatibility, pending state shape. No API keys/network/GPU used.')
     return 0
 
 

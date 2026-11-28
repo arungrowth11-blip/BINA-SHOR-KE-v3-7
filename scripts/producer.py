@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """BINA SHOR KE weekly faceless Reel factory.
 
-The default GitHub/Kaggle production path generates original Hindi stories, scene-level
-Wan2.2 video, Hindi AI narration, branded post-production, technical/visual QA and a
-publish kit for one pinned private Telegram chat. It never publishes to Facebook and
-never falls back to a paid service.
+The default GitHub/Kaggle production path generates original Hindi stories, FLUX.1 Schnell
+illustrated stills, Depth Anything V2 depth maps, deterministic 2.5D parallax, Hindi narration,
+branded post-production, technical/visual QA and a publish kit for one pinned private Telegram
+chat. Legacy Wan2.2 manifests remain supported separately; it never publishes to Facebook or
+falls back to a paid service.
 """
 from __future__ import annotations
 
@@ -33,6 +34,9 @@ from zoneinfo import ZoneInfo
 
 import requests
 from PIL import Image, ImageDraw, ImageFont
+import voice_first
+import story_engine
+import motion_comic
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "output"
@@ -55,10 +59,23 @@ PEXELS_API_KEY = os.getenv("PEXELS_API_KEY", "").strip()
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.8-flash")
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.8-flash-lite-tts")
+# Vision QA uses independent provider routing; text-only models are never selected here.
+GROQ_VISION_MODEL = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b").strip()
+MISTRAL_VISION_MODEL = os.getenv("MISTRAL_VISION_MODEL", "ministral-8b-2512").strip()
+CF_VISION_MODEL = os.getenv("CF_VISION_MODEL", "@cf/qwen/qwen3.8-27b").strip()
+VISION_REQUIRED_SCORE_KEYS = (
+    "text_legibility", "devanagari_rendering", "anatomy_integrity",
+    "story_visual_match", "safe_composition", "visual_quality",
+    "character_continuity", "metadata_text_cleanliness",
+)
 TTS_VOICE = os.getenv("TTS_VOICE", "Kore")
 FONT_DIR = "/usr/share/fonts/truetype/noto"
 # A conservative request pacing guard for free-tier TTS quotas (roughly <= 3 requests/min).
 TTS_MIN_INTERVAL_SECONDS = max(0.0, float(os.getenv("TTS_MIN_INTERVAL_SECONDS", "21")))
+# The WAV/cache transport gate accepts up to 12s; the voice-first scene planner
+# separately enforces its stricter 8.1s shot limit and reports when a beat must split.
+TTS_MIN_DURATION_SECONDS = 1.0
+TTS_MAX_DURATION_SECONDS = 12.0
 _LAST_TTS_REQUEST_AT = 0.0
 _ASR_MODEL = None
 _LAST_TEXT_PROVIDER_USED: str | None = None
@@ -152,7 +169,7 @@ def _gemini_json_request(system: str, user_prompt: str, temperature: float = 0.8
         "contents": [{"role": "user", "parts": [{"text": user_prompt}]}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": temperature},
     }
-    response = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=timeout)
+    response = requests.post(url, headers={"x-goog-api-key": GEMINI_API_KEY}, json=payload, timeout=timeout)
     if response.status_code >= 400:
         # Preserve the response object so retry logic can honour Retry-After.
         raise requests.HTTPError(
@@ -195,6 +212,31 @@ def gemini_json(system: str, user_prompt: str, temperature: float = 0.8, timeout
     raise RuntimeError(f"Gemini text request failed after bounded retries: {last_error}")
 
 
+def _openai_json_completion(body: dict[str, Any], provider: str, max_output_tokens: int) -> dict[str, Any]:
+    """Validate a completed OpenAI-compatible JSON response without repairing broken model output."""
+    choices = body.get("choices") or []
+    if not choices:
+        raise RuntimeError(f"{provider} returned no choices: {str(body)[:300]}")
+    choice = choices[0]
+    finish_reason = str(choice.get("finish_reason") or "").lower()
+    if finish_reason in {"length", "max_tokens"}:
+        raise RuntimeError(
+            f"{provider} output reached its {max_output_tokens}-token limit "
+            f"(finish_reason={finish_reason}); refusing to parse truncated JSON."
+        )
+    message = choice.get("message") or {}
+    content = message.get("content", "")
+    if isinstance(content, list):
+        content = "".join(
+            str(part.get("text") or "")
+            for part in content
+            if isinstance(part, dict) and part.get("type", "text") == "text"
+        )
+    if not isinstance(content, str) or not content.strip():
+        raise RuntimeError(f"{provider} returned an empty or unsupported message content.")
+    return extract_json(content)
+
+
 def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
     """Groq OpenAI-compatible JSON route; only used when GROQ_API_KEY is configured."""
     if not GROQ_API_KEY:
@@ -206,7 +248,13 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
             {"role": "user", "content": user_prompt},
         ],
         "temperature": temperature,
-        "max_completion_tokens": 2600,
+        "max_completion_tokens": 12000,
+        # GPT-OSS supports hidden reasoning in JSON mode; low effort reserves more of the
+        # completion budget for the structured screenplay instead of internal reasoning.
+        "reasoning_effort": "low",
+        # GPT-OSS 120B does not support reasoning_format; suppress its separate reasoning field.
+        "include_reasoning": False,
+        "response_format": {"type": "json_object"},
         "stream": False,
     }
     response = requests.post(
@@ -217,21 +265,23 @@ def groq_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Groq HTTP {response.status_code}: {response.text[:300]}")
-    body = response.json()
-    choices = body.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"Groq returned no choices: {str(body)[:300]}")
-    content = (choices[0].get("message") or {}).get("content", "")
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Groq returned an empty message.")
-    return extract_json(content)
+    return _openai_json_completion(response.json(), "Groq", 12000)
 
+
+
+def _mistral_free_only_enabled() -> bool:
+    return os.getenv("BSK_MISTRAL_FREE_ONLY", "").strip().upper() in {"YES", "TRUE"}
 
 
 def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
-    """Mistral Studio Free-mode Chat Completions route; never enables pay-as-you-go."""
+    """Mistral route is unavailable unless the owner explicitly confirms free-only billing."""
     if not MISTRAL_API_KEY:
         raise RuntimeError("Mistral is not configured (MISTRAL_API_KEY is absent).")
+    if not _mistral_free_only_enabled():
+        raise RuntimeError(
+            "Mistral is disabled: set BSK_MISTRAL_FREE_ONLY=YES only after confirming "
+            "the connected Mistral workspace has no paid billing."
+        )
     payload = {
         "model": MISTRAL_TEXT_MODEL,
         "messages": [
@@ -239,7 +289,8 @@ def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeou
             {"role": "user", "content": user_prompt},
         ],
         "temperature": temperature,
-        "max_tokens": 2600,
+        "max_tokens": 8000,
+        "response_format": {"type": "json_object"},
         "stream": False,
     }
     response = requests.post(
@@ -250,14 +301,7 @@ def mistral_json(system: str, user_prompt: str, temperature: float = 0.8, timeou
     )
     if response.status_code >= 400:
         raise RuntimeError(f"Mistral HTTP {response.status_code}: {response.text[:300]}")
-    body = response.json()
-    choices = body.get("choices") or []
-    if not choices:
-        raise RuntimeError(f"Mistral returned no choices: {str(body)[:300]}")
-    content = (choices[0].get("message") or {}).get("content", "")
-    if not isinstance(content, str) or not content.strip():
-        raise RuntimeError("Mistral returned an empty message.")
-    return extract_json(content)
+    return _openai_json_completion(response.json(), "Mistral", 8000)
 
 def cloudflare_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: int = 120) -> dict[str, Any]:
     """Optional Cloudflare Workers AI tertiary route; requires explicit free-plan opt-in."""
@@ -295,17 +339,27 @@ def cloudflare_json(system: str, user_prompt: str, temperature: float = 0.8, tim
 
 def _provider_failure_cooldown(name: str, exc: Exception) -> None:
     message = str(exc).lower()
-    permanent = any(token in message for token in ("http 400", "http 401", "http 403", "http 404", "invalid api key", "unauthorized", "model_not_found", "unknown model"))
-    if permanent:
+    response = getattr(exc, "response", None)
+    status_code = getattr(response, "status_code", None)
+    if status_code in {400, 401, 403, 404} or any(
+        token in message for token in ("http 400", "http 401", "http 403", "http 404", "invalid api key", "unauthorized", "model_not_found", "unknown model")
+    ):
         _PROVIDER_DISABLED_THIS_RUN.add(name)
         log(f"Provider circuit opened for {name} for the remainder of this run (configuration/model error).")
-    elif any(token in message for token in ("http 429", "quota", "rate limit", "resource_exhausted")):
+    elif status_code == 429 or any(token in message for token in ("http 429", "quota", "rate limit", "resource_exhausted")):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 900
         log(f"Provider circuit opened for {name} for 15 minutes (quota/rate-limit response).")
-    elif any(token in message for token in ("http 500", "http 502", "http 503", "http 504", "timeout", "connection", "temporarily unavailable")):
+    elif any(token in message for token in (
+        "jsondecodeerror", "unterminated string", "expecting ',' delimiter",
+        "output reached its", "invalid json", "empty or unsupported message content",
+    )):
+        # Invalid JSON is a response-quality failure, not proof the provider is unavailable.
+        log(f"Provider {name} returned invalid/truncated structured output; retaining it for a bounded candidate retry.")
+    elif status_code in {408, 500, 502, 503, 504} or any(token in message for token in (
+        "http 408", "http 500", "http 502", "http 503", "http 504", "timeout", "connection", "temporarily unavailable"
+    )):
         _PROVIDER_COOLDOWN_UNTIL[name] = time.monotonic() + 120
         log(f"Provider circuit opened for {name} for 2 minutes (transient failure).")
-
 
 def _provider_available(name: str) -> bool:
     if name in _PROVIDER_DISABLED_THIS_RUN:
@@ -325,7 +379,7 @@ def _text_provider_order(prefer_independent: bool = False) -> list[tuple[str, An
     enabled = {
         "gemini": bool(GEMINI_API_KEY),
         "groq": bool(GROQ_API_KEY),
-        "mistral": bool(MISTRAL_API_KEY),
+        "mistral": bool(MISTRAL_API_KEY and _mistral_free_only_enabled()),
         "cloudflare": bool(CF_WORKERS_AI_ENABLED and CF_ACCOUNT_ID and CF_API_TOKEN),
     }
     return [(name, providers[name]) for name in names if enabled[name] and _provider_available(name)]
@@ -336,7 +390,7 @@ def text_json(system: str, user_prompt: str, temperature: float = 0.8, timeout: 
     global _LAST_TEXT_PROVIDER_USED
     order = _text_provider_order(prefer_independent=False)
     if not order:
-        raise RuntimeError("No text AI provider is configured. Add GEMINI_API_KEY and/or an optional Groq/Mistral key.")
+        raise RuntimeError("No configured free text providers are currently available (missing credentials, disabled provider, or active cooldown).")
     failures = []
     for index, (name, provider) in enumerate(order):
         try:
@@ -573,7 +627,7 @@ def generate_concept(
     narrative_engine = NARRATIVE_ENGINES[(int(history.get("generated_count", 0)) + index) % len(NARRATIVE_ENGINES)]
     recent_engines = [str(x.get("narrative_engine", "")) for x in recent_topics[-6:] if x.get("narrative_engine")]
     recent_story_anchors = [str(x.get("human_detail", "")) for x in recent_topics[-12:] if x.get("human_detail")]
-    system = """You are the lead screenwriter of BINA SHOR KE. Write a tiny human film, not a motivational post disguised as cinema. The viewer should recognise a real feeling before they recognise the message. Prioritise emotional truth, subtext, human contradiction, consequence and restraint. Begin from a specific person in a specific ordinary moment with a concrete want, pressure or misunderstanding. Let an action, object, omission or choice carry meaning. Do not explain emotions that the image can show. Never make every character a saint or villain; give people mixed motives and believable limits. The ending must be earned by earlier details and leave a small aftertaste—not a lecture, slogan, twist for its own sake, or forced tearjerker. Avoid ready-made moral lines such as 'ज़िंदगी यही सिखाती है', 'अपनों की कदर', 'वक्त सब सिखा देता है', 'कभी-कभी खामोशी', and other interchangeable motivational clichés. Do not rely on poverty porn, illness/death reveals, abandoned-child twists, rich-vs-poor humiliation, miracle coincidences or manipulative guilt. Do not repeatedly use a phone notification, rain, a letter, an old person or a missed call as the reveal; only use such devices when causally essential and fresh. Vary sentence length, syntax, silence and point of view. Spoken Hindi must sound like a thoughtful person speaking—not translated English, formal essay Hindi or artificial shayari. Use simple vivid words, idiomatic Devanagari and natural pauses; Hinglish only when an actual speaker would use it. Give every beat a distinct vocal delivery direction (e.g. matter-of-fact, held-back hurt, a little hesitation, quiet relief); never instruct exaggerated crying or melodrama. Output valid JSON only. Do not imitate any creator, film, book, song or viral script. Avoid fake factual claims, medical/legal/financial advice, real allegations, identifiable real people, copyrighted lyrics, rage bait, deceptive hooks and forced engagement bait. Fictional stories must never be presented as verified true events. Every beat must advance a causal story, reveal information, change the audience's interpretation, or earn the ending. Visual prompts are for a photoreal open-weight text-to-video model: one physically plausible action, shot size/lens, controlled camera movement, motivated practical light, realistic materials and restrained grade. Never ask the model to render words, subtitles, logos or watermarks. Avoid complex hand interactions, fast choreographed movement, multiple speaking faces, visible brand marks and impossible actions. Keep recurring subject/clothes/setting consistent; prefer partial profiles, backs, silhouettes and object-led scenes when faces are not essential. Each Reel must be understandable without sound. Editorial scores are quality controls, not a Meta monetization/recommendation guarantee."""
+    system = """You are the lead screenwriter of BINA SHOR KE. Write a tiny human film, not a motivational post disguised as cinema. The viewer should recognise a real feeling before they recognise the message. Prioritise emotional truth, subtext, human contradiction, consequence and restraint. Begin from a specific person in a specific ordinary moment with a concrete want, pressure or misunderstanding. Let an action, object, omission or choice carry meaning. Do not explain emotions that the image can show. Never make every character a saint or villain; give people mixed motives and believable limits. The ending must be earned by earlier details and leave a small aftertaste—not a lecture, slogan, twist for its own sake, or forced tearjerker. Avoid ready-made moral lines such as 'ज़िंदगी यही सिखाती है', 'अपनों की कदर', 'वक्त सब सिखा देता है', 'कभी-कभी खामोशी', and other interchangeable motivational clichés. Do not rely on poverty porn, illness/death reveals, abandoned-child twists, rich-vs-poor humiliation, miracle coincidences or manipulative guilt. Do not repeatedly use a phone notification, rain, a letter, an old person or a missed call as the reveal; only use such devices when causally essential and fresh. Vary sentence length, syntax, silence and point of view. Spoken Hindi must sound like a thoughtful person speaking—not translated English, formal essay Hindi or artificial shayari. Use simple vivid words, idiomatic Devanagari and natural pauses; Hinglish only when an actual speaker would use it. Give every spoken turn a distinct, restrained vocal delivery and assign each line to its actual speaker. If two or more characters speak, never merge their words into one voice: each turn needs its own speaker_id. Do not invent a speaker just to fill a cast. A narrator is optional and must be a separate character when used. Output valid JSON only. Do not imitate any creator, film, book, song or viral script. Avoid fake factual claims, medical/legal/financial advice, real allegations, identifiable real people, copyrighted lyrics, rage bait, deceptive hooks and forced engagement bait. Fictional stories must never be presented as verified true events. Every beat must advance a causal story, reveal information, change the audience's interpretation, or earn the ending. Visual prompts are for a semi-painterly 2.5D Indian graphic-novel motion-comic video model: separated foreground/midground/background cues, one physically plausible action, controlled camera movement, warm practical light, tactile illustrated materials and restrained cinematic colour. Never ask the model to render words, subtitles, logos or watermarks. Avoid complex hand interactions, fast choreographed movement, multiple speaking faces, visible brand marks and impossible actions. Keep recurring subject/clothes/setting consistent; prefer partial profiles, backs, silhouettes and object-led scenes when faces are not essential. Each Reel must be understandable without sound. Editorial scores are quality controls, not a Meta monetization/recommendation guarantee."""
     pillar_rules = {
         "micro_story": "Create a compact fictional everyday story about human choices: trust, work, family, friendship, responsibility, misunderstanding, dignity, kindness or boundaries. Include a conflict, a consequential turn and an earned payoff. Avoid gender stereotypes and moralising.",
         "cinematic_moment": "Create a compact cinematic mini-story using everyday environments and objects with a genuine reveal or re-interpretation. The aesthetic must serve the story; no random pretty footage plus vague quote.",
@@ -587,7 +641,7 @@ Brand promise: 'कम शब्द। साफ़ कहानी। ऐसा
 NARRATIVE ENGINE TO EXPLORE (do not use it as a formula): {narrative_engine}. If this feels forced for the pillar, use a fresh variation but avoid the recent engines {json.dumps(recent_engines, ensure_ascii=False)}.
 Human-depth test: name a small human_detail (an observable gesture, object, unfinished task, habit or sensory detail) that feels lived-in; state the character_contradiction (what they want versus what they do or cannot say); identify the cost_of_choice (a small, believable consequence); let the audience infer emotion from behaviour; let the final line change the meaning of an earlier detail. Do not end with a generic moral. Avoid repeating recent story anchors {json.dumps(recent_story_anchors, ensure_ascii=False)}. One brief line of natural direct speech is allowed only when a real person would say it; do not turn every beat into a quote.
 Target audience hypothesis: Hindi-understanding adults across genders, regions and life stages who enjoy grounded stories about everyday decisions, relationships, work, trust, digital life and useful habits. Do not write only for men or only for romance audiences.
-Duration target: 22–32 seconds. Use exactly 6 beats. CRITICAL SPOKEN-LINE LIMIT: every beat's voiceover must contain 7–12 whitespace-separated Hindi words; aim for 8–10. Count each beat before returning JSON. Never put two long sentences into one beat and never exceed 12 words. Across all six beats, target 48–60 spoken Hindi words (the overall hard range is 45–72). If a line is too long, rewrite it shorter while preserving the story meaning. These are hard structural limits, not suggestions.
+Choose one story_type from emotional, suspense, twist, comedy, poetry or insight. Duration is adaptive: emotional/suspense target 35s (30–45s, 75–110 Hindi words); twist/comedy target 25s (20–30s, 52–78 words); poetry target 22s (18–26s, 32–60 words); insight target 28s (20–35s, 50–82 words). Use exactly 6 narrative beats in this order: hook, context, conflict, escalation, turn, payoff; these are story beats, not final editorial shots. Every beat must include narrative_role, state_change (4–32 words describing what new information, choice, action or interpretation changes), and causal_link (4–32 words describing the opening pressure for beat 1 or how beats 2–6 follow from the previous beat). Do not use generic transitions; describe actual cause and effect. Every state_change must be distinct. The payoff beat must resolve or deliberately reframe an earlier detail. Write the complete screenplay first. Each beat contains an ordered speech_segments array; each segment has one speaker_id and one complete spoken turn. Multiple speakers may speak in the same beat, but never merge their lines or assign the same voice to different characters. Some beats may be silent when visual action carries the story. Keep individual turns naturally speakable (usually 8–20 words) and stay inside the chosen story_type word range. Never shorten a line merely to fit a fixed-duration clip. Every speaking character must appear in characters, and every speaker_id must match exactly one cast member. For cast entries, OMIT voice_profile_id entirely (or set it to an empty string): the production pipeline derives the canonical age/gender-matched profile. Do not guess or copy a Gemini voice name into this field. If you choose a young-adult woman, the pipeline assigns Leda; if you choose an adult woman (30–54), it assigns Aoede. Make the appearance age explicit and consistent with age_band.
 
 PREVIOUS STRUCTURAL FEEDBACK (must be corrected in this candidate): {correction_feedback or 'No previous candidate feedback.'}
 
@@ -600,11 +654,16 @@ RECENT THEMES (do not repeat the same situation/twist): {json.dumps(recent_theme
 Return one JSON object with exactly these fields:
 {{
   "title": "short distinct internal title",
+  "characters": [
+    {{"character_id":"protagonist","display_name":"natural Hindi name","role":"protagonist|supporting|narrator","gender_presentation":"male|female|unspecified","age_band":"child|teen|young_adult|adult|older_adult|elder","visual_age_description":"visible age anchor consistent with age_band; normalized by the pipeline","appearance":"specific visual identity and exact age-consistent face/body/clothing anchors","personality":"brief behaviour traits","voice_direction":"natural Hindi performance direction for this character"}}
+  ],
   "pillar": "{pillar}",
+  "story_type": "emotional|suspense|twist|comedy|poetry|insight",
   "series_name": "one of the brand's three editorial series; it will be normalized from the pillar",
   "theme": "one-sentence theme, specific and not generic",
   "audience_reason": "one sentence why this audience may care; state as a hypothesis, not certainty",
   "share_reason": "the genuine human insight or practical utility that could make someone naturally send this to a friend; no forced CTA",
+  "share_recipient": "one specific relationship/person this story naturally fits, e.g. younger sister, father, office friend, old school friend",
   "narrative_engine": "brief name of the story device actually used",
   "emotional_aftertaste": "the quiet feeling or thought the ending should leave; not a moral",
   "human_detail": "one small, observable, non-generic lived-in detail used in the story",
@@ -613,7 +672,7 @@ Return one JSON object with exactly these fields:
   "hook": "a compelling first-screen line, 4–10 Hindi words, no deceptive promise",
   "visual_bible": "consistent visual language, scene setting, lighting and any recurring non-identifiable character details",
   "beats": [
-    {{"voiceover":"spoken line in natural Hindi", "voice_direction":"brief restrained acting direction for this line", "screen_text":"short readable line, max 2 lines", "visual_query":"3–7 English keywords describing the shot", "visual_direction":"what new information or emotion this shot contributes", "video_prompt":"100–160 words in English describing one photoreal, physically plausible 3.4-second vertical film shot; clear subject, one action, shot size/lens, camera movement, light source, material texture, ambient detail, continuity, restrained colour grade; explicitly no text, subtitles, logo or watermark", "overlay_type":"message|note|step|contrast|keyword", "overlay_text":"a short original clue/label that adds context rather than repeating the subtitle"}}
+    {{"narrative_role":"hook|context|conflict|escalation|turn|payoff in exact sequence", "state_change":"4–32 words describing the new information/action/interpretation in this beat", "causal_link":"4–32 words linking this beat to the opening pressure or immediately previous beat", "speech_segments":[{{"segment_id":"beat_01_line_01","speaker_id":"protagonist","text":"one complete natural Hindi spoken turn","emotion":"subtle emotion or acting cue"}}], "voiceover":"exact spoken words in this beat, joined in dialogue order for subtitle/ASR compatibility", "voice_direction":"optional overall beat direction", "screen_text":"short readable line, max 2 lines", "visual_query":"3–7 English keywords describing the shot", "visual_direction":"what new information or emotion this shot contributes", "video_prompt":"55–80 concrete English words describing the beat's visible action, shot size, motivated light, tactile materials, continuity and restrained grade; this is a temporary prompt and will be replaced after measured voice generation; no text, subtitles, logo or watermark", "overlay_type":"message|note|step|contrast|keyword", "overlay_text":"a short original clue/label that adds context rather than repeating the subtitle"}}
   ],
   "caption": "2–3 short natural lines, do not simply repeat the whole script",
   "hashtags": ["#BinaShorKe", "#relevant2", "#relevant3"],
@@ -621,9 +680,13 @@ Return one JSON object with exactly these fields:
   "posting_note": "one sentence explaining the test hypothesis for this reel"
 }}
 
-Rules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Use exactly 6 beats, target 22–32 seconds and 45–72 spoken Hindi words; don't stretch the story to hit a duration. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately. Return JSON only."""
+SHARE-RECIPIENT GATE: identify one concrete real-world recipient for the story, not generic "everyone" or "people". The premise, detail and emotional turn should make sense for why this exact person would receive it. Do not force a call-to-action.\n\nRules: first frame delivers a specific curiosity gap within 1 second, with no logo intro. Return a beats array containing EXACTLY SIX objects—no prologue object, no epilogue object, no seventh beat, and no merged beats—with narrative_role values in this exact order: hook, context, conflict, escalation, turn, payoff. Count the objects before returning JSON. Every beat must include explicit state_change and causal_link fields; reject any beat that only restates the previous one. The payoff must be earned by earlier details, not introduced from nowhere. The selected story_type controls the total spoken-word range described above. speech_segments is the source of truth; voiceover must be the exact joined text of those segments and may be empty only when speech_segments is empty. Never force every beat to the same word count. Audio is generated before video; the measured voice duration selects the final Reel duration and editorial shot timing. Do not compress or shorten dialogue to fit a generated clip. Each beat must materially change the story or audience understanding. The last line should pay off the opening, not tack on a generic moral. The video_prompt must specify what is actually visible; never ask the model to show Hindi text. Make every shot different but coherent, with a clear beginning/middle/end progression. overlay_text must add context rather than duplicate narration. Use 3–5 relevant hashtags. Never force shares/comments or claim virality. Do not use copyrighted songs, movie clips or another creator's post. For fictional stories, communicate fiction appropriately.
+
+CAST AGE/VOICE HARD GATE: visible age is selected first and is immutable. The age_band controls the canonical visual_age_description and the voice profile; the appearance description must visibly agree with it. Adult women use Aoede, not Gacrux. Gacrux is only for older-adult/elder women; apply the equivalent age mapping to male profiles. Child/teen characters may appear silently, but no speech segment may be assigned to them until a dedicated age-appropriate Hindi voice has been auditioned. Never make a child/teen sound adult, and never age a character up/down just to fit a voice. The pipeline rejects an explicit voice-profile mismatch before TTS/GPU work. Return JSON only."""
 
     concept = text_json(system, user, temperature=0.85)
+    # Upgrade legacy narrator concepts or validate an explicit multi-speaker screenplay.
+    concept = voice_first.normalise_screenplay(concept)
     # Normalize stable required fields, then locally validate shape.
     concept["pillar"] = pillar
     concept["series_name"] = SERIES_BY_PILLAR[pillar]
@@ -637,12 +700,66 @@ Rules: first frame delivers a specific curiosity gap within 1 second, with no lo
     return concept
 
 
-def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
-    """Apply safe local fixes, then make one constrained AI repair for narration length only.
+def _infer_share_recipient(concept: dict[str, Any]) -> str:
+    """Choose one concrete, singular recipient from story context without an AI call."""
+    parts = [
+        concept.get("title", ""),
+        concept.get("theme", ""),
+        concept.get("share_reason", ""),
+        concept.get("human_detail", ""),
+        concept.get("character_contradiction", ""),
+        concept.get("cost_of_choice", ""),
+    ]
+    for beat in concept.get("beats", []):
+        if isinstance(beat, dict):
+            parts.extend((beat.get("voiceover", ""), beat.get("visual_direction", "")))
+    for character in concept.get("characters", []):
+        if isinstance(character, dict):
+            parts.extend((character.get("role", ""), character.get("personality", "")))
 
-    Overlay type is a presentation enum, so an unknown value can safely fall back to
-    the neutral `keyword` style. Spoken narration is semantic content and is never
-    truncated locally; out-of-range lines receive one targeted rewrite request.
+    raw_text = " ".join(str(value or "") for value in parts).casefold()
+    tokens = set(normalize_for_similarity(raw_text).split())
+    relationship_rules = (
+        ({"mother", "mom", "mum", "mummy", "ma"}, ("माँ", "मां", "माता", "अम्मा"), "अपनी माँ को"),
+        ({"father", "dad", "papa", "papi"}, ("पिता", "पापा", "बाबा", "बाप"), "अपने पिता को"),
+        ({"sister"}, ("बहन", "दीदी", "अप्पा"), "अपनी बहन को"),
+        ({"brother"}, ("भाई", "भैया"), "अपने भाई को"),
+        ({"wife", "husband", "spouse", "partner"}, ("पति", "पत्नी", "जीवनसाथी"), "अपने जीवनसाथी को"),
+        ({"daughter", "son", "child", "children"}, ("बेटी", "बेटा", "बच्चा", "बच्चे", "संतान"), "अपने बच्चे को"),
+        ({"teacher", "mentor"}, ("शिक्षक", "शिक्षिका", "गुरु", "अध्यापक"), "अपने शिक्षक को"),
+        ({"colleague", "coworker", "office"}, ("सहकर्मी", "दफ्तर", "ऑफिस"), "अपने सहकर्मी को"),
+        ({"friend"}, ("दोस्त", "मित्र", "यार"), "उस दोस्त को"),
+    )
+    for english_markers, hindi_markers, recipient in relationship_rules:
+        if tokens & english_markers or any(marker in raw_text for marker in hindi_markers):
+            return recipient
+    return "उस दोस्त को"
+
+
+def _share_recipient_is_generic(value: str) -> bool:
+    """Reject audience labels; a recipient must be one identifiable person or relationship."""
+    normalized = normalize_for_similarity(str(value or ""))
+    generic_phrases = {
+        "everyone", "anyone", "all people", "people", "sabko", "har kisi ko",
+        "kisi ko", "logon ko", "log", "sabhi log", "hindi audience",
+        "general audience", "social media audience", "audience", "viewers",
+        "general public", "public", "followers", "friends", "family",
+        "darshak", "darshakon", "janata", "users", "all viewers",
+    }
+    if normalized in generic_phrases:
+        return True
+    generic_tokens = {
+        "audience", "viewers", "followers", "public", "people", "users",
+        "friends", "family", "darshak", "darshakon", "janata",
+    }
+    return bool(set(normalized.split()) & generic_tokens)
+
+
+def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
+    """Repair mechanical draft defects locally and use AI only for incomplete visual shots.
+
+    Share-recipient selection is a deterministic editorial label, not a creative field
+    worth another provider call. Spoken narration is never shortened locally.
     """
     if not isinstance(concept, dict):
         raise ValueError("Generated Reel must be a JSON object.")
@@ -669,15 +786,122 @@ def repair_concept_structure(concept: dict[str, Any]) -> dict[str, Any]:
         else:
             beat["overlay_type"] = overlay_type
 
+    # Resolve the recipient locally: provider outages must not invalidate an otherwise
+    # sound story merely because the model returned "everyone" or "Hindi audience".
+    recipient = str(concept.get("share_recipient") or "").strip()
+    recipient_needs_repair = (
+        not 1 <= len(recipient.split()) <= 12
+        or len(recipient) > 100
+        or _share_recipient_is_generic(recipient)
+    )
+    if recipient_needs_repair:
+        concept["share_recipient"] = _infer_share_recipient(concept)
+        recipient = concept["share_recipient"]
+        log(f"Structural repair: selected specific share recipient locally ({recipient}).")
+    prompt_repairs = []
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        prompt = str(beat.get("video_prompt") or "").strip()
+        words = len(prompt.split())
+        if words < 45 or words > 180 or len(prompt) > 1600:
+            prompt_repairs.append({
+                "beat": i + 1,
+                "visual_direction": str(beat.get("visual_direction") or ""),
+                "visual_query": str(beat.get("visual_query") or ""),
+                "current_prompt": prompt,
+            })
+
+    if prompt_repairs:
+        context = {
+            "title": str(concept.get("title") or ""),
+            "theme": str(concept.get("theme") or ""),
+            "share_reason": str(concept.get("share_reason") or ""),
+            "human_detail": str(concept.get("human_detail") or ""),
+            "character_contradiction": str(concept.get("character_contradiction") or ""),
+            "characters": [
+                {
+                    "display_name": item.get("display_name", ""),
+                    "role": item.get("role", ""),
+                }
+                for item in concept.get("characters", [])
+                if isinstance(item, dict)
+            ],
+            "visual_bible": str(concept.get("visual_bible") or ""),
+            "shots_requiring_repair": prompt_repairs,
+        }
+        requested_fields = []
+        if prompt_repairs:
+            requested_fields.append("video_prompts")
+        repair_system = (
+            "You are a production continuity editor. Repair only the explicitly requested "
+            "structural fields. Preserve the story, characters, actions, emotional meaning "
+            "and visual continuity. Return one valid JSON object only."
+        )
+        repair_prompt = f"""Repair this BINA SHOR KE draft's structural defects.
+
+CONTEXT:
+{json.dumps(context, ensure_ascii=False)}
+
+REQUIRED OUTPUT FIELDS: {json.dumps(requested_fields)}
+Rules:
+- video_prompts must contain exactly one object for every supplied beat, preserving its beat number. Each replacement must be 65–100 concrete English words, describe only the supplied shot and its actual visible action, and retain the visual bible. Include framing, motivated light, tactile detail and coherent depth. Do not invent dialogue, characters, props or plot. No text, subtitles, logos or watermark.
+- Do not return or alter the Hindi script, voiceover, speaker identity, beat order, caption or any unrequested field.
+Return JSON only:
+{{"video_prompts":[{{"beat":3,"video_prompt":"65–100 concrete English words"}}]}}"""
+        repaired = text_json(repair_system, repair_prompt, temperature=0.2, timeout=90)
+        if prompt_repairs:
+            returned = repaired.get("video_prompts") if isinstance(repaired, dict) else None
+            if not isinstance(returned, list):
+                raise ValueError("Targeted structural repair returned no video_prompts list.")
+            expected = {int(item["beat"]) for item in prompt_repairs}
+            replacements: dict[int, str] = {}
+            for item in returned:
+                if not isinstance(item, dict):
+                    raise ValueError("Targeted structural repair returned a malformed video prompt.")
+                number = item.get("beat")
+                prompt = item.get("video_prompt")
+                if isinstance(number, bool) or not isinstance(number, int) or number not in expected or number in replacements:
+                    raise ValueError("Targeted structural repair returned an unexpected or duplicate beat.")
+                if not isinstance(prompt, str) or not 55 <= len(prompt.split()) <= 180 or len(prompt) > 1600:
+                    raise ValueError(f"Targeted structural repair left Beat {number} outside the 55–180 word prompt gate.")
+                lowered = prompt.lower()
+                if any(term in lowered for term in ("subtitle overlay", "watermark text", "show the words", "write a caption")):
+                    raise ValueError(f"Targeted structural repair introduced a forbidden text instruction in Beat {number}.")
+                replacements[number] = prompt.strip()
+            if set(replacements) != expected:
+                raise ValueError("Targeted structural repair omitted one or more requested video prompts.")
+            for number, prompt in replacements.items():
+                beats[number - 1]["video_prompt"] = prompt
+                log(f"Structural repair: Beat {number} visual prompt rewritten and revalidated.")
+
+    # A near-threshold prompt can be completed safely without another model request.
+    continuity_suffix = (
+        "Preserve the established character design, wardrobe, spatial continuity, and layered "
+        "foreground, middle ground, and background throughout."
+    )
+    for i, beat in enumerate(beats):
+        if not isinstance(beat, dict):
+            continue
+        prompt = str(beat.get("video_prompt") or "").strip()
+        words = len(prompt.split())
+        if 45 <= words < 55 and len(prompt) + len(continuity_suffix) + 1 <= 1600:
+            beat["video_prompt"] = prompt + " " + continuity_suffix
+            log(f"Structural repair: Beat {i+1} visual prompt completed with continuity detail ({words} -> {len(beat['video_prompt'].split())} words).")
+
     invalid_lines = []
     for i, beat in enumerate(beats):
         if not isinstance(beat, dict):
+            continue
+        # Structured dialogue is validated as one complete screenplay below.
+        # Never rewrite or shorten individual turns merely to fit a fixed-duration clip.
+        if isinstance(beat.get("speech_segments"), list):
             continue
         voiceover = beat.get("voiceover")
         if not isinstance(voiceover, str):
             continue  # Main validator reports missing/invalid required fields.
         word_count = len(voiceover.split())
-        if not 7 <= word_count <= 12:
+        if not 7 <= word_count <= 18:
             invalid_lines.append({
                 "beat": i + 1,
                 "voiceover": voiceover,
@@ -702,7 +926,7 @@ Character contradiction: {concept.get('character_contradiction', '')}
 Lines requiring repair (beat numbers are one-based):
 {json.dumps(invalid_lines, ensure_ascii=False)}
 
-For EVERY listed beat, return exactly one replacement line with 7–12 whitespace-separated Hindi words (aim for 8–10). Preserve the same event and emotional meaning. Do not add facts, change the plot, use a moral slogan, or combine two sentences. Do not rewrite any other beat.
+For EVERY listed beat, return exactly one replacement line with 7–18 whitespace-separated Hindi words. Preserve the same event and emotional meaning. Do not add facts, change the plot, use a moral slogan, or combine two sentences. Do not rewrite any other beat.
 Return exactly this JSON shape:
 {{"replacements":[{{"beat":1,"voiceover":"short natural Hindi line"}}]}}
 The replacements array must contain every requested beat exactly once and no other beat numbers."""
@@ -723,10 +947,10 @@ The replacements array must contain every requested beat exactly once and no oth
                 raise ValueError("Targeted narration repair returned an unexpected or duplicate beat.")
             line = line.strip()
             repaired_word_count = len(line.split())
-            if not 7 <= repaired_word_count <= 12:
+            if not 7 <= repaired_word_count <= 18:
                 raise ValueError(
                     f"Targeted narration repair left Beat {beat_number} at {repaired_word_count} words; "
-                    "the allowed range is 7–12."
+                    "the allowed range is 7–18."
                 )
             received[beat_number] = line
         if set(received) != expected:
@@ -740,23 +964,49 @@ The replacements array must contain every requested beat exactly once and no oth
 
 
 def validate_concept_shape(concept: dict[str, Any]) -> None:
-    required = ["title", "theme", "hook", "beats", "caption", "hashtags", "cover_text", "visual_bible", "share_reason", "narrative_engine", "emotional_aftertaste", "human_detail", "character_contradiction", "cost_of_choice"]
+    required = ["title", "theme", "hook", "beats", "story_type", "caption", "hashtags", "cover_text", "visual_bible", "share_reason", "share_recipient", "narrative_engine", "emotional_aftertaste", "human_detail", "character_contradiction", "cost_of_choice"]
     missing = [k for k in required if not concept.get(k)]
     if missing:
         raise ValueError("Generated concept misses required fields: " + ", ".join(missing))
+    recipient = str(concept.get("share_recipient") or "").strip()
+    if not 1 <= len(recipient.split()) <= 12 or len(recipient) > 100:
+        raise ValueError("Share recipient must identify one specific person or relationship (1–12 words), not a broad audience.")
+    recipient_normalized = normalize_for_similarity(recipient)
+    if _share_recipient_is_generic(recipient):
+        raise ValueError("Share recipient is too generic; name a concrete relationship or person.")
     if not isinstance(concept["beats"], list) or len(concept["beats"]) != 6:
-        raise ValueError("Reel must contain exactly 6 beats (one cinematic shot per beat; weekly GPU budget is 18 shots max).")
+        raise ValueError("Screenplay must contain exactly 6 narrative beats; editorial coverage is derived after measured voice timing.")
+    story_engine.validate_narrative_arc(concept["beats"])
     allowed_overlay_types = {"message", "note", "step", "contrast", "keyword"}
+    structured_script = all(isinstance(beat.get("speech_segments"), list) for beat in concept["beats"] if isinstance(beat, dict))
+    character_ids = {
+        str(item.get("character_id", "")) for item in concept.get("characters", [])
+        if isinstance(item, dict)
+    }
+    if structured_script and not character_ids:
+        raise ValueError("Structured screenplay requires at least one cast character.")
     for i, beat in enumerate(concept["beats"]):
-        beat.setdefault("voice_direction", "Natural, calm Hindi narration; restrained and conversational.")
-        for key in ("voiceover", "screen_text", "visual_query", "visual_direction", "video_prompt", "overlay_text", "overlay_type"):
+        beat.setdefault("voice_direction", "Natural Hindi; restrained and conversational.")
+        for key in ("narrative_role", "state_change", "causal_link", "screen_text", "visual_query", "visual_direction", "video_prompt", "overlay_text", "overlay_type"):
             if not isinstance(beat.get(key), str) or not beat[key].strip():
                 raise ValueError(f"Beat {i+1} misses {key}.")
+        if not structured_script and (not isinstance(beat.get("voiceover"), str) or not beat["voiceover"].strip()):
+            raise ValueError(f"Beat {i+1} misses voiceover.")
         if beat["overlay_type"] not in allowed_overlay_types:
             raise ValueError(f"Beat {i+1} has an unsupported overlay_type.")
-        spoken_words = len(beat["voiceover"].split())
-        if not 7 <= spoken_words <= 12:
-            raise ValueError(f"Beat {i+1} narration has {spoken_words} words; use 7–12 words so the spoken line fits a short cinematic shot.")
+        if structured_script:
+            if not isinstance(beat.get("speech_segments"), list):
+                raise ValueError(f"Beat {i+1} speech_segments must be a list.")
+            for line_index, segment in enumerate(beat["speech_segments"], start=1):
+                if not isinstance(segment, dict) or str(segment.get("speaker_id", "")) not in character_ids:
+                    raise ValueError(f"Beat {i+1} line {line_index} references an unknown speaker.")
+                if not isinstance(segment.get("text"), str) or not segment["text"].strip():
+                    raise ValueError(f"Beat {i+1} line {line_index} has no dialogue text.")
+            beat["voiceover"] = " ".join(segment["text"] for segment in beat["speech_segments"])
+        else:
+            spoken_words = len(beat["voiceover"].split())
+            if not 7 <= spoken_words <= 18:
+                raise ValueError(f"Beat {i+1} narration has {spoken_words} words; use 7–18 words; measured audio, not a fixed beat template, controls shot timing.")
         if len(beat["screen_text"]) > 70 or len(beat["overlay_text"]) > 42:
             raise ValueError(f"Beat {i+1} text exceeds mobile-safe limits.")
         prompt_words = len(beat["video_prompt"].split())
@@ -788,18 +1038,160 @@ def validate_concept_shape(concept: dict[str, Any]) -> None:
         concept["hashtags"].insert(0, "#BinaShorKe")
         concept["hashtags"] = concept["hashtags"][:5]
     concept["hashtags"] = [str(t).strip().replace(" ", "") for t in concept["hashtags"]]
-    total_words = len(" ".join(b.get("voiceover", "") for b in concept["beats"]).split())
-    if not 45 <= total_words <= 72:
-        raise ValueError(f"Voice-over has {total_words} words; the production range is 45–72 natural spoken words (target 48–60).")
+    story_engine.validate_screenplay_length(concept)
     hook_word_count = len(str(concept["hook"]).split())
     if len(concept["hook"]) > 70 or not 3 <= hook_word_count <= 10:
         raise ValueError("Hook must be a clear 3–10-word first-screen line and under 70 characters.")
 
 
+
+def generate_voice_aware_storyboard(concept: dict[str, Any]) -> dict[str, Any]:
+    """Author final shot prompts only after speaker WAVs and exact durations are locked."""
+    if concept.get("voice_first_plan", {}).get("status") != "voice_measured_before_video":
+        raise RuntimeError("Voice-aware storyboard requires measured TTS audio before any video prompt is finalized.")
+    characters = concept.get("characters", [])
+    cast = {
+        str(item["character_id"]): {
+            "display_name": item.get("display_name", item["character_id"]),
+            "role": item.get("role", "supporting"),
+            "appearance": item.get("appearance", ""),
+            "personality": item.get("personality", ""),
+            "gender_presentation": item.get("gender_presentation", "unspecified"),
+            "age_band": item.get("age_band", "adult"),
+            "visual_age_description": item.get("visual_age_description") or voice_first.visual_age_description(item.get("age_band", "adult")),
+            "voice_profile_id": item.get("voice_profile_id", ""),
+            "voice_style": item.get("voice_direction", ""),
+        }
+        for item in characters
+    }
+    brief = []
+    for index, beat in enumerate(concept.get("beats", []), start=1):
+        timing = beat.get("voice_timing")
+        if not isinstance(timing, dict) or timing.get("timing_source") != "measured_tts_wav_before_gpu":
+            raise RuntimeError(f"Beat {index} is missing its measured voice timeline; refusing to guess scene duration.")
+        turns = []
+        placed_by_id = {str(item["segment_id"]): item for item in timing.get("segments", [])}
+        for segment in beat.get("speech_segments", []):
+            speaker = cast.get(str(segment.get("speaker_id")), {})
+            placed = placed_by_id.get(str(segment.get("segment_id")), {})
+            turns.append({
+                "speaker_id": segment.get("speaker_id"),
+                "speaker_name": speaker.get("display_name"),
+                "appearance": speaker.get("appearance"),
+                "visual_age_description": speaker.get("visual_age_description"),
+                "personality": speaker.get("personality"),
+                "voice_profile_id": speaker.get("voice_profile_id"),
+                "spoken_dialogue": segment.get("text"),
+                "emotion": segment.get("emotion"),
+                "audio_start_seconds": placed.get("start_seconds"),
+                "audio_end_seconds": placed.get("end_seconds"),
+                "actual_audio_duration_seconds": segment.get("duration_seconds"),
+            })
+        brief.append({
+            "beat_index": index,
+            "narrative_role": beat.get("narrative_role"),
+            "state_change": beat.get("state_change"),
+            "causal_link": beat.get("causal_link"),
+            "target_duration_seconds": timing["target_duration_seconds"],
+            "target_frames": timing["target_frames"],
+            "fps": timing["fps"],
+            "visual_direction": beat.get("visual_direction", ""),
+            "visual_query": beat.get("visual_query", ""),
+            "visual_bible": concept.get("visual_bible", ""),
+            "spoken_turns_in_exact_audio_order": turns,
+            "initial_visual_prompt_for_reference_only": beat.get("video_prompt", ""),
+        })
+
+    system = (
+        "You are the animation director and shot designer for a premium Hindi 2.5D motion-comic studio. "
+        "The screenplay and all character voices are already final and measured. You are writing the "
+        "FINAL video-generation shot prompts AFTER audio lock. Never rewrite dialogue, change the cast, "
+        "add a character, add a prop, invent an event, or change the established story outcome. "
+        "Match each shot's exact duration and its speaker turn timestamps. For dialogue, make the correct "
+        "speaker visibly speak during their own audio interval; show natural mouth/jaw motion, eye focus, "
+        "micro-expressions and restrained gestures. For the listener, use a believable reaction without "
+        "moving the mouth as if speaking. If there are multiple turns, plan a clear camera cut or deliberate "
+        "shot composition that follows the turn order; the final editor will preserve the full audio timeline. "
+        "Use each beat's narrative_role to control its visual purpose and depict its state_change rather than repeating the previous image. Respect causal_link: do not show a later consequence before its cause. Use the visual bible, canonical visual_age_description and character appearance verbatim for continuity. Keep the same illustrated character design, outfit, palette and environment across every source beat. "
+        "The visible age/gender presentation of every speaker must match that speaker's locked voice profile; "
+        "never age a character up or down to fit a voice. One clear physical action per "
+        "shot, plausible anatomy and physics, purposeful camera coverage, illustrated surface treatment, layered foreground/midground/background separation and readable "
+        "silhouette. Never put any readable text, subtitles, logo or watermark inside the generated video. "
+        "Do not shorten any line or force every beat to the same length. Return valid JSON only."
+    )
+    user_prompt = f"""Create exactly six source-scene prompts from this voice-locked Hindi screenplay. These are narrative-beat source clips; final editorial cuts are assembled from measured timing.
+
+TITLE: {concept.get("title", "")}
+STYLE / VISUAL BIBLE: {concept.get("visual_bible", "")}
+CAST (immutable): {json.dumps(cast, ensure_ascii=False)}
+MEASURED AUDIO AND BEAT STORYBOARDS:
+{json.dumps(brief, ensure_ascii=False)}
+
+Return exactly:
+{{"shots":[
+  {{"beat_index":1,"video_prompt":"100–160 concrete English words. Describe the exact characters, shot size, camera placement/movement, physical action, speaker/listener facial acting and mouth motion, lighting, environment, material detail and continuity. The shot is exactly the supplied target duration."}}
+]}}
+Rules:
+- Exactly one entry for every beat_index 1 through 6, no missing or duplicate indices.
+- The video_prompt is final and must be 55–180 whitespace-separated words, <=1600 characters. Use a mature semi-painterly Indian graphic-novel motion-comic style, not photoreal live-action or generic glossy 3D.
+- The measured target_duration_seconds and target_frames are authoritative; do not change them.
+- If a beat is silent, do not invent dialogue or fake speech mouth motion.
+- Keep every character's visible age exactly aligned with the canonical visual_age_description and age_band in CAST; never de-age or age-up a speaker.
+- Adult feminine speakers must look adult and use the adult profile; reserve older/elder appearance and Gacrux for older_adult/elder characters only.
+- Do not convert this story to a different genre or add characters merely to improve a shot.
+- Do not return or modify any Hindi script, dialogue, captions or voice metadata.
+Return JSON only."""
+    response = text_json(system, user_prompt, temperature=0.45, timeout=150)
+    shots = response.get("shots")
+    if not isinstance(shots, list) or len(shots) != 6:
+        raise ValueError("Voice-aware storyboard must return exactly six shot prompts.")
+    by_index: dict[int, str] = {}
+    for shot in shots:
+        if not isinstance(shot, dict):
+            raise ValueError("Each voice-aware storyboard shot must be an object.")
+        try:
+            index = int(shot.get("beat_index"))
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Every storyboard shot needs an integer beat_index.") from exc
+        if index in by_index or index not in range(1, 7):
+            raise ValueError(f"Duplicate or out-of-range storyboard beat_index: {index}")
+        prompt = str(shot.get("video_prompt") or "").strip()
+        word_count = len(prompt.split())
+        if not 55 <= word_count <= 180 or len(prompt) > 1600:
+            raise ValueError(f"Final shot {index} has {word_count} words / {len(prompt)} characters; expected 55–180 words and <=1600 characters.")
+        lowered = prompt.lower()
+        for forbidden in ("subtitle overlay", "watermark text", "show the words", "write a caption"):
+            if forbidden in lowered:
+                raise ValueError(f"Final shot {index} risks generated text artifacts: {forbidden}.")
+        by_index[index] = prompt
+    if set(by_index) != set(range(1, 7)):
+        raise ValueError("Final storyboard is missing one or more beat indices.")
+    for index, beat in enumerate(concept["beats"], start=1):
+        beat["video_prompt"] = by_index[index]
+    concept["voice_aware_storyboard"] = {
+        "status": "generated_after_voice_lock",
+        "timing_basis": "measured_tts_wav_before_gpu",
+        "source_scene_count": 6,
+        "dialogue_rewritten": False,
+        "target_frames_changed": False,
+    }
+    beat_durations = [float(beat["voice_timing"]["target_duration_seconds"]) for beat in concept["beats"]]
+    duration_lock = story_engine.validate_measured_duration(sum(beat_durations), concept.get("story_type", "emotional"))
+    shot_plan = story_engine.build_editorial_shot_plan(beat_durations, concept.get("story_type", "emotional"))
+    concept["duration_lock"] = duration_lock
+    concept["editorial_shot_plan"] = shot_plan
+    concept["visual_pipeline"] = shot_plan["visual_pipeline"]
+    concept["visual_style_profile"] = shot_plan["visual_style_profile"]
+    for beat_index, beat in enumerate(concept["beats"], start=1):
+        beat["editorial_shots"] = story_engine.shots_for_beat(shot_plan, beat_index)
+    log(f"Locked {duration_lock['measured_seconds']:.2f}s {duration_lock['story_type']} story; {shot_plan['editorial_shot_count']} editorial shots from {shot_plan['source_beat_count']} source-video generations.")
+    return concept
+
+
 def judge_concept(concept: dict[str, Any]) -> dict[str, Any]:
     system = (
         "You are an independent Hindi short-film story editor, dialogue doctor, "
-        "audience psychologist and photoreal AI-shot supervisor. Evaluate the story "
+        "audience psychologist and illustrated motion-comic shot supervisor. Evaluate the story "
         "as a human experience before evaluating production craft. Return JSON only. "
         "Reject generic motivation, forced sentiment, emotional manipulation, "
         "recycled twists, implausible behaviour and AI-artifact-prone prompts."
@@ -807,23 +1199,23 @@ def judge_concept(concept: dict[str, Any]) -> dict[str, Any]:
     prompt = f"""Evaluate this BINA SHOR KE Reel concept as a strict second-opinion editor:
 {json.dumps(concept, ensure_ascii=False)}
 
-Score every dimension from 1 to 5. In addition to craft, explicitly test whether a real person could recognise themselves in the situation, whether the emotion is earned by specific behaviour rather than stated, and whether the ending leaves a memorable human aftertaste without preaching.
-Required scores: hook_clarity, specificity, human_specificity, emotional_resonance, story_progression, payoff, readability, originality, creative_contribution_beyond_stock, visual_match, photoreal_prompt_quality, motion_feasibility, continuity_coherence, voiceover_rhythm, caption_quality, share_value, platform_safety.
+Score every dimension from 1 to 5. Test whether a real person recognises the situation, whether emotion is earned through specific behaviour, and whether the ending leaves a memorable human aftertaste without preaching. Inspect share_recipient: it must name a concrete person/relationship and match the story's real emotional or practical reason for sending.
+Required scores: hook_clarity, specificity, human_specificity, emotional_resonance, story_progression, payoff, readability, originality, creative_contribution_beyond_stock, visual_match, illustrated_visual_quality, motion_feasibility, continuity_coherence, voiceover_rhythm, caption_quality, share_value, platform_safety.
 
-Human-specificity test: at least one small, observable, non-generic detail should make the scene feel lived-in. Emotional-resonance test: the audience should infer a feeling from a choice, pause, object or consequence; do not reward tears, tragedy or melodrama by themselves. Dialogue test: read every Hindi line aloud mentally; flag essay-like syntax, unnatural translation, over-poetic language, repeated sentence rhythm, generic moral endings and lines that explain what the scene already shows. Depth test: the ending should change the meaning of an earlier detail or reveal a cost/choice, not merely announce a lesson.
+Human-specificity: at least one small, observable, non-generic detail should make the scene feel lived-in. Emotional resonance must come from a choice, pause, object or consequence; do not reward tragedy or melodrama alone. Dialogue must sound natural when read aloud, not like an essay, translation or generic moral. The ending should change the meaning of an earlier detail or reveal a cost/choice.
 
-Visual test: every prompt must describe one visible action, physically plausible movement, coherent camera/lens, motivated light, tactile material details and continuity. Penalize impossible physics, unnecessary hand/face close-ups, inconsistent people/clothes, generated text, vague “cinematic 8K” filler and repeated shots.
+Visual test: every prompt must describe a mature illustrated graphic-novel shot, clear action, physically plausible motion, foreground/midground/background depth cues, coherent camera framing, motivated light, tactile painterly detail and continuity. Penalize impossible physics, inconsistent clothing/characters, generated text, vague "cinematic 8K" filler and repeated shots.
 
 Return JSON exactly in this shape:
-{{"scores":{{"hook_clarity":1,"specificity":1,"human_specificity":1,"emotional_resonance":1,"story_progression":1,"payoff":1,"readability":1,"originality":1,"creative_contribution_beyond_stock":1,"visual_match":1,"photoreal_prompt_quality":1,"motion_feasibility":1,"continuity_coherence":1,"voiceover_rhythm":1,"caption_quality":1,"share_value":1,"platform_safety":1}},"approved":true,"revision_notes":["..."],"main_risk":"...","human_truth":"one sentence describing the recognisable human truth, or state what is missing"}}
+{{"scores":{{"hook_clarity":1,"specificity":1,"human_specificity":1,"emotional_resonance":1,"story_progression":1,"payoff":1,"readability":1,"originality":1,"creative_contribution_beyond_stock":1,"visual_match":1,"illustrated_visual_quality":1,"motion_feasibility":1,"continuity_coherence":1,"voiceover_rhythm":1,"caption_quality":1,"share_value":1,"platform_safety":1}},"approved":true,"revision_notes":["..."],"main_risk":"...","human_truth":"one sentence describing the recognisable human truth, or what is missing"}}
 
-Approve only if average >=4.2, human_specificity >=4, emotional_resonance >=4, originality >=4, creative_contribution_beyond_stock >=4, photoreal_prompt_quality >=4, motion_feasibility >=4, continuity_coherence >=4, voiceover_rhythm >=4, share_value >=4 and platform_safety >=4. A high emotional score must be earned by the writing, not dramatic subject matter. This is an editorial gate, not a Meta eligibility or reach verdict."""
+Approve only if average >=4.2 and every critical dimension is >=4: hook_clarity, story_progression, payoff, human_specificity, emotional_resonance, originality, creative_contribution_beyond_stock, illustrated_visual_quality, motion_feasibility, continuity_coherence, voiceover_rhythm, share_value and platform_safety. A high emotional score must be earned by writing, not dramatic subject matter. This is an editorial gate, not a Meta eligibility or reach verdict."""
     return independent_review_json(system, prompt, temperature=0.2)
 
 
 def revise_concept(concept: dict[str, Any], review: dict[str, Any], history: dict[str, Any], slot: datetime) -> dict[str, Any]:
     notes = review.get("revision_notes", []) if isinstance(review, dict) else []
-    prompt = f"""Revise this Reel using the specific editorial critique. Do not merely paraphrase it. Preserve the useful core only if original enough; replace the angle completely if needed. Return the full production JSON schema including share_reason, visual_bible, narrative_engine, emotional_aftertaste, human_detail, character_contradiction, cost_of_choice and every beat's voice_direction, video_prompt, overlay_type and overlay_text. Choose exactly one overlay_type from message, note, step, contrast, keyword. Every overlay adds context and must not repeat narration. Use exactly 6 beats; keep every voiceover line to 7–12 whitespace-separated Hindi words and the total narration to 45–72 words. Each video_prompt must be one physically plausible photoreal vertical shot with a single action, practical light, camera/lens language, natural imperfect texture, no generated text/logo/watermark, and continuity with visual_bible.
+    prompt = f"""Revise this Reel using the specific editorial critique. Do not merely paraphrase it. Preserve the useful core only if original enough; replace the angle completely if needed. Return the full production JSON schema including story_type, share_reason, share_recipient, visual_bible, narrative_engine, emotional_aftertaste, human_detail, character_contradiction, cost_of_choice and every beat's narrative_role, state_change, causal_link, voice_direction, video_prompt, overlay_type and overlay_text. Choose exactly one overlay_type from message, note, step, contrast, keyword. Every overlay adds context and must not repeat narration. Use exactly 6 beats in hook, context, conflict, escalation, turn, payoff order; keep every voiceover line to story_type-specific spoken-word ranges. Each video_prompt must be one physically plausible semi-painterly 2.5D illustrated vertical shot with a single action, practical light, camera/lens language, natural imperfect texture, no generated text/logo/watermark, and continuity with visual_bible.
 CURRENT DRAFT: {json.dumps(concept, ensure_ascii=False)}
 REVIEW NOTES: {json.dumps(notes, ensure_ascii=False)}
 PRIMARY RISK: {str(review.get('main_risk',''))[:500]}
@@ -831,6 +1223,7 @@ RECENT TITLES/THEMES TO AVOID: {json.dumps([{ "title": x.get("title", ""), "them
 Return one valid JSON object only."""
     revised = text_json("You are a senior editor rewriting original Hindi short-form content. Apply the critique directly. Output JSON only.", prompt, temperature=0.55)
     revised["pillar"] = concept["pillar"]
+    revised["story_type"] = concept["story_type"]
     revised["series_name"] = SERIES_BY_PILLAR[concept["pillar"]]
     revised["planned_publish_at"] = slot.isoformat()
     revised["planned_publish_label"] = slot.strftime("%a %d %b, %I:%M %p IST")
@@ -847,9 +1240,10 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
     """Draft, independently critique, apply targeted revisions once, then fail closed."""
     concept = None
     draft_failures: list[str] = []
-    # Two bounded candidate attempts handle malformed/duplicate model output without looping forever.
+    # Three bounded candidate attempts absorb occasional malformed beat-count/cast metadata
+    # without unbounded provider calls. All providers remain on the configured free-tier allowlist.
     previous_feedback = ""
-    for candidate_attempt in range(2):
+    for candidate_attempt in range(3):
         try:
             candidate = generate_concept(
                 history, pillar, slot, index + candidate_attempt * 7,
@@ -864,12 +1258,13 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
         except Exception as exc:
             message = str(exc)
             draft_failures.append(message[:400])
-            log(f"Draft candidate {candidate_attempt + 1}/2 rejected: {message[:400]}")
+            log(f"Draft candidate {candidate_attempt + 1}/3 rejected: {message[:400]}")
             previous_feedback = message[:700]
             lowered = message.lower()
             # Once all configured free providers have failed with quota/transient errors,
             # a second candidate cannot help. Stop here instead of making a redundant call.
             provider_unavailable = any(marker in lowered for marker in (
+                "no configured free text providers are currently available",
                 "http 429", "http 500", "http 502", "http 503", "http 504",
                 "quota exceeded", "rate limit", "temporarily unavailable",
                 "timed out", "timeout", "connection error",
@@ -886,7 +1281,7 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
     def verdict(result: dict[str, Any]) -> tuple[bool, dict[str, Any], float, float, float, float, float]:
         expected_scores = (
             "hook_clarity", "specificity", "human_specificity", "emotional_resonance", "story_progression", "payoff", "readability",
-            "originality", "creative_contribution_beyond_stock", "visual_match", "photoreal_prompt_quality",
+            "originality", "creative_contribution_beyond_stock", "visual_match", "illustrated_visual_quality",
             "motion_feasibility", "continuity_coherence", "voiceover_rhythm", "caption_quality", "share_value", "platform_safety",
         )
         scores = result.get("scores", {})
@@ -899,20 +1294,22 @@ def acquire_approved_concept(history: dict[str, Any], pillar: str, slot: datetim
         orig = float(scores["originality"])
         creative = float(scores["creative_contribution_beyond_stock"])
         safety = float(scores["platform_safety"])
-        photo = float(scores["photoreal_prompt_quality"])
+        visual_quality = float(scores["illustrated_visual_quality"])
         motion = float(scores["motion_feasibility"])
         share = float(scores["share_value"])
         human = float(scores["human_specificity"])
         emotion = float(scores["emotional_resonance"])
         continuity = float(scores["continuity_coherence"])
         rhythm = float(scores["voiceover_rhythm"])
-        approved = bool(result.get("approved")) and avg >= 4.2 and orig >= 4 and creative >= 4 and photo >= 4 and motion >= 4 and continuity >= 4 and rhythm >= 4 and share >= 4 and human >= 4 and emotion >= 4 and safety >= 4
+        progression = float(scores["story_progression"])
+        payoff = float(scores["payoff"])
+        approved = bool(result.get("approved")) and avg >= 4.2 and progression >= 4 and payoff >= 4 and orig >= 4 and creative >= 4 and visual_quality >= 4 and motion >= 4 and continuity >= 4 and rhythm >= 4 and share >= 4 and human >= 4 and emotion >= 4 and safety >= 4
         return approved, scores, avg, orig, creative, safety, share
 
     approved, scores, avg, orig, creative, safety, share = verdict(review)
     passes = 1
     if not approved:
-        log(f"Editorial gate requested revision (avg={avg:.2f}, human={scores.get('human_specificity', 0)}, emotion={scores.get('emotional_resonance', 0)}, originality={orig:.1f}, share_value={share:.1f}, safety={safety:.1f}).")
+        log(f"Editorial gate requested revision (avg={avg:.2f}, progression={scores.get('story_progression', 0)}, payoff={scores.get('payoff', 0)}, human={scores.get('human_specificity', 0)}, emotion={scores.get('emotional_resonance', 0)}, originality={orig:.1f}, share_value={share:.1f}, safety={safety:.1f}).")
         concept = revise_concept(concept, review, history, slot)
         review = judge_concept(concept)
         approved, scores, avg, orig, creative, safety, share = verdict(review)
@@ -1023,10 +1420,18 @@ def download_file(url: str, destination: Path, max_bytes: int = 150 * 1024 * 102
         raise RuntimeError("Downloaded video is unexpectedly small or invalid.")
 
 
-def tts_wav(text: str, destination: Path, voice_direction: str | None = None) -> None:
-    """Generate Hindi speech using the free-tier TTS model and save valid 24 kHz mono WAV."""
+def tts_wav(
+    text: str,
+    destination: Path,
+    voice_direction: str | None = None,
+    voice_name: str | None = None,
+) -> None:
+    """Generate one speaker's Hindi turn using free-tier TTS and save 24 kHz mono WAV."""
     url = "https://generativelanguage.googleapis.com/v1beta/interactions"
     direction = (voice_direction or "").strip()
+    selected_voice = str(voice_name or TTS_VOICE).strip()
+    if not selected_voice:
+        raise ValueError("A non-empty Gemini TTS voice name is required.")
     speech_style = (
         "Natural Hindi; warm, grounded, restrained, clear diction. "
         "Line direction: " + direction[:120]
@@ -1044,79 +1449,121 @@ def tts_wav(text: str, destination: Path, voice_direction: str | None = None) ->
             }],
         }],
         "response_format": {"type": "audio", "mime_type": "audio/l16", "sample_rate": 24000},
-        "generation_config": {"speech_config": [{"voice": TTS_VOICE}]},
+        "generation_config": {"speech_config": [{"voice": selected_voice}]},
     }
     global _LAST_TTS_REQUEST_AT
     last_error = None
+    retryable_http_statuses = {408, 429, 500, 502, 503, 504}
     for attempt in range(3):
+        elapsed = time.monotonic() - _LAST_TTS_REQUEST_AT
+        if _LAST_TTS_REQUEST_AT and elapsed < TTS_MIN_INTERVAL_SECONDS:
+            time.sleep(TTS_MIN_INTERVAL_SECONDS - elapsed)
+        _LAST_TTS_REQUEST_AT = time.monotonic()
+
         try:
-            # Pace calls even when a 3-Reel batch contains 15–18 short narration beats.
-            # Never upgrade to a paid endpoint if free limits are reached.
-            elapsed = time.monotonic() - _LAST_TTS_REQUEST_AT
-            if _LAST_TTS_REQUEST_AT and elapsed < TTS_MIN_INTERVAL_SECONDS:
-                time.sleep(TTS_MIN_INTERVAL_SECONDS - elapsed)
-            _LAST_TTS_REQUEST_AT = time.monotonic()
             response = requests.post(
                 url,
                 headers={"x-goog-api-key": GEMINI_API_KEY, "Content-Type": "application/json"},
                 json=payload,
                 timeout=180,
             )
-            if response.status_code in (429, 500, 502, 503, 504):
-                last_error = f"Gemini TTS HTTP {response.status_code}: {response.text[:300]}"
-                time.sleep((attempt + 1) * (20 if response.status_code == 429 else 8))
-                continue
-            response.raise_for_status()
-            body = response.json()
-            audio_data = (body.get("output_audio") or {}).get("data")
-            if not audio_data:
-                for step in body.get("steps", []):
-                    if step.get("type") == "model_output":
-                        for content in step.get("content", []):
-                            if content.get("type") == "audio" and content.get("data"):
-                                audio_data = content["data"]
-            if not audio_data:
-                raise ValueError("No audio block found in Gemini TTS response.")
-            pcm = base64.b64decode(audio_data, validate=True)
-            if len(pcm) < 4000 or len(pcm) % 2:
-                raise ValueError("Gemini TTS returned an unexpectedly small or misaligned PCM payload.")
-            destination.parent.mkdir(parents=True, exist_ok=True)
-            with wave.open(str(destination), "wb") as wav_file:
-                wav_file.setnchannels(1)
-                wav_file.setsampwidth(2)
-                wav_file.setframerate(24000)
-                wav_file.writeframes(pcm)
-            with wave.open(str(destination), "rb") as check:
-                if check.getnchannels() != 1 or check.getsampwidth() != 2 or check.getframerate() != 24000:
-                    raise ValueError("Rendered voice WAV failed sample-format verification.")
-            return
-        except Exception as exc:
-            last_error = str(exc)
+        except (requests.Timeout, requests.ConnectionError) as exc:
+            last_error = f"{type(exc).__name__}: {exc}"
             if attempt < 2:
                 time.sleep((attempt + 1) * 5)
-    raise RuntimeError(f"Gemini TTS failed after retries: {last_error}. No paid model fallback was attempted.")
+                continue
+            break
+
+        if response.status_code in retryable_http_statuses:
+            last_error = f"Gemini TTS HTTP {response.status_code}: {response.text[:300]}"
+            if attempt < 2:
+                # Back off only for explicit transient provider statuses. Never retry an
+                # authentication, request, safety-policy, response-format or local file error.
+                time.sleep((attempt + 1) * (20 if response.status_code == 429 else 8))
+                continue
+            break
+        if response.status_code >= 400:
+            raise RuntimeError(
+                f"Gemini TTS non-retryable HTTP {response.status_code}: {response.text[:300]}. "
+                "The request was not retried."
+            )
+
+        body = response.json()
+        audio_data = (body.get("output_audio") or {}).get("data")
+        if not audio_data:
+            for step in body.get("steps", []):
+                if step.get("type") == "model_output":
+                    for content in step.get("content", []):
+                        if content.get("type") == "audio" and content.get("data"):
+                            audio_data = content["data"]
+        if not audio_data:
+            raise ValueError("No audio block found in Gemini TTS response; request was not retried.")
+        pcm = base64.b64decode(audio_data, validate=True)
+        if len(pcm) < 4000 or len(pcm) % 2:
+            raise ValueError("Gemini TTS returned an unexpectedly small or misaligned PCM payload; request was not retried.")
+
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with wave.open(str(destination), "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(24000)
+            wav_file.writeframes(pcm)
+        with wave.open(str(destination), "rb") as check:
+            if check.getnchannels() != 1 or check.getsampwidth() != 2 or check.getframerate() != 24000:
+                raise ValueError("Rendered voice WAV failed sample-format verification; request was not retried.")
+        return
+
+    raise RuntimeError(
+        f"Gemini TTS failed after bounded transient retries: {last_error}. "
+        "No paid model fallback was attempted."
+    )
+
+
+def _tts_wav_validation_error(path: Path) -> str | None:
+    """Return a precise cache-format/duration defect without hiding WAV measurements."""
+    try:
+        with wave.open(str(path), "rb") as wav_file:
+            channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            sample_rate = wav_file.getframerate()
+            frames = wav_file.getnframes()
+            if channels != 1:
+                return f"expected mono audio, received {channels} channel(s)"
+            if sample_width != 2:
+                return f"expected 16-bit PCM, received {sample_width * 8}-bit samples"
+            if sample_rate != 24000:
+                return f"expected 24000 Hz, received {sample_rate} Hz"
+            if frames <= 0:
+                return "WAV contains zero PCM frames"
+            duration = frames / float(sample_rate)
+            if duration < TTS_MIN_DURATION_SECONDS or duration > TTS_MAX_DURATION_SECONDS:
+                return (
+                    f"measured duration {duration:.3f}s is outside the "
+                    f"{TTS_MIN_DURATION_SECONDS:.2f}–{TTS_MAX_DURATION_SECONDS:.2f}s "
+                    "TTS transport/cache range"
+                )
+            return None
+    except (OSError, EOFError, wave.Error) as exc:
+        return f"unreadable WAV container ({type(exc).__name__}): {exc}"
 
 
 def _valid_tts_wav(path: Path) -> bool:
-    try:
-        with wave.open(str(path), "rb") as wav_file:
-            return (
-                wav_file.getnchannels() == 1
-                and wav_file.getsampwidth() == 2
-                and wav_file.getframerate() == 24000
-                and 24000 <= wav_file.getnframes() <= 24000 * 8
-            )
-    except (OSError, EOFError, wave.Error):
-        return False
+    return _tts_wav_validation_error(path) is None
 
 
-def ensure_tts_wav(text: str, destination: Path, voice_direction: str | None = None) -> str:
+def ensure_tts_wav(
+    text: str,
+    destination: Path,
+    voice_direction: str | None = None,
+    voice_name: str | None = None,
+) -> str:
     """Reuse only a validated WAV whose SHA-256 sidecar matches this exact narration text.
 
     The repository-wide cache is restored by GitHub Actions so transient finalization
     retries do not regenerate identical voice lines and burn additional free-tier quota.
     """
-    cache_material = text + "\n[voice_direction=" + (voice_direction or "") + "]"
+    selected_voice = str(voice_name or TTS_VOICE).strip()
+    cache_material = text + "\n[voice_direction=" + (voice_direction or "") + "]\n[gemini_voice=" + selected_voice + "]"
     digest = hashlib.sha256(cache_material.encode("utf-8")).hexdigest()
     sidecar_suffix = ".wav.sha256"
     cached_audio = TTS_CACHE_DIR / f"{digest}.wav"
@@ -1147,9 +1594,12 @@ def ensure_tts_wav(text: str, destination: Path, voice_direction: str | None = N
 
     destination.unlink(missing_ok=True)
     local_sidecar.unlink(missing_ok=True)
-    tts_wav(text, destination, voice_direction=voice_direction)
-    if not _valid_tts_wav(destination):
-        raise RuntimeError("TTS result failed cache-format/duration validation.")
+    tts_wav(text, destination, voice_direction=voice_direction, voice_name=selected_voice)
+    validation_error = _tts_wav_validation_error(destination)
+    if validation_error:
+        raise RuntimeError(
+            "TTS result failed cache-format/duration validation: " + validation_error
+        )
 
     TTS_CACHE_DIR.mkdir(parents=True, exist_ok=True)
     # Write a temporary file then atomically replace to avoid partially cached audio.
@@ -1166,6 +1616,21 @@ def ensure_tts_wav(text: str, destination: Path, voice_direction: str | None = N
     return "generated"
 
 
+def _scene_audio_filter(audio_tempo: float, audio_pad_duration: float, *, has_speech: bool) -> str:
+    """Build a finite-safe scene audio chain; loudnorm is undefined for all-silence audio."""
+    if not math.isfinite(audio_tempo) or audio_tempo <= 0:
+        raise ValueError("Scene audio tempo must be finite and positive.")
+    if not math.isfinite(audio_pad_duration) or audio_pad_duration < 0:
+        raise ValueError("Scene audio padding must be finite and non-negative.")
+    filters: list[str] = []
+    if audio_tempo > 1.000001:
+        filters.append(f"atempo={audio_tempo:.6f}")
+    filters.append(f"apad=pad_dur={audio_pad_duration:.3f}")
+    # FFmpeg loudnorm on digital silence can produce NaN/Inf and break AAC encoding.
+    filters.append("loudnorm=I=-16:TP=-1.5:LRA=11" if has_speech else "anull")
+    return ",".join(filters)
+
+
 def run_cmd(args: list[str], timeout: int = 240) -> None:
     proc = subprocess.run(args, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
     if proc.returncode != 0:
@@ -1174,23 +1639,427 @@ def run_cmd(args: list[str], timeout: int = 240) -> None:
 
 
 
-def gemini_json_with_images(system: str, user_prompt: str, image_paths: list[Path], temperature: float = 0.2) -> dict[str, Any]:
-    """Send a few rendered frames to Gemini for a soft visual QA pass."""
+def _valid_visual_scorecard(result: Any) -> bool:
+    """A provider is eligible only when it returns every required score and a real boolean gate."""
+    if not isinstance(result, dict) or not isinstance(result.get("scores"), dict):
+        return False
+    if not isinstance(result.get("critical_issue"), bool):
+        return False
+    for key in VISION_REQUIRED_SCORE_KEYS:
+        value = result["scores"].get(key)
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(float(value))
+            or not 1.0 <= float(value) <= 5.0
+        ):
+            return False
+    return True
+
+
+def _visual_contact_sheet(image_paths: list[Path]) -> Path | None:
+    """Build a small whole-Reel overview so per-provider image batches retain continuity context."""
+    if len(image_paths) < 3:
+        return None
+    try:
+        from PIL import Image, ImageOps
+
+        cell_width, cell_height, columns = 180, 320, 3
+        rows = math.ceil(len(image_paths) / columns)
+        sheet = Image.new("RGB", (columns * cell_width, rows * cell_height), (24, 24, 24))
+        for index, image_path in enumerate(image_paths):
+            with Image.open(image_path) as source:
+                thumb = ImageOps.contain(source.convert("RGB"), (cell_width, cell_height))
+            x = (index % columns) * cell_width + (cell_width - thumb.width) // 2
+            y = (index // columns) * cell_height + (cell_height - thumb.height) // 2
+            sheet.paste(thumb, (x, y))
+        destination = image_paths[0].parent / "qa_contact_sheet.jpg"
+        sheet.save(destination, format="JPEG", quality=82, optimize=True)
+        return destination
+    except Exception as exc:
+        # The full-resolution frames remain authoritative; overview is an aid, never a gate.
+        log(f"Could not build optional visual QA contact sheet: {str(exc)[:180]}")
+        return None
+
+
+def _gemini_visual_qa_request(
+    system: str,
+    user_prompt: str,
+    image_paths: list[Path],
+    temperature: float = 0.2,
+    model: str | None = None,
+) -> dict[str, Any]:
+    """Gemini multimodal request with a bounded transient retry; caller handles provider fallback."""
+    if not GEMINI_API_KEY:
+        raise RuntimeError("Gemini visual QA is not configured (GEMINI_API_KEY is absent).")
+    selected_model = model or GEMINI_TEXT_MODEL
     parts: list[dict[str, Any]] = [{"text": user_prompt}]
     for image_path in image_paths:
         raw = image_path.read_bytes()
         parts.append({"inlineData": {"mimeType": "image/jpeg", "data": base64.b64encode(raw).decode("ascii")}})
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_TEXT_MODEL}:generateContent"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{selected_model}:generateContent"
     payload = {
         "systemInstruction": {"parts": [{"text": system}]},
         "contents": [{"role": "user", "parts": parts}],
         "generationConfig": {"responseMimeType": "application/json", "temperature": temperature},
     }
-    response = requests.post(url, params={"key": GEMINI_API_KEY}, json=payload, timeout=150)
+    last_error: Exception | None = None
+    for attempt in range(3):
+        try:
+            response = requests.post(url, headers={"x-goog-api-key": GEMINI_API_KEY}, json=payload, timeout=150)
+            response.raise_for_status()
+            body = response.json()
+            candidates = body.get("candidates") or []
+            if not candidates:
+                raise RuntimeError(f"Gemini visual QA returned no candidates: {str(body)[:300]}")
+            response_parts = (candidates[0].get("content") or {}).get("parts") or []
+            output_text = next(
+                (part.get("text") for part in response_parts if isinstance(part, dict) and part.get("text")),
+                "",
+            )
+            if not output_text:
+                raise RuntimeError("Gemini visual QA returned no text part.")
+            return extract_json(output_text)
+        except Exception as exc:
+            last_error = exc
+            error_response = getattr(exc, "response", None)
+            status_code = getattr(error_response, "status_code", None)
+            transient_http = status_code in {408, 429, 500, 502, 503, 504}
+            transient_network = isinstance(exc, (requests.Timeout, requests.ConnectionError))
+            malformed_response = isinstance(exc, (json.JSONDecodeError, KeyError, IndexError, ValueError, RuntimeError))
+            if attempt >= 2 or not (transient_http or transient_network or malformed_response):
+                break
+            retry_after = 0
+            if error_response is not None:
+                try:
+                    retry_after = int(float(error_response.headers.get("Retry-After", "0")))
+                except (AttributeError, TypeError, ValueError):
+                    retry_after = 0
+            delay = min(retry_after, 10) if retry_after > 0 else min(3 * (2 ** attempt), 8)
+            log(f"Gemini visual QA transient/response failure (attempt {attempt + 1}/3): {str(exc)[:220]}; retrying in {delay}s.")
+            time.sleep(delay)
+    raise RuntimeError(f"Gemini visual QA failed after bounded retries: {last_error}") from last_error
+
+
+def _openai_compatible_visual_qa_request(
+    provider: str,
+    endpoint: str,
+    api_key: str,
+    model: str,
+    system: str,
+    user_prompt: str,
+    image_paths: list[Path],
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    """Vision request for Groq, Mistral, or explicitly enabled Cloudflare Workers AI."""
+    if not api_key:
+        raise RuntimeError(f"{provider} vision QA is not configured.")
+    content: list[dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+    for image_path in image_paths:
+        encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+        content.append({
+            "type": "image_url",
+            "image_url": {"url": f"data:image/jpeg;base64,{encoded}"},
+        })
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [
+            {"role": "system", "content": system + "\nReturn valid JSON only. Follow the requested scorecard exactly."},
+            {"role": "user", "content": content},
+        ],
+        "temperature": temperature,
+        "response_format": {"type": "json_object"},
+        "stream": False,
+    }
+    if provider == "Groq":
+        payload["max_completion_tokens"] = 6000
+        payload["reasoning_effort"] = "low"
+    else:
+        payload["max_tokens"] = 6000
+    response = requests.post(
+        endpoint,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        json=payload,
+        timeout=150,
+    )
     response.raise_for_status()
-    body = response.json()
-    output_text = body["candidates"][0]["content"]["parts"][0]["text"]
-    return extract_json(output_text)
+    return _openai_json_completion(response.json(), provider, 6000)
+
+
+def _vision_provider_order() -> list[tuple[str, str, str, str, str, int]]:
+    """Configured free-tier providers only; each route uses a documented vision model."""
+    providers = {
+        "gemini": ("Gemini", GEMINI_TEXT_MODEL, "", GEMINI_API_KEY, 18),
+        "groq": ("Groq", GROQ_VISION_MODEL, "https://api.groq.com/openai/v1/chat/completions", GROQ_API_KEY, 3),
+        "mistral": ("Mistral", MISTRAL_VISION_MODEL, "https://api.mistral.ai/v1/chat/completions", MISTRAL_API_KEY, 8),
+        "cloudflare": (
+            "Cloudflare Workers AI", CF_VISION_MODEL,
+            f"https://api.cloudflare.com/client/v4/accounts/{CF_ACCOUNT_ID}/ai/v1/chat/completions",
+            CF_API_TOKEN, 8,
+        ),
+    }
+    primary = os.getenv("BSK_VISION_PROVIDER", "groq").strip().lower()
+    names = [primary] + [name for name in ("gemini", "groq", "mistral", "cloudflare") if name != primary]
+    enabled = {
+        "gemini": bool(GEMINI_API_KEY),
+        "groq": bool(GROQ_API_KEY),
+        # Mistral may be connected to a billable workspace. A key alone never enables it.
+        "mistral": bool(
+            MISTRAL_API_KEY
+            and _mistral_free_only_enabled()
+        ),
+        # Cloudflare is used only when the operator explicitly enables its free-only route.
+        "cloudflare": bool(CF_WORKERS_AI_ENABLED and CF_ACCOUNT_ID and CF_API_TOKEN),
+    }
+    return [
+        (name, *providers[name])
+        for name in names
+        if name in providers and enabled[name] and _provider_available(f"{name}_vision")
+    ]
+
+
+def gemini_json_with_images(
+    system: str,
+    user_prompt: str,
+    image_paths: list[Path],
+    temperature: float = 0.2,
+) -> dict[str, Any]:
+    """Use every configured free-tier vision provider until one completes the full validated review.
+
+    A real visual rejection is returned immediately and cannot be overwritten by a second model.
+    Provider outages or malformed/incomplete scorecards move to the next configured vision model.
+    """
+    if not image_paths:
+        raise RuntimeError("Visual QA received no rendered frames.")
+    order = _vision_provider_order()
+    if not order:
+        raise RuntimeError(
+            "No configured free-tier vision providers are available "
+            "(Gemini, Groq, Mistral, or explicitly enabled Cloudflare Workers AI)."
+        )
+    contact_sheet = _visual_contact_sheet(image_paths)
+    failures: list[str] = []
+    for provider_key, provider_label, model, endpoint, api_key, max_images in order:
+        try:
+            if provider_key == "gemini":
+                result = _gemini_visual_qa_request(
+                    system, user_prompt, image_paths, temperature=temperature, model=model
+                )
+                if not _valid_visual_scorecard(result):
+                    raise ValueError("Gemini returned an incomplete or invalid visual QA scorecard.")
+                result["visual_qa_provider"] = provider_label
+                result["visual_qa_model"] = model
+                result["visual_qa_batches"] = 1
+                log(f"Visual QA completed with {provider_label} model {model}.")
+                return result
+
+            # Groq documents a maximum of 3 images/request; Mistral and Workers AI
+            # are kept to 8/request. A whole-Reel overview accompanies detailed batches.
+            overview = contact_sheet if contact_sheet is not None else None
+            detail_limit = max(1, max_images - (1 if overview else 0))
+            batches = [
+                image_paths[index:index + detail_limit]
+                for index in range(0, len(image_paths), detail_limit)
+            ]
+            batch_results: list[dict[str, Any]] = []
+            hard_rejection = False
+            for batch_index, batch in enumerate(batches, start=1):
+                request_images = ([overview] if overview else []) + batch
+                batch_prompt = user_prompt
+                if overview:
+                    batch_prompt += (
+                        "\nThe first image is a small contact sheet of ALL ordered Reel samples. "
+                        "Use it to judge whole-Reel continuity. The remaining images are full-resolution "
+                        f"detail samples for batch {batch_index}/{len(batches)}; inspect each closely."
+                    )
+                if len(batches) > 1:
+                    batch_prompt += (
+                        f"\nThis is detail batch {batch_index} of {len(batches)}. "
+                        "Score every required dimension for the supplied detailed frames, "
+                        "and report any critical defect visible either in the overview or detail frames."
+                    )
+                result = _openai_compatible_visual_qa_request(
+                    provider_label, endpoint, api_key, model, system, batch_prompt,
+                    request_images, temperature=temperature,
+                )
+                if not _valid_visual_scorecard(result):
+                    raise ValueError(
+                        f"{provider_label} batch {batch_index}/{len(batches)} returned an incomplete or invalid visual QA scorecard."
+                    )
+                batch_results.append(result)
+                # A genuine critical finding is a hard rejection; do not shop for a more
+                # favourable model response or spend tokens reviewing additional batches.
+                if result.get("critical_issue") is True or min(
+                    float(result["scores"][key]) for key in VISION_REQUIRED_SCORE_KEYS
+                ) <= 2:
+                    hard_rejection = True
+                    break
+
+            combined_scores = {
+                key: min(float(item["scores"][key]) for item in batch_results)
+                for key in VISION_REQUIRED_SCORE_KEYS
+            }
+            confidence_order = {"low": 0, "medium": 1, "high": 2}
+            confidences = [
+                str(item.get("confidence", "low")).lower()
+                for item in batch_results
+            ]
+            confidence = min(
+                (value for value in confidences if value in confidence_order),
+                key=lambda value: confidence_order[value],
+                default="low",
+            )
+            notes = []
+            for item in batch_results:
+                item_notes = item.get("notes", [])
+                if isinstance(item_notes, list):
+                    notes.extend(str(note)[:400] for note in item_notes[:8])
+            combined = {
+                "scores": combined_scores,
+                "critical_issue": any(item["critical_issue"] for item in batch_results),
+                "notes": notes[:24],
+                "confidence": confidence,
+                "visual_qa_provider": provider_label,
+                "visual_qa_model": model,
+                "visual_qa_batches": len(batch_results),
+                "visual_qa_expected_batches": len(batches),
+            }
+            # A critical result can stop early (and reject); a pass is accepted only after
+            # every expected detail batch was reviewed successfully.
+            if not hard_rejection and len(batch_results) != len(batches):
+                raise RuntimeError(f"{provider_label} visual QA stopped before all batches were reviewed.")
+            log(
+                f"Visual QA completed with {provider_label} model {model} "
+                f"({len(batch_results)}/{len(batches)} batches)."
+            )
+            return combined
+        except Exception as exc:
+            failures.append(f"{provider_label}/{model}: {str(exc)[:300]}")
+            _provider_failure_cooldown(f"{provider_key}_vision", exc)
+            log(f"Visual QA provider {provider_label} model {model} failed: {str(exc)[:240]}")
+    raise RuntimeError(
+        "All configured free-tier vision providers failed to complete a valid whole-Reel scorecard; "
+        "no paid fallback was attempted. " + " | ".join(failures)
+    )
+
+def deterministic_local_visual_qa(frame_paths: list[Path]) -> dict[str, Any]:
+    """Run dependency-light, deterministic checks on every sampled frame.
+
+    This verifies frame integrity and gross technical defects only. It deliberately does
+    not claim to understand story meaning, anatomy, character identity or artistic quality.
+    """
+    from PIL import ImageFilter, ImageStat
+
+    if len(frame_paths) < 2:
+        return {
+            "status": "not_completed",
+            "engine": "bsk_local_frame_qa_v1",
+            "frames_scanned": len(frame_paths),
+            "hard_failures": ["At least two rendered frames are required."],
+            "human_review_required": True,
+        }
+
+    hard_failures: list[dict[str, Any]] = []
+    observations: list[dict[str, Any]] = []
+    review_notes: list[dict[str, Any]] = []
+
+    for frame_path in frame_paths:
+        try:
+            with Image.open(frame_path) as opened:
+                image = opened.convert("RGB")
+                image.load()
+        except Exception as exc:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "image_integrity",
+                "detail": str(exc)[:180],
+            })
+            continue
+
+        width, height = image.size
+        if width < 320 or height < 568:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "minimum_resolution",
+                "detail": f"Frame is only {width}x{height}; minimum is 320x568.",
+            })
+        ratio = width / max(height, 1)
+        if not 0.52 <= ratio <= 0.61:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "portrait_aspect_ratio",
+                "detail": f"Expected a 9:16 portrait frame; received {width}x{height}.",
+            })
+
+        gray = image.convert("L")
+        histogram = gray.histogram()
+        pixel_count = max(width * height, 1)
+        near_black_fraction = sum(histogram[:9]) / pixel_count
+        luminance = ImageStat.Stat(gray)
+        mean_luma = float(luminance.mean[0])
+        luma_stddev = float(luminance.stddev[0])
+        edge_stddev = float(ImageStat.Stat(gray.filter(ImageFilter.FIND_EDGES)).stddev[0])
+
+        if near_black_fraction >= 0.995:
+            hard_failures.append({
+                "frame": frame_path.name,
+                "check": "near_black_frame",
+                "detail": f"{near_black_fraction:.3%} of pixels are near black.",
+            })
+        elif luma_stddev < 1.5 or edge_stddev < 0.8:
+            review_notes.append({
+                "frame": frame_path.name,
+                "check": "low_visual_information",
+                "detail": "Frame has very little tonal or edge variation; inspect manually.",
+            })
+
+        observations.append({
+            "frame": frame_path.name,
+            "width": width,
+            "height": height,
+            "mean_luminance": round(mean_luma, 2),
+            "luminance_stddev": round(luma_stddev, 2),
+            "edge_stddev": round(edge_stddev, 2),
+            "near_black_fraction": round(near_black_fraction, 5),
+        })
+
+    return {
+        "status": "warning" if hard_failures else "passed",
+        "engine": "bsk_local_frame_qa_v1",
+        "frames_scanned": len(observations),
+        "hard_failures": hard_failures,
+        "review_notes": review_notes,
+        "observations": observations,
+        "checks": ["image_integrity", "minimum_resolution", "portrait_aspect_ratio", "near_black_frame"],
+        "not_assessed": [
+            "story_visual_match",
+            "anatomy_integrity",
+            "character_continuity",
+            "Hindi subtitle correctness and safe-area placement",
+            "subjective visual quality and emotional impact",
+        ],
+        "human_review_required": True,
+    }
+
+
+def local_visual_review_fallback(reason: str, local_report: dict[str, Any]) -> dict[str, Any]:
+    """Create an honest human-review state; never fabricate an AI score or an AI pass."""
+    return {
+        "status": "local_pass_human_review",
+        "critical_issue": False,
+        "review_mode": "deterministic_local_fallback",
+        "visual_ai_review": {
+            "status": "not_completed",
+            "reason": str(reason)[:500],
+        },
+        "local_visual_diagnostics": local_report,
+        "scores": {},
+        "notes": [
+            "Local frame-integrity checks passed; AI semantic review was unavailable.",
+            "A human must inspect story match, anatomy, character continuity, subtitle placement and overall visual quality before approval.",
+        ],
+        "human_review_required": True,
+    }
 
 
 def normalize_transcript_for_comparison(text_value: str) -> str:
@@ -1277,7 +2146,7 @@ def motion_diagnostics(video_path: Path) -> dict[str, Any]:
     """Full-duration FFmpeg scan for black intervals and unusually long frozen sections."""
     command = [
         "ffmpeg", "-hide_banner", "-i", str(video_path),
-        "-vf", "freezedetect=n=-50dB:d=1.35,blackdetect=d=0.30:pix_th=0.10",
+        "-vf", "freezedetect=n=-50dB:d=1.0,blackdetect=d=0.20:pix_th=0.10",
         "-an", "-f", "null", "-",
     ]
     try:
@@ -1287,8 +2156,8 @@ def motion_diagnostics(video_path: Path) -> dict[str, Any]:
         black_events = [float(x) for x in re.findall(r"black_duration:([0-9.]+)", log_text)]
         if result.returncode:
             return {"status": "not_completed", "reason": log_text[-500:], "human_review_required": True}
-        severe_black = [x for x in black_events if x >= 0.30]
-        long_freezes = [x for x in freeze_events if x >= 1.8]
+        severe_black = [x for x in black_events if x >= 0.20]
+        long_freezes = [x for x in freeze_events if x >= 1.0]
         if severe_black:
             status = "warning"
         elif long_freezes:
@@ -1305,8 +2174,186 @@ def motion_diagnostics(video_path: Path) -> dict[str, Any]:
         return {"status": "not_completed", "reason": str(exc)[:500], "human_review_required": True}
 
 
+def metadata_ocr_qa(video_path: Path, reel_dir: Path, duration: float) -> dict[str, Any]:
+    """OCR a full-timeline sample and hard-reject leaked production labels."""
+    tesseract = shutil.which("tesseract")
+    if not tesseract:
+        return {
+            "status": "not_completed",
+            "reason": "Tesseract OCR is not installed; internal-label QA cannot be skipped.",
+            "frames_scanned": 0,
+            "human_review_required": True,
+        }
+    if isinstance(duration, bool) or not isinstance(duration, (int, float)) or not math.isfinite(float(duration)) or duration <= 0:
+        return {"status": "not_completed", "reason": "OCR duration is invalid.", "frames_scanned": 0, "human_review_required": True}
+
+    frames_dir = reel_dir / "metadata_ocr_frames"
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    pattern = frames_dir / "ocr_%04d.jpg"
+    try:
+        run_cmd([
+            "ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+            "-i", str(video_path), "-vf", "fps=1,scale=720:-2",
+            "-q:v", "4", str(pattern),
+        ], timeout=240)
+        frames = sorted(frames_dir.glob("ocr_*.jpg"))
+        if not frames:
+            raise RuntimeError("FFmpeg did not produce OCR sample frames.")
+        forbidden = re.compile(r"\b(?:KEYWORD|STEP|CONTRAST|SCENE|HOOK|PROMPT|CLOSING)\b")
+        detections: list[dict[str, str]] = []
+        for frame in frames:
+            result = subprocess.run(
+                [tesseract, str(frame), "stdout", "-l", "eng+hin", "--psm", "11"],
+                text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30,
+            )
+            if result.returncode:
+                raise RuntimeError(f"Tesseract failed for {frame.name}: {(result.stderr or '')[-400:]}")
+            text_value = result.stdout or ""
+            for match in forbidden.finditer(text_value):
+                detections.append({
+                    "frame": frame.name,
+                    "term": match.group(0),
+                    "context": text_value[max(0, match.start()-70):min(len(text_value), match.end()+70)].strip(),
+                })
+            if re.search(r"[\[{]\s*['\"]?(?:role|prompt|scene|keyword|step)\b", text_value, flags=re.IGNORECASE):
+                detections.append({"frame": frame.name, "term": "raw_json_fragment", "context": text_value[:140].strip()})
+        report = {
+            "status": "warning" if detections else "passed",
+            "frames_scanned": len(frames),
+            "sample_rate_fps": 1,
+            "forbidden_terms_detected": detections,
+            "full_timeline_sampled": True,
+            "human_review_required": True,
+            "note": "OCR supplements VLM review; it cannot prove the absence of every visual text artifact.",
+        }
+    except Exception as exc:
+        report = {
+            "status": "not_completed",
+            "reason": str(exc)[:700],
+            "frames_scanned": 0,
+            "human_review_required": True,
+        }
+    (reel_dir / "metadata_ocr_report.json").write_text(
+        json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    return report
+
+
+def reconcile_actual_voice_timing(beat: dict[str, Any], measured_durations: dict[str, float]) -> dict[str, Any]:
+    """Make the validated WAV files authoritative and rebuild the beat timing without truncating speech.
+
+    The planning and finalization runners may restore different snapshots of a shared cache.
+    Matching transcript/voice identity does not guarantee an identical synthesized duration.
+    A duration drift is therefore reconciled against the exact WAV being rendered, then the
+    normal scene-duration and bounded video-retiming guards decide whether it is safe.
+    """
+    segments = beat.get("speech_segments")
+    if not isinstance(segments, list) or not segments:
+        return {"adjusted": False, "differences": []}
+
+    old_timing = beat.get("voice_timing")
+    old_segments = old_timing.get("segments", []) if isinstance(old_timing, dict) else []
+    planned_by_id = {
+        str(item.get("segment_id")): float(item["duration_seconds"])
+        for item in old_segments
+        if isinstance(item, dict)
+        and item.get("segment_id") is not None
+        and isinstance(item.get("duration_seconds"), (int, float))
+        and not isinstance(item.get("duration_seconds"), bool)
+    }
+
+    differences: list[dict[str, Any]] = []
+    for segment in segments:
+        segment_id = str(segment.get("segment_id") or "")
+        if segment_id not in measured_durations:
+            raise RuntimeError(f"Measured WAV duration is missing for voice segment {segment_id!r}.")
+        measured = float(measured_durations[segment_id])
+        if not math.isfinite(measured) or measured <= 0:
+            raise RuntimeError(f"Measured WAV duration is invalid for voice segment {segment_id!r}.")
+        planned = planned_by_id.get(segment_id)
+        if planned is not None and abs(measured - planned) > 0.15:
+            differences.append({
+                "segment_id": segment_id,
+                "planned_seconds": round(planned, 4),
+                "actual_wav_seconds": round(measured, 4),
+                "delta_seconds": round(measured - planned, 4),
+            })
+        segment["duration_seconds"] = round(measured, 4)
+
+    if differences:
+        gap_count = max(0, len(segments) - 1)
+        recorded_gap = (
+            float(old_timing.get("dialogue_gap_seconds", 0.0) or 0.0)
+            if isinstance(old_timing, dict) else 0.0
+        )
+        gap_per_turn = (
+            recorded_gap / gap_count if gap_count else voice_first.DEFAULT_DIALOGUE_GAP_SECONDS
+        )
+        rebuilt = voice_first.build_scene_timing_plan(
+            segments,
+            {str(item["segment_id"]): float(item["duration_seconds"]) for item in segments},
+            dialogue_gap_seconds=gap_per_turn,
+            head_handle_seconds=float(
+                old_timing.get("head_handle_seconds", voice_first.HEAD_HANDLE_SECONDS)
+                if isinstance(old_timing, dict) else voice_first.HEAD_HANDLE_SECONDS
+            ),
+            tail_handle_seconds=float(
+                old_timing.get("tail_handle_seconds", voice_first.TAIL_HANDLE_SECONDS)
+                if isinstance(old_timing, dict) else voice_first.TAIL_HANDLE_SECONDS
+            ),
+            fps=int(
+                old_timing.get("fps", voice_first.FPS)
+                if isinstance(old_timing, dict) else voice_first.FPS
+            ),
+        )
+        beat["voice_timing"] = rebuilt
+        beat["target_frames"] = rebuilt["target_frames"]
+        log(
+            "Rebuilt voice-first timing from the exact validated WAV duration(s): "
+            + ", ".join(
+                f"{item['segment_id']} {item['planned_seconds']:.3f}s→{item['actual_wav_seconds']:.3f}s"
+                for item in differences
+            )
+            + f"; new scene target {rebuilt['target_duration_seconds']:.3f}s."
+        )
+
+    return {
+        "adjusted": bool(differences),
+        "differences": differences,
+        "new_target_duration_seconds": (
+            beat.get("voice_timing", {}).get("target_duration_seconds")
+            if isinstance(beat.get("voice_timing"), dict) else None
+        ),
+    }
+
+
+def persist_visual_qa_report(reel_dir: Path, review: dict[str, Any]) -> Path:
+    """Persist QA results and frame evidence even when a later hard gate rejects the Reel."""
+    frames_dir = reel_dir / "qa_frames"
+    frames = sorted(
+        path.relative_to(reel_dir).as_posix()
+        for path in frames_dir.glob("frame_*.jpg")
+        if path.is_file() and path.stat().st_size > 1000
+    )
+    contact_sheet = frames_dir / "qa_contact_sheet.jpg"
+    report = dict(review)
+    report["qa_evidence"] = {
+        "frames": frames,
+        "contact_sheet": (
+            contact_sheet.relative_to(reel_dir).as_posix()
+            if contact_sheet.is_file() else None
+        ),
+    }
+    destination = reel_dir / "visual_qa_report.json"
+    destination.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return destination
+
+
 def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_durations: list[float] | None = None) -> dict[str, Any]:
-    """Sample two frames per beat plus cover the timeline; separately scan the complete video."""
+    """Sample the whole Reel, run local diagnostics, then use the configured vision-provider cascade."""
     frames_dir = reel_dir / "qa_frames"
     frames_dir.mkdir(parents=True, exist_ok=True)
     timestamps = []
@@ -1327,30 +2374,120 @@ def visual_qa(video_path: Path, reel_dir: Path, duration: float, segment_duratio
             frame_paths.append(frame)
     if len(frame_paths) < 2:
         return {"status": "not_completed", "reason": "Could not extract enough frames for automated visual QA.", "human_review_required": True}
-    try:
-        result = gemini_json_with_images(
-            "You are a visual quality-control editor for a premium Hindi vertical Reel. Evaluate only the supplied rendered frames; do not infer unseen frames. Return JSON only.",
-            "These images are ordered samples from each beat of a 9:16 Hindi Reel. Inspect EVERY supplied frame for malformed faces/hands, duplicated limbs, broken object geometry, visual mismatch to the narration, poor composition, subtitle glyph errors, clipping, contrast and UI-safe margins. Do not infer movement or anything between sampled frames. Return JSON: {\"scores\":{\"text_legibility\":1,\"devanagari_rendering\":1,\"anatomy_integrity\":1,\"story_visual_match\":1,\"safe_composition\":1,\"visual_quality\":1},\"critical_issue\":false,\"notes\":[\"short note\"],\"confidence\":\"low|medium|high\"}. Scores 1-5. Do not automatically reject subjective taste; set critical_issue=true only for obvious malformed anatomy, severe visual mismatch, broken text or clipping.",
-            frame_paths,
-        )
-        scores = result.get("scores", {}) if isinstance(result, dict) else {}
-        numeric = [float(v) for v in scores.values() if isinstance(v, (int, float))]
-        result["average_score"] = round(sum(numeric) / len(numeric), 2) if numeric else None
-        result["status"] = "warning" if result.get("critical_issue") or (numeric and min(numeric) <= 2) else "reviewed"
-        result["human_review_required"] = True
-        return result
-    except Exception as exc:
-        log(f"Visual QA did not complete; continuing with human review required: {exc}")
-        return {"status": "not_completed", "reason": str(exc)[:500], "human_review_required": True}
+
+    local_report = deterministic_local_visual_qa(frame_paths)
+    if local_report.get("status") != "passed":
+        result: dict[str, Any] = {
+            "status": "warning" if local_report.get("status") == "warning" else "not_completed",
+            "critical_issue": bool(local_report.get("hard_failures")),
+            "review_mode": "local_precheck_blocked",
+            "local_visual_diagnostics": local_report,
+            "human_review_required": True,
+            "notes": ["Local frame-integrity checks did not pass; AI review cannot override a technical defect."],
+        }
+    else:
+        try:
+            result = gemini_json_with_images(
+                "You are a visual quality-control editor for a premium Hindi vertical Reel. Evaluate only the supplied rendered frames; do not infer unseen frames. Return JSON only.",
+                "These ordered samples cover the full 9:16 Hindi Reel (two frames per narrative beat). Inspect EVERY supplied frame for malformed faces/hands, duplicated limbs, broken object geometry, visual mismatch to the beat's narrative_role and state_change, subtitle glyph errors, clipping, contrast and UI-safe margins. Compare recurring characters across all frames: same face shape, apparent age, hair, clothing, clothing colour and distinguishing props; report visible identity or wardrobe drift under character_continuity. Treat the first clear appearance of each recurring character as its visual anchor. Check visible text for internal production labels or prompt metadata, especially KEYWORD, STEP, CONTRAST, PROMPT, SCENE, HOOK or raw JSON fragments; score this under metadata_text_cleanliness. Do not infer movement or anything between sampled frames. Return JSON: {\"scores\":{\"text_legibility\":1,\"devanagari_rendering\":1,\"anatomy_integrity\":1,\"story_visual_match\":1,\"safe_composition\":1,\"visual_quality\":1,\"character_continuity\":1,\"metadata_text_cleanliness\":1},\"critical_issue\":false,\"notes\":[\"short note\"],\"confidence\":\"low|medium|high\"}. Scores 1-5. Set character_continuity or metadata_text_cleanliness to 1–2 for a clear defect; set critical_issue=true for obvious malformed anatomy, severe continuity mismatch, leaked internal labels, broken text or clipping. Do not auto-reject subjective style preference.",
+                frame_paths,
+            )
+            scores = result.get("scores", {}) if isinstance(result, dict) else {}
+            required_scores = (
+                "text_legibility", "devanagari_rendering", "anatomy_integrity",
+                "story_visual_match", "safe_composition", "visual_quality",
+                "character_continuity", "metadata_text_cleanliness",
+            )
+
+            def valid_visual_score(value: Any) -> bool:
+                # bool is a subclass of int in Python; explicitly reject it. A model
+                # response outside the documented 1–5 scale must never count as QA.
+                return (
+                    isinstance(value, (int, float))
+                    and not isinstance(value, bool)
+                    and math.isfinite(float(value))
+                    and 1.0 <= float(value) <= 5.0
+                )
+
+            missing_scores = [key for key in required_scores if not valid_visual_score(scores.get(key))]
+            numeric = [float(scores[key]) for key in required_scores if valid_visual_score(scores.get(key))]
+            critical_issue_valid = isinstance(result.get("critical_issue"), bool)
+            result["average_score"] = round(sum(numeric) / len(numeric), 2) if numeric else None
+            result["missing_required_scores"] = missing_scores
+            result["missing_required_fields"] = [] if critical_issue_valid else ["critical_issue"]
+            if missing_scores or not critical_issue_valid:
+                result["status"] = "not_completed"
+            elif result["critical_issue"] is True or min(numeric) <= 2:
+                result["status"] = "warning"
+            else:
+                result["status"] = "reviewed"
+
+            result["review_mode"] = "ai_assisted"
+            result["local_visual_diagnostics"] = local_report
+            result["human_review_required"] = True
+            if result["status"] == "not_completed":
+                result = local_visual_review_fallback(
+                    "Gemini returned an incomplete visual scorecard; semantic review is still required.",
+                    local_report,
+                )
+        except Exception as exc:
+            log(f"Visual AI review unavailable; retaining local QA result for human review: {exc}")
+            result = local_visual_review_fallback(str(exc), local_report)
+
+    ocr_report = metadata_ocr_qa(video_path, reel_dir, duration)
+    result["metadata_ocr_qa"] = ocr_report
+    result["qa_evidence"] = {
+        "frames": [
+            path.relative_to(reel_dir).as_posix()
+            for path in frame_paths
+            if path.is_file()
+        ],
+        "contact_sheet": (
+            (frames_dir / "qa_contact_sheet.jpg").relative_to(reel_dir).as_posix()
+            if (frames_dir / "qa_contact_sheet.jpg").is_file() else None
+        ),
+    }
+    if ocr_report.get("status") == "warning":
+        result["critical_issue"] = True
+        result["status"] = "warning"
+    elif ocr_report.get("status") != "passed" and result.get("status") != "warning":
+        result["status"] = "not_completed"
+    return result
+
 
 def enforce_visual_qa(review: dict[str, Any]) -> None:
-    """Reject obvious visual defects; QA outage remains flagged for manual review."""
-    if review.get("status") == "warning":
+    """Require objective local checks, OCR and full-video motion checks before human review."""
+    status = review.get("status")
+    if status == "warning" or review.get("critical_issue") is True:
         raise RuntimeError(
             "Rendered-frame QA detected a potentially critical visual defect; "
             "the Reel was not added to the publish kit. Check QA frames and rerun."
         )
 
+    if status == "local_pass_human_review":
+        local = review.get("local_visual_diagnostics")
+        if (
+            review.get("review_mode") != "deterministic_local_fallback"
+            or review.get("human_review_required") is not True
+            or not isinstance(local, dict)
+            or local.get("engine") != "bsk_local_frame_qa_v1"
+            or local.get("status") != "passed"
+            or int(local.get("frames_scanned", 0) or 0) < 2
+            or local.get("hard_failures")
+        ):
+            raise RuntimeError("Local visual QA did not pass its required checks; refusing human-review handoff.")
+    elif status != "reviewed":
+        raise RuntimeError(
+            "Rendered-frame QA did not complete successfully; the Reel was not added to the publish kit. "
+            "Review the QA outage/scorecard and rerun."
+        )
+
+    ocr = review.get("metadata_ocr_qa")
+    if not isinstance(ocr, dict) or ocr.get("status") != "passed" or ocr.get("forbidden_terms_detected"):
+        raise RuntimeError("Metadata OCR did not pass; refusing to deliver a Reel with unknown or leaked production labels.")
+    motion = review.get("full_video_motion_diagnostics")
+    if not isinstance(motion, dict) or motion.get("status") != "passed" or motion.get("full_video_scanned") is not True:
+        raise RuntimeError("Full-video black/freeze diagnostics did not pass; refusing to deliver a Reel with incomplete motion QA.")
 
 
 def create_original_sound_bed(destination: Path, duration: float, pillar: str) -> None:
@@ -1518,7 +2655,7 @@ Style: Counter,Noto Sans,24,&H00E6DFD3,&H000000FF,&H00101010,&HAA101010,-1,0,0,0
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
 Dialogue: 3,0:00:00.00,{ass_time(duration)},Brand,,0,0,0,,{{\\an8\\pos(540,165)}}BINA SHOR KE
 Dialogue: 2,0:00:00.00,{ass_time(duration)},Counter,,0,0,0,,{{\\an9\\pos(1010,170)}}{scene_index:02d} / {scene_count:02d}
-Dialogue: 2,0:00:00.14,{ass_time(max(0.25, duration - 0.12))},Tag,,0,0,0,,{{\\an7\\pos(72,430)\\fad(160,100)}}{clean_ass_text((overlay_type.upper().replace('_', ' ') + '  |  ' + overlay_text)[:65])}
+Dialogue: 2,0:00:00.14,{ass_time(max(0.25, duration - 0.12))},Tag,,0,0,0,,{{\\an7\\pos(72,430)\\fad(160,100)}}{clean_ass_text(overlay_text[:65])}
 Dialogue: 1,0:00:00.10,{ass_time(max(0.2, duration - 0.1))},Main,,0,0,0,,{{\\an5\\pos(540,1180)\\fad(180,180)}}{safe_text}
 """
     path.write_text(content, encoding="utf-8")
@@ -1785,6 +2922,11 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     segments_dir = reel_dir / "segments"
     for folder in (clips_dir, art_dir, voice_dir, segments_dir):
         folder.mkdir(parents=True, exist_ok=True)
+    editorial_plan = concept.get("editorial_shot_plan")
+    if isinstance(editorial_plan, dict):
+        (reel_dir / "editorial_shot_plan.json").write_text(
+            json.dumps(editorial_plan, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
     pexels_credits: list[dict[str, Any]] = []
     current_ids = set(asset_ids)
     used_assets: list[str] = []
@@ -1798,39 +2940,163 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     stock_scenes = 0
 
     require_ai_video = os.getenv("REQUIRE_AI_VIDEO", "0").strip() == "1"
-    # Preserve Wan's native 24 fps cadence to avoid fake duplicated frames; local-only smoke renders use 30 fps.
-    target_fps = 24 if require_ai_video else 30
+    primary_image_first = (
+        require_ai_video
+        and concept.get("visual_pipeline") == story_engine.PRIMARY_25D_PIPELINE
+    )
+    # Wan legacy source clips stay at 24 FPS. Primary 2.5D masters are rendered at 30 FPS.
+    target_fps = (
+        30 if story_engine.is_25d_pipeline(concept.get("visual_pipeline"))
+        else (24 if require_ai_video else 30)
+    )
+    if require_ai_video and not primary_image_first:
+        # Preserve the clear legacy error contract: detect missing Wan source assets
+        # before reporting an absent editorial plan, and always before TTS generation.
+        missing_legacy_clips = [
+            f"scene_{i+1:02d}.mp4"
+            for i in range(len(concept["beats"]))
+            if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()
+        ]
+        if missing_legacy_clips:
+            raise RuntimeError(
+                "AI-video mode is missing required clips before TTS starts: "
+                + ", ".join(missing_legacy_clips)
+            )
     if require_ai_video:
-        # Fail before any TTS quota is consumed if GPU generation did not produce a full scene set.
-        missing_ai = [f"scene_{i+1:02d}.mp4" for i in range(len(concept["beats"]))
-                      if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()]
-        if missing_ai:
-            raise RuntimeError("AI-video mode is missing required clips before TTS starts: " + ", ".join(missing_ai))
-        for i in range(len(concept["beats"])):
-            clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
-            if clip.stat().st_size < 100_000 or probe_duration(clip) < 2.5:
-                raise RuntimeError(f"AI scene {clip.name} is missing, too small or too short; refusing to spend TTS quota on an invalid batch.")
+        if not isinstance(editorial_plan, dict):
+            raise RuntimeError("AI production requires a voice-locked editorial_shot_plan; refusing a legacy fallback.")
+        if int(editorial_plan.get("source_beat_count", 0)) != len(concept["beats"]):
+            raise RuntimeError("Editorial shot plan source beat count does not match the screenplay.")
+        expected_shots = int(editorial_plan.get("editorial_shot_count", 0))
+        policy = story_engine.policy_for(concept.get("story_type", "emotional"))
+        if not policy["min_shots"] <= expected_shots <= policy["max_shots"]:
+            raise RuntimeError(f"Editorial shot plan has {expected_shots} shots; expected {policy['min_shots']}–{policy['max_shots']} for {policy['story_type']}.")
+        if primary_image_first:
+            sources = [shot.get("source") for shot in editorial_plan.get("shots", [])]
+            if not sources or any(source != "depth_parallax" for source in sources):
+                raise RuntimeError("Primary 2.5D must use only depth-parallax editorial shots; a Wan hero-video route is not permitted in the default image-first mode.")
+            for i, beat in enumerate(concept["beats"], start=1):
+                still = reel_dir / "ai_clips" / f"scene_{i:02d}.png"
+                depth_clip = reel_dir / "ai_clips" / f"scene_{i:02d}_25d.mp4"
+                if not still.is_file() or still.stat().st_size < 100_000:
+                    raise RuntimeError(f"Image-first 2.5D is missing or has an invalid still asset: {still.name}")
+                try:
+                    with Image.open(still) as image:
+                        image.verify()
+                    with Image.open(still) as image:
+                        if image.size != (704, 1280):
+                            raise RuntimeError(f"Image-first still {still.name} must be 704x1280; got {image.size}.")
+                except Exception as exc:
+                    raise RuntimeError(f"Image-first still {still.name} failed image validation: {exc}") from exc
+                if not depth_clip.is_file() or depth_clip.stat().st_size < 100_000:
+                    raise RuntimeError(f"Image-first 2.5D is missing required depth-parallax clip {depth_clip.name}.")
+                measured = probe_duration(depth_clip)
+                planned = float((beat.get("voice_timing") or {}).get("target_duration_seconds", 0) or 0)
+                if planned <= 0 or abs(measured - planned) > 0.20:
+                    raise RuntimeError(
+                        f"Image-first parallax duration mismatch for beat {i}: planned {planned:.3f}s, "
+                        f"measured {measured:.3f}s."
+                    )
+        elif story_engine.is_25d_pipeline(concept.get("visual_pipeline")):
+            missing_ai = [
+                f"scene_{i:02d}.mp4" for i in range(1, len(concept["beats"]) + 1)
+                if not (reel_dir / "ai_clips" / f"scene_{i:02d}.mp4").is_file()
+            ]
+            if missing_ai:
+                raise RuntimeError("Legacy hybrid video mode is missing required Wan source clips: " + ", ".join(missing_ai))
+            for i in range(len(concept["beats"])):
+                source_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
+                depth_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
+                if not depth_clip.is_file() or depth_clip.stat().st_size < 100_000:
+                    raise RuntimeError(f"Legacy hybrid mode is missing a valid depth-parallax scene {depth_clip.name}.")
+                if abs(probe_duration(source_clip) - probe_duration(depth_clip)) > 0.20:
+                    raise RuntimeError(f"Legacy hybrid depth-parallax duration mismatch for beat {i+1}.")
+        else:
+            missing_ai = [
+                f"scene_{i+1:02d}.mp4" for i in range(len(concept["beats"]))
+                if not (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").is_file()
+            ]
+            if missing_ai:
+                raise RuntimeError("AI-video mode is missing required clips before TTS starts: " + ", ".join(missing_ai))
+            for i in range(len(concept["beats"])):
+                clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
+                if clip.stat().st_size < 100_000 or probe_duration(clip) < 2.5:
+                    raise RuntimeError(f"AI scene {clip.name} is missing, too small or too short; refusing to spend TTS quota on an invalid batch.")
 
     for i, beat in enumerate(concept["beats"]):
-        log(f"[{concept['title']}] Voice + original visual {i+1}/{len(concept['beats'])}: {beat['visual_query']}")
+        log(f"[{concept['title']}] Voice-first render {i+1}/{len(concept['beats'])}: {beat['visual_query']}")
         audio_path = voice_dir / f"beat_{i+1:02d}.wav"
-        ensure_tts_wav(beat["voiceover"], audio_path, voice_direction=beat.get("voice_direction"))
+        speech_segments = beat.get("speech_segments")
+        if isinstance(speech_segments, list):
+            line_paths: list[Path] = []
+            spoken_seconds = 0.0
+            measured_line_durations: dict[str, float] = {}
+            for line_index, line in enumerate(speech_segments, start=1):
+                speaker_id = str(line["speaker_id"])
+                segment_id = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(line.get("segment_id") or f"beat_{i+1:02d}_line_{line_index:02d}"))
+                line_path = voice_dir / f"{segment_id}_{speaker_id}.wav"
+                voice_direction = (
+                    str(line.get("voice_direction") or "Natural Hindi dialogue.")
+                    + " Performance emotion: " + str(line.get("emotion") or "natural, restrained")
+                )
+                ensure_tts_wav(
+                    str(line["text"]), line_path,
+                    voice_direction=voice_direction,
+                    voice_name=str(line.get("gemini_voice") or TTS_VOICE),
+                )
+                measured = voice_first.wav_duration(line_path)
+                measured_line_durations[segment_id] = measured
+                spoken_seconds += measured
+                line_paths.append(line_path)
+            if line_paths:
+                timing_reconciliation = reconcile_actual_voice_timing(
+                    beat, measured_line_durations
+                )
+                if timing_reconciliation["adjusted"]:
+                    log(
+                        f"[{concept['title']}] Beat {i+1}: exact WAV timing differed from the "
+                        "planning snapshot; the beat was safely replanned from measured audio."
+                    )
+            if not line_paths:
+                planned_scene = float((beat.get("voice_timing") or {}).get("target_duration_seconds", 2.5))
+                voice_first.write_silence_wav(audio_path, max(2.5, planned_scene))
+                audio_duration = voice_first.wav_duration(audio_path)
+            else:
+                audio_duration = voice_first.assemble_dialogue_wav(
+                    line_paths, audio_path,
+                    leading_silence_seconds=voice_first.HEAD_HANDLE_SECONDS,
+                )
+            total_voice_seconds += spoken_seconds
+        else:
+            # Backward compatibility for an older pending manifest or a hand-authored test concept.
+            ensure_tts_wav(beat["voiceover"], audio_path, voice_direction=beat.get("voice_direction"))
+            audio_duration = probe_duration(audio_path)
+            total_voice_seconds += audio_duration
         voice_audio_paths.append(audio_path)
-        audio_duration = probe_duration(audio_path)
-        if not 1.0 <= audio_duration <= 8.0:
-            raise RuntimeError(f"TTS beat {i+1} length {audio_duration:.2f}s is outside expected range; quality gate stopped rendering.")
-        total_voice_seconds += audio_duration
+        if not 1.0 <= audio_duration <= 12.0:
+            raise RuntimeError(f"Rendered dialogue beat {i+1} length {audio_duration:.2f}s is outside the 1–12s safety range; storyboard must split the scene, never shorten its words.")
         rendered_audio_duration = audio_duration
         target_duration = audio_duration + 0.08
         audio_tempo = 1.0
 
-        # Primary mode: locally generated photoreal AI clip from the Kaggle Wan render stage.
-        ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
-        if require_ai_video and not ai_clip.exists():
-            raise RuntimeError(f"AI-video mode requires scene clip {ai_clip.name}; refusing to silently downgrade to static graphics.")
+        # Image-first primary 2.5D uses one generated still plus its real depth-parallax
+        # motion master per beat. Legacy Wan routes remain available only for old manifests.
+        if primary_image_first:
+            still_image = reel_dir / "ai_clips" / f"scene_{i+1:02d}.png"
+            ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
+            if not still_image.is_file() or not ai_clip.is_file():
+                raise RuntimeError(f"Image-first primary 2.5D is missing still/parallax assets for beat {i+1}; refusing static or legacy downgrade.")
+            if first_visual is None:
+                first_visual = still_image
+                first_beat = beat
+        else:
+            still_image = None
+            ai_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4"
+            if require_ai_video and not ai_clip.exists():
+                raise RuntimeError(f"AI-video mode requires scene clip {ai_clip.name}; refusing to silently downgrade to static graphics.")
         if ai_clip.exists():
             if first_visual is None:
-                first_visual = ai_clip
+                first_visual = still_image if primary_image_first else ai_clip
                 first_beat = beat
             clip_duration = probe_duration(ai_clip)
             if clip_duration < 2.5:
@@ -1863,16 +3129,34 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
                     f"Timed AI scene {i+1}: video ratio={ratio:.4f}x, "
                     f"end hold={video_hold_duration:.3f}s, audio pad={audio_pad_duration:.3f}s."
                 )
-            input_args = ["-i", str(ai_clip), "-i", str(audio_path)]
-            hold_filter = (
-                f",tpad=stop_mode=clone:stop_duration={video_hold_duration:.3f}"
-                if video_hold_duration > 0.001 else ""
-            )
-            video_filter = (
-                f"setpts=PTS*{ratio:.5f}{hold_filter},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-                f"fps={target_fps},eq=contrast=1.035:saturation=0.94:brightness=-0.008,vignette=PI/6,"
-                f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
-            )
+            if story_engine.is_25d_pipeline(concept.get("visual_pipeline")):
+                parallax_clip = reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4"
+                editorial_clip = clips_dir / f"scene_{i+1:02d}_editorial.mp4"
+                beat_shots = story_engine.retime_beat_shots(beat.get("editorial_shots", []), target_duration)
+                motion_comic.render_editorial_montage(
+                    None if primary_image_first else ai_clip,
+                    parallax_clip, editorial_clip, beat_shots,
+                    target_duration=target_duration,
+                    video_speed_ratio=ratio,
+                    video_hold_duration=video_hold_duration,
+                    fps=target_fps,
+                )
+                input_args = ["-i", str(editorial_clip), "-i", str(audio_path)]
+                video_filter = (
+                    f"fps={target_fps},eq=contrast=1.035:saturation=0.96:brightness=-0.006,vignette=PI/6,"
+                    f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
+                )
+            else:
+                input_args = ["-i", str(ai_clip), "-i", str(audio_path)]
+                hold_filter = (
+                    f",tpad=stop_mode=clone:stop_duration={video_hold_duration:.3f}"
+                    if video_hold_duration > 0.001 else ""
+                )
+                video_filter = (
+                    f"setpts=PTS*{ratio:.5f}{hold_filter},scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
+                    f"fps={target_fps},eq=contrast=1.035:saturation=0.94:brightness=-0.008,vignette=PI/6,"
+                    f"subtitles='{(segments_dir / f'beat_{i+1:02d}.ass').as_posix()}':fontsdir={FONT_DIR}"
+                )
             original_graphic_scenes += 0
             stock_clip = None
         else:
@@ -1925,10 +3209,8 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
         segment_path = segments_dir / f"segment_{i+1:02d}.mp4"
         duration = target_duration
         audio_pad_duration = timing["audio_pad_duration"] if ai_clip.exists() else 0.08
-        audio_filter = (
-            (f"atempo={audio_tempo:.6f}," if audio_tempo > 1.000001 else "")
-            + f"apad=pad_dur={audio_pad_duration:.3f},loudnorm=I=-16:TP=-1.5:LRA=11"
-        )
+        has_speech = bool(speech_segments) or bool(str(beat.get("voiceover") or "").strip())
+        audio_filter = _scene_audio_filter(audio_tempo, audio_pad_duration, has_speech=has_speech)
         run_cmd([
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *input_args,
             "-vf", video_filter, "-map", "0:v:0", "-map", "1:a:0",
@@ -1966,8 +3248,12 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     mixed_path.replace(video_path)
     final_duration = probe_duration(video_path)
     media_info = probe_media(video_path, expected_fps=target_fps)
-    if not 16.0 <= final_duration <= 38.0:
-        raise RuntimeError(f"Technical QA rejected duration {final_duration:.1f}s; expected 16–38 seconds.")
+    duration_policy = story_engine.policy_for(concept.get("story_type", "emotional"))
+    if not duration_policy["min_seconds"] - 0.5 <= final_duration <= duration_policy["max_seconds"] + 0.5:
+        raise RuntimeError(
+            f"Technical QA rejected {final_duration:.1f}s {duration_policy['story_type']} Reel; "
+            f"expected {duration_policy['min_seconds']}–{duration_policy['max_seconds']} seconds."
+        )
     if video_path.stat().st_size > 45 * 1024 * 1024:
         raise RuntimeError("Technical QA rejected video over 45 MB (Telegram delivery safety limit).")
 
@@ -1990,16 +3276,24 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
     segment_durations = [probe_duration(path) for path in segment_paths]
     frame_review = visual_qa(video_path, reel_dir, final_duration, segment_durations=segment_durations)
     frame_review["full_video_motion_diagnostics"] = motion_diagnostics(video_path)
+    # Save the scorecard and sampled frames before the fail-closed gate so rejected
+    # Reels always carry the evidence referenced by Telegram alerts and Actions artifacts.
+    persist_visual_qa_report(reel_dir, frame_review)
     # Fail closed for unmistakably broken text/composition. If visual model review is
     # unavailable, deliver only with an explicit human-review requirement instead.
     enforce_visual_qa(frame_review)
     technical = {
         "duration_seconds": round(final_duration, 2),
-        "resolution": "1080x1920", "aspect_ratio": "9:16", "frame_rate_target": f"{target_fps} fps" + (" (native Wan cadence)" if require_ai_video else ""),
+        "resolution": "1080x1920", "aspect_ratio": "9:16",
+        "frame_rate_target": f"{target_fps} fps" + (" (primary 2.5D editorial master; Wan source 24 fps)" if story_engine.is_25d_pipeline(concept.get("visual_pipeline")) else (" (native Wan cadence)" if require_ai_video else "")),
+        "visual_style_profile": concept.get("visual_style_profile", {}),
+        "primary_visual_pipeline": story_engine.PRIMARY_25D_PIPELINE,
         "ffprobe_media_info": media_info, "file_size_mb": round(video_path.stat().st_size / 1024 / 1024, 2),
-        "voice_segments": len(concept["beats"]), "stock_video_segments": stock_scenes,
+        "voice_segments": len(concept["beats"]), "editorial_shots": int((concept.get("editorial_shot_plan") or {}).get("editorial_shot_count", len(concept["beats"]))), "stock_video_segments": stock_scenes,
         "original_custom_graphic_scenes": original_graphic_scenes,
-        "photoreal_ai_video_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").exists()),
+        "ai_source_video_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}.mp4").exists()),
+        "depth_parallax_scenes": sum(1 for i in range(len(concept["beats"])) if (reel_dir / "ai_clips" / f"scene_{i+1:02d}_25d.mp4").exists()),
+        "visual_pipeline": concept.get("visual_pipeline", "legacy_wan_video"),
         "custom_story_specific_overlays": sum(1 for beat in concept["beats"] if beat.get("overlay_text")),
         "unique_pexels_video_ids_in_reel": len(set(used_assets)),
         "originality_safeguards": concept.get("originality_safeguards", {}),
@@ -2010,7 +3304,7 @@ def render_reel(concept: dict[str, Any], reel_dir: Path, asset_ids: set[str], hi
             "Listen once for Hindi pronunciation and pacing.",
             "Check every subtitle on a phone screen before publishing.",
             "Confirm the cover and caption match the intended Page brand.",
-            "Check natural motion, scene continuity, realistic lighting/materials and obvious AI defects. If anything feels visibly synthetic or broken, do not publish; regenerate that scene.",
+            "Check illustrated style consistency, character continuity, parallax depth, natural motion and obvious AI defects. If anything feels visibly broken, do not publish; regenerate that beat.",
             "Evaluate whether the story and editing add meaningful creative value beyond AI-generated footage.",
             "Use Meta's current AI disclosure/label option when required for realistic synthetic media; do not imply a fictional story is a verified real event.",
         ],
@@ -2442,6 +3736,9 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
     if (
         approved
         and topic.get("qa_passed") is True
+        and topic.get("visual_qa_status") == "reviewed"
+        and topic.get("motion_diagnostics_status") == "passed"
+        and topic.get("metadata_ocr_status") == "passed"
         and topic.get("telegram_delivered") is True
         and topic.get("reel_id")
     ):
@@ -2452,6 +3749,9 @@ def _parse_review_message(message_text: str, history: dict[str, Any], approved: 
             "job_id": str(topic.get("job_id") or ""),
             "title": str(topic.get("title", title)),
             "qa_passed": True,
+            "visual_qa_status": "reviewed",
+            "motion_diagnostics_status": "passed",
+            "metadata_ocr_status": "passed",
             "telegram_delivered": True,
             "owner_approved": True,
             "approved_at_ist": topic.get("reviewed_at_ist") or datetime.now(TZ).isoformat(timespec="seconds"),
@@ -2614,7 +3914,7 @@ def director_10k_readiness(concept: dict[str, Any], build: dict[str, Any]) -> di
         "hook_clarity": 12, "story_progression": 10, "payoff": 10,
         "originality": 10, "creative_contribution_beyond_stock": 8,
         "share_value": 8, "human_specificity": 9, "emotional_resonance": 9,
-        "photoreal_prompt_quality": 7, "continuity_coherence": 5,
+        "illustrated_visual_quality": 7, "continuity_coherence": 5,
         "voiceover_rhythm": 4, "readability": 3, "platform_safety": 5,
     }
     available = [(key, weight, scores.get(key)) for key, weight in weights.items()]

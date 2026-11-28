@@ -1,36 +1,57 @@
-# Project Status — BINA SHOR KE v3.7 P0 Reliability
+# BINA SHOR KE — Current Project Status
 
-**Historical v3.5 baseline:** resilient recovery + automated QA. Current v3.7 release notes follow below. Live production is not certified.
+**As of 22 November 2026 (Asia/Kolkata).** This file describes the current feature branch, not a production release. The PR remains draft/open and is not merged.
 
-- Historical baseline ZIP: `BINA_SHOR_KE_Studio_v3_5_Resilient_AutoQA.zip`
-- Historical v3.5 baseline had 70 offline unit/orchestration tests.
-- Python compile, all 3 GitHub workflow YAML files parse, producer self-test, studio preflight and model-lab CLI checks passed.
-- Lightweight scheduled polling checks Kaggle status before full finalizer setup, skipping media/ASR dependencies while a GPU job remains active.
-- Primary production video model remains Wan2.2 TI2V-5B Q4_K_M GGUF on Kaggle GPU.
-- Gemini remains the currently qualified Hindi TTS and image-based visual reviewer. Groq/Mistral/Cloudflare routing is for text only.
-- Local Whisper large-v3-turbo (CPU int8) checks transcript alignment; FFmpeg scans entire duration for black/frozen intervals; Gemini vision QA samples up to 18 beat-stratified frames. Human full playback and Telegram approve/reject remain required.
-- Kaggle output recovery is best-effort: scenes are locally atomic/checksummed; on failure, if Kaggle exposes the partial outputs, verified scenes are uploaded to a private Kaggle dataset and restored. This is not a guarantee against hard infrastructure loss.
-- Automatic resume budget: <=4h estimated; owner-triggered resume <=8h; maximum two attempts; ambiguous pushes require owner confirmation.
-- HunyuanVideo-1.5, FLUX.1 schnell and Indic-Speak are isolated Model Lab candidates, not weekly workflow dependencies. No model promotion without paired baseline test and rights review.
-- No paid fallback and no automatic Facebook publishing.
-- No live Kaggle GPU, gated-model, API-key or Telegram acceptance test has been performed in this environment.
-- See `FINAL_DEEP_REVIEW_v3.5.md`, `ANNUAL_OPERATIONS_PLAYBOOK_HINDI.md` and `docs/MODEL_LAB_BENCHMARK_HINDI.md`.
+## Selected architecture
 
+The selected primary renderer is **image-first, primarily 2.5D illustrated motion-comic cinema**:
+- FLUX.1 Schnell Q4_K_S produces one 704×1280 illustrated still for each source story beat.
+- Depth Anything V2 produces depth maps; OpenCV/FFmpeg create genuine parallax motion from the stills.
+- The primary storyboard routes 100% of editorial shots to depth-parallax. It does not generate Wan video clips.
+- Final editorial output is 1080×1920, 30 FPS.
+- Wan2.2 remains only as a backward-compatible legacy route for older manifests/recovery. It is not the default renderer.
+- Human review remains required; the factory does not auto-publish to Facebook/Instagram/YouTube.
 
-## v3.6 follow-up fix
-A post-release integration review found that Telegram owner commands were only consumed during planning, not during idle periods. A dedicated six-hour scheduled `telegram-feedback-sync.yml` now drains updates independently of GPU activity and commits the private owner cursor/history/performance log. Manual `Run workflow` is available for immediate sync.
+## Implemented in the feature branch
 
+- Voice-first screenplay/timing and speaker-specific Hindi WAV generation.
+- Adaptive story duration/shot planning and genre-specific colour, lighting and camera grammar.
+- FLUX still-image ComfyUI graph, immutable model-revision capture, vertical image validation and SHA-256 manifests.
+- Depth Anything V2 parallax generation directly from still PNGs; pure-parallax FFmpeg assembly without dummy hero-video inputs.
+- Separate image-first toolchain lock and runtime benchmark logic; legacy Wan lock is kept separate.
+- Private Kaggle PNG still checkpoint save/restore, hash validation and regeneration of missing parallax assets. Recovery manifests now also preserve the exact ComfyUI/GGUF commits, FLUX/CLIP/T5/VAE/Depth revisions and runtime package versions; a resumed worker refuses to mix checkpoints with a different model/runtime build.
+- Image-first recovery estimates rebuild the parallax phase from restored PNG stills. At least five measured per-scene parallax timings are required; without enough measurements the estimate is unknown/unsafe and automatic resume is blocked rather than assuming a 1.5-hour placeholder.
+- VLM schema validation (finite numeric 1–5 scores, mandatory boolean critical flag), full-video black/freeze scan, 1 FPS Hindi+English Tesseract OCR for leaked internal labels, and fail-closed delivery/approval gate.
+- Weekly 3-Reel plan gate requires one complete image-first Reel, VLM/OCR/motion/technical QA, all four Telegram delivery receipts, owner /approve and a qualified image-first GPU estimate.
+- English/Hindi README, pilot design note, and operator notes updated for the new default and explicit qualification gaps.
+- FLUX AE VAE uses a public mirror with a fixed SHA-256 check to avoid relying on a gated BFL repository/token.
 
-## Current release: v3.6
-Use `BINA_SHOR_KE_Studio_v3_6_Continuous_Feedback.zip`. v3.6 corrects the v3.5 Telegram command ingestion gap with an independent six-hour scheduled/manual feedback sync. Offline verification: 74 tests, compile, producer self-test, studio preflight and workflow YAML parse passed. Live account/GPU qualification is still pending.
+## CI and live qualification status
 
+- Latest feature-head Offline Quality Gates run: GitHub Actions run **44941197291**, head **74777bf7ef78de69a6d2bd492deedc27cff6dcce**; at the time of this status update the run is still in progress. Do not infer a pass from older heads/runs that were superseded or cancelled.
+- Live image-first FLUX/Kaggle render: **not yet run/verified**.
+- Image-first ComfyUI/model toolchain lock and measured GPU benchmark: **not yet recorded**; the file data/image_toolchain_lock.json is created only after a complete live worker manifest is returned and verified.
+- Historical Wan benchmark remains about 10.32 hours for a 3-Reel batch and is unqualified. It is not valid evidence for the FLUX image-first renderer.
+- Historical Reel “मग का कर्ज” was produced using the previous Wan-based path and delivered to Telegram for manual review. It has not been owner-approved as a new image-first qualification Reel.
+- No new image-first video/cover/review-message/publish-kit Telegram receipt exists yet.
+- Six-Reel controlled experiment and actual platform analytics feedback have not been completed.
+- Target 18–28 minutes per Reel is a research target, not a measured runtime.
 
-## Current release: v3.7 P0 Reliability
+## Explicit remaining engineering gaps
 
-- Corrected generated Kaggle worker manifest injection and added non-empty manifest import integration test.
-- Weekly batch now requires persisted one-Reel QA + complete Telegram delivery + owner `/approve`, in addition to the separate GPU benchmark/time gate.
-- Telegram sync drain and commit steps require the bot token.
-- Empty/unset Kaggle kernel slug safely resolves to the default.
-- New plans are blocked while `gpu_checkpoint_saved` is present.
-- Offline validation: 84 tests passed; compile, producer self-test, studio preflight and all four workflow YAML parses passed.
-- Live account/API/GPU qualification remains pending; do not run `plan-week` until a real `plan-one` is reviewed and approved.
+1. True image-conditioned character-sheet/reference conditioning across all generated stills and across episodes. Current FLUX prompts repeat the cast description/wardrobe and VLM checks sampled continuity, but prompt repetition is not an identity lock.
+2. The current plan produces one source still per story beat (six source beats), then expands these into 12–16 editorial cuts using camera crops/retiming. It does not yet produce 12–16 independent still keyframes.
+3. Live GPU memory/disk/model-node compatibility, end-to-end FLUX still generation, parallax encoding and total runtime must be qualified on Kaggle.
+4. Full one-Reel output QA, human watch/listen review, and real Telegram receipt must pass before weekly planning unlocks.
+5. Six-Reel experiment, 72-hour per-platform analytics, story-category performance and style/voice A/B tests remain pending.
+6. Pre-baked immutable container / dependency-cache optimisation to remove the previous cold-start bottleneck is not yet implemented or benchmarked.
+7. Human review remains essential for Hindi pronunciation, dialect nuance, story taste, visual identity, cultural context and platform disclosure.
+
+## Persistent data / safety
+
+- data/toolchain_lock.json: legacy Wan toolchain lock only.
+- data/image_toolchain_lock.json: separate primary FLUX/Depth toolchain lock; not yet generated by a live qualified run.
+- data/pending_gpu_job.json and data/job_archive/: preserve pending/failed job state and recovery evidence.
+- data/history.json: stores approved/rejected story and owner qualification state.
+- Do not manually mark a GPU benchmark qualified, manually fabricate VLM/OCR/motion pass evidence, or reuse old Wan footage as a new image-first pass.
+- No paid model fallback. No automatic publishing. Do not merge/promote without explicit owner approval.

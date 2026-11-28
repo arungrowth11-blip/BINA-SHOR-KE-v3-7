@@ -1,3 +1,5 @@
+> **Historical review — v3.7 P0 Wan-era snapshot.** This review documents the earlier reliability baseline and is not evidence that the current image-first 2.5D architecture is qualified. Current architecture, live/offline evidence, and remaining gaps are maintained in `PROJECT_STATUS.md` and `docs/VOICE_FIRST_3D_PILOT.md`. The Wan-specific GPU/render statements below apply only to legacy jobs; do not use them to approve a new primary image-first Reel or weekly batch.
+
 # BINA SHOR KE v3.7 — P0 Reliability Review
 
 ## Scope

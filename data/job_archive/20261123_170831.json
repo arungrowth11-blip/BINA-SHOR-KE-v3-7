@@ -1,0 +1,1898 @@
+{
+  "job_id": "20261123_170831",
+  "created_at_ist": "2026-11-23T17:13:11+05:30",
+  "status": "qa_rejected",
+  "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
+  "manifest": {
+    "job_id": "20261123_170831",
+    "created_at_ist": "2026-11-23T17:13:11+05:30",
+    "status": "dispatching",
+    "toolchain_lock": {
+      "comfyui_commit": "7c4390a6f70cd8eb41014d6af52969397a752fc4",
+      "comfyui_gguf_commit": "6ea2651e7df66d7585f6ffee804b20e92fb38b8a",
+      "model_revisions": {
+        "unet": "e1701a0fc7a708f6459531776ee6e08111417d49",
+        "clip": "c4f60d30c55a624e35427060fdd217579a6c1d77",
+        "vae": "c4f60d30c55a624e35427060fdd217579a6c1d77"
+      }
+    },
+    "image_toolchain_lock": {},
+    "screenplay_schema_version": 2,
+    "audio_before_video": true,
+    "visual_pipeline": "primary_25d_motion_comic_v2",
+    "generation_mode": "still_image_first",
+    "editorial_shot_count": 13,
+    "model": "FLUX.1-schnell Q4_K_S GGUF (4-step still generation) + Depth Anything V2 Small + deterministic 2.5D parallax; no Wan video generation in the primary path",
+    "reels": [
+      {
+        "reel_id": "reel_01_170831",
+        "title": "चुप्पी के किनारे",
+        "pillar": "cinematic_moment",
+        "visual_bible": "छोटी, गर्म किचन, प्राकृतिक विंडो लाइट, लकड़ी की टेबल, कप और चावल की थाली, धुंधले पृष्ठभूमि में हल्की शैडो",
+        "characters": [
+          {
+            "character_id": "story_b593dfae_protagonist",
+            "display_name": "रिशा",
+            "role": "protagonist",
+            "gender_presentation": "female",
+            "age_band": "adult",
+            "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+            "appearance": "लंबी काली बाल, सफ़ेद कुर्ता, हल्का मेकअप, किचन में हल्के जूते",
+            "personality": "ध्यानशील, थोड़ा घबराहट भरा, काम में फोकस्ड",
+            "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+            "source_character_id": "protagonist",
+            "voice_profile_id": "hi_female_adult_aoede",
+            "gemini_voice": "Aoede"
+          },
+          {
+            "character_id": "story_b593dfae_supporting",
+            "display_name": "अमन",
+            "role": "supporting",
+            "gender_presentation": "male",
+            "age_band": "adult",
+            "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+            "appearance": "छोटा दाढ़ी, नीला शर्ट, किचन में हल्के सैंडल, हाथ में मोबाइल",
+            "personality": "सहज, थोड़ी अनभिज्ञ, मददगार लेकिन अंधेरे में",
+            "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+            "source_character_id": "supporting",
+            "voice_profile_id": "hi_male_adult_charon",
+            "gemini_voice": "Charon"
+          }
+        ],
+        "story_type": "emotional",
+        "visual_pipeline": "primary_25d_motion_comic_v2",
+        "visual_style_profile": {
+          "profile_id": "warm_indian_melodrama",
+          "palette": "warm tungsten amber, muted earth, monsoon teal shadows, restrained skin tones",
+          "lighting": "motivated window light and warm practical lamps, soft falloff, lived-in interiors",
+          "camera_grammar": "gentle push-ins, intimate reaction close-ups, slow lateral drifts, held emotional payoff",
+          "surface_language": "semi-painterly Indian graphic-novel illustration, tactile brush grain, restrained ink contours"
+        },
+        "beats": [
+          {
+            "video_prompt": "Medium close‑up of the warm kitchen interior, natural window light spilling onto a wooden table. Adult female Risha in a white kurta, long black hair, light makeup, barefoot, lifts a steaming tea cup; subtle jaw and lip movement syncs to her line. Behind her, a classic wall clock ticks, slightly blurred hands moving. Steam curls upward, soft shadows fall on the table. Camera is slightly low, focused on Risha’s face and cup, with shallow depth of field keeping background muted. No other movement, maintaining a quiet, tense atmosphere for the 3.54‑second duration.",
+            "narrative_role": "hook",
+            "state_change": "रिशा किचन में अकेले चाय बना रही, घड़ी की टिक‑टिक सुन रही",
+            "causal_link": "सिर्फ सुबह की शांति, कोई बाहरी शोर नहीं",
+            "visual_direction": "समय की धारा को दृश्यमान बनाना",
+            "scene_index": 1,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 3.28,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 3.5417,
+              "target_frames": 85,
+              "segments": [
+                {
+                  "segment_id": "beat_01_line_01",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.36,
+                  "duration_seconds": 3.28
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 85,
+            "editorial_shots": [
+              {
+                "shot_number": 1,
+                "beat_index": 1,
+                "shot_in_beat": 1,
+                "story_role": "hook",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "punch_in",
+                "start_seconds": 0,
+                "end_seconds": 1.7709,
+                "duration_seconds": 1.7709,
+                "zoom": 1.16,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 2,
+                "beat_index": 1,
+                "shot_in_beat": 2,
+                "story_role": "hook",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "reveal_left",
+                "start_seconds": 1.7709,
+                "end_seconds": 3.5417,
+                "duration_seconds": 1.7709,
+                "zoom": 1.1,
+                "crop_x": 0.38,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ]
+          },
+          {
+            "video_prompt": "Over‑the‑shoulder shot of adult Risha typing on a laptop, eyes focused, slight furrowed brow indicating mild anxiety. She wears the same white kurta and barefoot stance. In the foreground, laptop screen glows, illuminating her face. To the right, a pot of dal simmers on a gas stove, steam rising; her hand briefly rests on the pot rim, feeling warmth, then returns to typing. Camera tracks gently from laptop to pot, maintaining consistent lighting and kitchen décor, capturing her subtle mouth movement as she speaks, lasting 6.04 seconds.",
+            "narrative_role": "context",
+            "state_change": "रिशा रिपोर्ट लिख रही है, दाल का पानी उबलना भूल जाती है",
+            "causal_link": "काम की फोकस ने उसे छोटी‑छोटी चीज़ों से दूर कर दिया",
+            "visual_direction": "काम और रसोई के टकराव को दिखाना",
+            "scene_index": 2,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 5.72,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 6.0417,
+              "target_frames": 145,
+              "segments": [
+                {
+                  "segment_id": "beat_02_line_01",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 5.8,
+                  "duration_seconds": 5.72
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 145,
+            "editorial_shots": [
+              {
+                "shot_number": 3,
+                "beat_index": 2,
+                "shot_in_beat": 1,
+                "story_role": "context",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "gentle_push",
+                "start_seconds": 0,
+                "end_seconds": 3.0208,
+                "duration_seconds": 3.0208,
+                "zoom": 1.08,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 4,
+                "beat_index": 2,
+                "shot_in_beat": 2,
+                "story_role": "context",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "wide_drift_right",
+                "start_seconds": 3.0208,
+                "end_seconds": 6.0417,
+                "duration_seconds": 3.0208,
+                "zoom": 1.04,
+                "crop_x": 0.62,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ]
+          },
+          {
+            "video_prompt": "Two‑shot of adult Risha and adult Aman in the kitchen. Aman, with short beard, blue shirt, sandals, holds a mobile phone, gesturing toward the stove. Risha, still in white kurta, nods, eyes flicking to the clock, slight mouth movement for her reply. Both exhibit natural micro‑expressions: Aman’s calm smile, Risha’s hesitant smile. Camera positioned at eye level, slightly angled to capture both bodies, with shallow depth separating them from blurred background. Lighting remains warm, natural, emphasizing the silent tension for 6.04 seconds.",
+            "narrative_role": "conflict",
+            "state_change": "अमन आता है, मीट का ऑर्डर ले लेता है, रिशा चुप रहती है",
+            "causal_link": "अमन की मदद की पेशकश से रिशा को अपने काम में और गहराई मिलती है",
+            "visual_direction": "संवाद के बाद चुप्पी का निर्माण",
+            "scene_index": 3,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 5.6,
+              "dialogue_gap_seconds": 0.18,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 6.0417,
+              "target_frames": 145,
+              "segments": [
+                {
+                  "segment_id": "beat_03_line_01",
+                  "speaker_id": "story_b593dfae_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.08,
+                  "duration_seconds": 3
+                },
+                {
+                  "segment_id": "beat_03_line_02",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 3.26,
+                  "end_seconds": 5.86,
+                  "duration_seconds": 2.6
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 145,
+            "editorial_shots": [
+              {
+                "shot_number": 5,
+                "beat_index": 3,
+                "shot_in_beat": 1,
+                "story_role": "conflict",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "reaction_close",
+                "start_seconds": 0,
+                "end_seconds": 3.0208,
+                "duration_seconds": 3.0208,
+                "zoom": 1.18,
+                "crop_x": 0.52,
+                "crop_y": 0.48,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 6,
+                "beat_index": 3,
+                "shot_in_beat": 2,
+                "story_role": "conflict",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "slow_push",
+                "start_seconds": 3.0208,
+                "end_seconds": 6.0417,
+                "duration_seconds": 3.0208,
+                "zoom": 1.12,
+                "crop_x": 0.5,
+                "crop_y": 0.52,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ]
+          },
+          {
+            "video_prompt": "Close‑up of Aman’s hands pulling a clean kitchen towel across the wooden table, fabric texture crisp, his shoulders relaxed. He says his line with subtle mouth motion, then the focus shifts to Risha’s hand gently lifting her tea cup, condensation glistening on the rim. Risha’s face shows soft, reluctant expression, slight mouth movement for her dialogue. Camera dolly tracks leftward, keeping the cup centered, maintaining consistent warm lighting and kitchen details for 5.21 seconds.",
+            "narrative_role": "escalation",
+            "state_change": "अमन चादरें झाड़ता है, रिशा धीरे‑धीरे चाय का कप उठाती है",
+            "causal_link": "अमन की हल्की हरकत रिश्ते की दूरी को बढ़ा देती है",
+            "visual_direction": "शारीरिक दूरी को दृश्यमान बनाना",
+            "scene_index": 4,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.8,
+              "dialogue_gap_seconds": 0.18,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 5.2083,
+              "target_frames": 125,
+              "segments": [
+                {
+                  "segment_id": "beat_04_line_01",
+                  "speaker_id": "story_b593dfae_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 2.88,
+                  "duration_seconds": 2.8
+                },
+                {
+                  "segment_id": "beat_04_line_02",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 3.06,
+                  "end_seconds": 5.06,
+                  "duration_seconds": 2
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 125,
+            "editorial_shots": [
+              {
+                "shot_number": 7,
+                "beat_index": 4,
+                "shot_in_beat": 1,
+                "story_role": "escalation",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "track_left",
+                "start_seconds": 0,
+                "end_seconds": 2.6042,
+                "duration_seconds": 2.6042,
+                "zoom": 1.08,
+                "crop_x": 0.38,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 8,
+                "beat_index": 4,
+                "shot_in_beat": 2,
+                "story_role": "escalation",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "track_right",
+                "start_seconds": 2.6042,
+                "end_seconds": 5.2083,
+                "duration_seconds": 2.6042,
+                "zoom": 1.08,
+                "crop_x": 0.62,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ]
+          },
+          {
+            "video_prompt": "Medium shot of Aman bringing the tea cup to his lips, eyebrows raised in surprised delight, mouth moving for his line. Quick cut to Risha’s face, brief frown and slight disappointment, mouth subtly forming her words. The empty cup on the table now holds Aman’s tea, steam curling upward. Background remains softly blurred; lighting warm, emphasizing facial expressions and the swapped cup. Camera holds each reaction for a beat, then a gentle push‑in to heighten intimacy over the 6.54‑second span.",
+            "narrative_role": "turn",
+            "state_change": "अमन अनजाने में रिशा की चाय पी लेता है, वह समझती है कि उसने सुना नहीं",
+            "causal_link": "उसकी अनजानी हरकत रिश्ते की चुप्पी को उजागर करती है",
+            "visual_direction": "अहसास के क्षण को उजागर करना",
+            "scene_index": 5,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 6.2,
+              "dialogue_gap_seconds": 0.18,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 6.5417,
+              "target_frames": 157,
+              "segments": [
+                {
+                  "segment_id": "beat_05_line_01",
+                  "speaker_id": "story_b593dfae_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 2.8,
+                  "duration_seconds": 2.72
+                },
+                {
+                  "segment_id": "beat_05_line_02",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 2.98,
+                  "end_seconds": 6.46,
+                  "duration_seconds": 3.48
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 157,
+            "editorial_shots": [
+              {
+                "shot_number": 9,
+                "beat_index": 5,
+                "shot_in_beat": 1,
+                "story_role": "turn",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "reveal_push",
+                "start_seconds": 0,
+                "end_seconds": 2.1806,
+                "duration_seconds": 2.1806,
+                "zoom": 1.2,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 10,
+                "beat_index": 5,
+                "shot_in_beat": 2,
+                "story_role": "turn",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "clue_insert",
+                "start_seconds": 2.1806,
+                "end_seconds": 4.3611,
+                "duration_seconds": 2.1806,
+                "zoom": 1.18,
+                "crop_x": 0.58,
+                "crop_y": 0.58,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 11,
+                "beat_index": 5,
+                "shot_in_beat": 3,
+                "story_role": "turn",
+                "coverage": "detail",
+                "source": "depth_parallax",
+                "camera_move": "reveal_push",
+                "start_seconds": 4.3611,
+                "end_seconds": 6.5417,
+                "duration_seconds": 2.1806,
+                "zoom": 1.2,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ]
+          },
+          {
+            "video_prompt": "Close‑up of an empty tea cup on the wooden table, faint steam lingering above. Aman’s adult hand rests lightly on the rim, fingers relaxed, no mouth movement. In soft focus behind, Risha’s profile appears, silhouetted by morning light, her expression calm yet slightly sad. Camera remains still, capturing the quiet stillness, warm natural lighting, and subtle shadows that echo the lingering silence for the final 4.71 seconds.",
+            "narrative_role": "payoff",
+            "state_change": "खाली कप में अमन का हाथ, रिशा अभी भी वही चुप्पी सुनती है",
+            "causal_link": "पहले की चुप्पी और अनसुनी बातें अब कप के खालीपन में परिलक्षित होती हैं",
+            "visual_direction": "अंतिम भावनात्मक प्रतिबिंब देना",
+            "scene_index": 6,
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.44,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.7083,
+              "target_frames": 113,
+              "segments": [
+                {
+                  "segment_id": "beat_06_line_01",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 4.52,
+                  "duration_seconds": 4.44
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 113,
+            "editorial_shots": [
+              {
+                "shot_number": 12,
+                "beat_index": 6,
+                "shot_in_beat": 1,
+                "story_role": "payoff",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "slow_pull_frame",
+                "start_seconds": 0,
+                "end_seconds": 2.3542,
+                "duration_seconds": 2.3542,
+                "zoom": 1.04,
+                "crop_x": 0.5,
+                "crop_y": 0.52,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 13,
+                "beat_index": 6,
+                "shot_in_beat": 2,
+                "story_role": "payoff",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "emotional_hold",
+                "start_seconds": 2.3542,
+                "end_seconds": 4.7083,
+                "duration_seconds": 2.3542,
+                "zoom": 1.12,
+                "crop_x": 0.5,
+                "crop_y": 0.48,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "reels": [
+    {
+      "reel_id": "reel_01_170831",
+      "title": "चुप्पी के किनारे",
+      "pillar": "cinematic_moment",
+      "story_type": "emotional",
+      "visual_pipeline": "primary_25d_motion_comic_v2",
+      "visual_bible": "छोटी, गर्म किचन, प्राकृतिक विंडो लाइट, लकड़ी की टेबल, कप और चावल की थाली, धुंधले पृष्ठभूमि में हल्की शैडो",
+      "theme": "एक छोटी सी अनदेखी चुप्पी रिश्ते में दूरी बनाती है",
+      "planned_publish_at": "2026-11-24T13:07:00+05:30",
+      "planned_publish_label": "Tue 24 Nov, 01:07 PM IST",
+      "concept": {
+        "title": "चुप्पी के किनारे",
+        "characters": [
+          {
+            "character_id": "story_b593dfae_protagonist",
+            "display_name": "रिशा",
+            "role": "protagonist",
+            "gender_presentation": "female",
+            "age_band": "adult",
+            "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+            "appearance": "लंबी काली बाल, सफ़ेद कुर्ता, हल्का मेकअप, किचन में हल्के जूते",
+            "personality": "ध्यानशील, थोड़ा घबराहट भरा, काम में फोकस्ड",
+            "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+            "source_character_id": "protagonist",
+            "voice_profile_id": "hi_female_adult_aoede",
+            "gemini_voice": "Aoede"
+          },
+          {
+            "character_id": "story_b593dfae_supporting",
+            "display_name": "अमन",
+            "role": "supporting",
+            "gender_presentation": "male",
+            "age_band": "adult",
+            "visual_age_description": "Visibly an adult (30–54); do not depict as a teenager, young adult or elderly person.",
+            "appearance": "छोटा दाढ़ी, नीला शर्ट, किचन में हल्के सैंडल, हाथ में मोबाइल",
+            "personality": "सहज, थोड़ी अनभिज्ञ, मददगार लेकिन अंधेरे में",
+            "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+            "source_character_id": "supporting",
+            "voice_profile_id": "hi_male_adult_charon",
+            "gemini_voice": "Charon"
+          }
+        ],
+        "pillar": "cinematic_moment",
+        "story_type": "emotional",
+        "series_name": "जो दिखा, पूरा सच नहीं",
+        "theme": "एक छोटी सी अनदेखी चुप्पी रिश्ते में दूरी बनाती है",
+        "audience_reason": "वयस्क दर्शकों को रोज़ की छोटी‑छोटी असहजताओं में खुद को पहचानने का अवसर देता है",
+        "share_reason": "सुनने‑न सुनने की नाजुक लकीर को उजागर करता है, जिसे कोई भी दोस्त या साथी समझ सके",
+        "share_recipient": "पुराने कॉलेज मित्र, जो अक्सर बातों में चुप्पी को अनदेखा करता है",
+        "narrative_engine": "साइलेंट म्युझिक वॉटरलीक",
+        "emotional_aftertaste": "एक हल्की उदासी कि कुछ बातें कहे बिना भी असर छोड़ देती हैं",
+        "human_detail": "रिशा के हाथ में टपकती चाय की बूंदें",
+        "character_contradiction": "रिशा सबको सुना चाहती है, पर अपनी रिपोर्ट की धुन में चुप रहती है",
+        "cost_of_choice": "अमन के साथ छोटी‑सी दूरी बन जाती है, जो अब भी चाय के कप में ही रहती है",
+        "hook": "किचन की चुप्पी में घड़ी टिकती रही",
+        "visual_bible": "छोटी, गर्म किचन, प्राकृतिक विंडो लाइट, लकड़ी की टेबल, कप और चावल की थाली, धुंधले पृष्ठभूमि में हल्की शैडो",
+        "beats": [
+          {
+            "narrative_role": "hook",
+            "state_change": "रिशा किचन में अकेले चाय बना रही, घड़ी की टिक‑टिक सुन रही",
+            "causal_link": "सिर्फ सुबह की शांति, कोई बाहरी शोर नहीं",
+            "speech_segments": [
+              {
+                "segment_id": "beat_01_line_01",
+                "speaker_id": "story_b593dfae_protagonist",
+                "text": "किचन की चुप्पी में घड़ी टिकती रही",
+                "emotion": "शांत लेकिन तनावभरी",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 3.28
+              }
+            ],
+            "voiceover": "किचन की चुप्पी में घड़ी टिकती रही",
+            "voice_direction": "धीमी, स्थिर लहजा",
+            "screen_text": "किचन की चुप्पी में घड़ी टिकती रही",
+            "visual_query": "kitchen interior, closeup clock, steam from tea",
+            "visual_direction": "समय की धारा को दृश्यमान बनाना",
+            "video_prompt": "Medium close‑up of the warm kitchen interior, natural window light spilling onto a wooden table. Adult female Risha in a white kurta, long black hair, light makeup, barefoot, lifts a steaming tea cup; subtle jaw and lip movement syncs to her line. Behind her, a classic wall clock ticks, slightly blurred hands moving. Steam curls upward, soft shadows fall on the table. Camera is slightly low, focused on Risha’s face and cup, with shallow depth of field keeping background muted. No other movement, maintaining a quiet, tense atmosphere for the 3.54‑second duration.",
+            "overlay_type": "keyword",
+            "overlay_text": "समय",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 3.28,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 3.5417,
+              "target_frames": 85,
+              "segments": [
+                {
+                  "segment_id": "beat_01_line_01",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.36,
+                  "duration_seconds": 3.28
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 85,
+            "editorial_shots": [
+              {
+                "shot_number": 1,
+                "beat_index": 1,
+                "shot_in_beat": 1,
+                "story_role": "hook",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "punch_in",
+                "start_seconds": 0,
+                "end_seconds": 1.7709,
+                "duration_seconds": 1.7709,
+                "zoom": 1.16,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 2,
+                "beat_index": 1,
+                "shot_in_beat": 2,
+                "story_role": "hook",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "reveal_left",
+                "start_seconds": 1.7709,
+                "end_seconds": 3.5417,
+                "duration_seconds": 1.7709,
+                "zoom": 1.1,
+                "crop_x": 0.38,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ],
+            "scene_index": 1
+          },
+          {
+            "narrative_role": "context",
+            "state_change": "रिशा रिपोर्ट लिख रही है, दाल का पानी उबलना भूल जाती है",
+            "causal_link": "काम की फोकस ने उसे छोटी‑छोटी चीज़ों से दूर कर दिया",
+            "speech_segments": [
+              {
+                "segment_id": "beat_02_line_01",
+                "speaker_id": "story_b593dfae_protagonist",
+                "text": "मैं आज की रिपोर्ट पर काम कर रही हूँ, लेकिन दाल का पानी उबलना भूल गई",
+                "emotion": "थोड़ी घबराहट",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 5.72
+              }
+            ],
+            "voiceover": "मैं आज की रिपोर्ट पर काम कर रही हूँ, लेकिन दाल का पानी उबलना भूल गई",
+            "voice_direction": "थोड़ी तेज़ी, फोकस्ड",
+            "screen_text": "रिपोर्ट और दाल",
+            "visual_query": "laptop, pot on stove, steam, focused woman",
+            "visual_direction": "काम और रसोई के टकराव को दिखाना",
+            "video_prompt": "Over‑the‑shoulder shot of adult Risha typing on a laptop, eyes focused, slight furrowed brow indicating mild anxiety. She wears the same white kurta and barefoot stance. In the foreground, laptop screen glows, illuminating her face. To the right, a pot of dal simmers on a gas stove, steam rising; her hand briefly rests on the pot rim, feeling warmth, then returns to typing. Camera tracks gently from laptop to pot, maintaining consistent lighting and kitchen décor, capturing her subtle mouth movement as she speaks, lasting 6.04 seconds.",
+            "overlay_type": "note",
+            "overlay_text": "भूल",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 5.72,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 6.0417,
+              "target_frames": 145,
+              "segments": [
+                {
+                  "segment_id": "beat_02_line_01",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 5.8,
+                  "duration_seconds": 5.72
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 145,
+            "editorial_shots": [
+              {
+                "shot_number": 3,
+                "beat_index": 2,
+                "shot_in_beat": 1,
+                "story_role": "context",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "gentle_push",
+                "start_seconds": 0,
+                "end_seconds": 3.0208,
+                "duration_seconds": 3.0208,
+                "zoom": 1.08,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 4,
+                "beat_index": 2,
+                "shot_in_beat": 2,
+                "story_role": "context",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "wide_drift_right",
+                "start_seconds": 3.0208,
+                "end_seconds": 6.0417,
+                "duration_seconds": 3.0208,
+                "zoom": 1.04,
+                "crop_x": 0.62,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ],
+            "scene_index": 2
+          },
+          {
+            "narrative_role": "conflict",
+            "state_change": "अमन आता है, मीट का ऑर्डर ले लेता है, रिशा चुप रहती है",
+            "causal_link": "अमन की मदद की पेशकश से रिशा को अपने काम में और गहराई मिलती है",
+            "speech_segments": [
+              {
+                "segment_id": "beat_03_line_01",
+                "speaker_id": "story_b593dfae_supporting",
+                "text": "मैं मीट का ऑर्डर ले लेता हूँ, तुम रिपोर्ट पूरी करो",
+                "emotion": "सहज, मददगार",
+                "source_speaker_id": "supporting",
+                "voice_profile_id": "hi_male_adult_charon",
+                "gemini_voice": "Charon",
+                "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+                "duration_seconds": 3
+              },
+              {
+                "segment_id": "beat_03_line_02",
+                "speaker_id": "story_b593dfae_protagonist",
+                "text": "ठीक है, बस थोड़ा समय दो",
+                "emotion": "हल्की अनिच्छा",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 2.6
+              }
+            ],
+            "voiceover": "मैं मीट का ऑर्डर ले लेता हूँ, तुम रिपोर्ट पूरी करो ठीक है, बस थोड़ा समय दो",
+            "voice_direction": "मित्रतापूर्ण, पर तनाव के नीचे",
+            "screen_text": "ऑर्डर का प्रस्ताव",
+            "visual_query": "two people in kitchen, phone ordering, subtle tension",
+            "visual_direction": "संवाद के बाद चुप्पी का निर्माण",
+            "video_prompt": "Two‑shot of adult Risha and adult Aman in the kitchen. Aman, with short beard, blue shirt, sandals, holds a mobile phone, gesturing toward the stove. Risha, still in white kurta, nods, eyes flicking to the clock, slight mouth movement for her reply. Both exhibit natural micro‑expressions: Aman’s calm smile, Risha’s hesitant smile. Camera positioned at eye level, slightly angled to capture both bodies, with shallow depth separating them from blurred background. Lighting remains warm, natural, emphasizing the silent tension for 6.04 seconds.",
+            "overlay_type": "contrast",
+            "overlay_text": "सहायता",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 5.6,
+              "dialogue_gap_seconds": 0.18,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 6.0417,
+              "target_frames": 145,
+              "segments": [
+                {
+                  "segment_id": "beat_03_line_01",
+                  "speaker_id": "story_b593dfae_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 3.08,
+                  "duration_seconds": 3
+                },
+                {
+                  "segment_id": "beat_03_line_02",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 3.26,
+                  "end_seconds": 5.86,
+                  "duration_seconds": 2.6
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 145,
+            "editorial_shots": [
+              {
+                "shot_number": 5,
+                "beat_index": 3,
+                "shot_in_beat": 1,
+                "story_role": "conflict",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "reaction_close",
+                "start_seconds": 0,
+                "end_seconds": 3.0208,
+                "duration_seconds": 3.0208,
+                "zoom": 1.18,
+                "crop_x": 0.52,
+                "crop_y": 0.48,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 6,
+                "beat_index": 3,
+                "shot_in_beat": 2,
+                "story_role": "conflict",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "slow_push",
+                "start_seconds": 3.0208,
+                "end_seconds": 6.0417,
+                "duration_seconds": 3.0208,
+                "zoom": 1.12,
+                "crop_x": 0.5,
+                "crop_y": 0.52,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ],
+            "scene_index": 3
+          },
+          {
+            "narrative_role": "escalation",
+            "state_change": "अमन चादरें झाड़ता है, रिशा धीरे‑धीरे चाय का कप उठाती है",
+            "causal_link": "अमन की हल्की हरकत रिश्ते की दूरी को बढ़ा देती है",
+            "speech_segments": [
+              {
+                "segment_id": "beat_04_line_01",
+                "speaker_id": "story_b593dfae_supporting",
+                "text": "मैं यहाँ साफ‑सफ़ाई कर लेता हूँ",
+                "emotion": "सादगी से",
+                "source_speaker_id": "supporting",
+                "voice_profile_id": "hi_male_adult_charon",
+                "gemini_voice": "Charon",
+                "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+                "duration_seconds": 2.8
+              },
+              {
+                "segment_id": "beat_04_line_02",
+                "speaker_id": "story_b593dfae_protagonist",
+                "text": "मैं अपनी चाय ले लेती हूँ",
+                "emotion": "नरम, अनिच्छुक",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 2
+              }
+            ],
+            "voiceover": "मैं यहाँ साफ‑सफ़ाई कर लेता हूँ मैं अपनी चाय ले लेती हूँ",
+            "voice_direction": "सामान्य, दैनिक",
+            "screen_text": "सफाई और चाय",
+            "visual_query": "cleaning cloth, tea cup, hand movements",
+            "visual_direction": "शारीरिक दूरी को दृश्यमान बनाना",
+            "video_prompt": "Close‑up of Aman’s hands pulling a clean kitchen towel across the wooden table, fabric texture crisp, his shoulders relaxed. He says his line with subtle mouth motion, then the focus shifts to Risha’s hand gently lifting her tea cup, condensation glistening on the rim. Risha’s face shows soft, reluctant expression, slight mouth movement for her dialogue. Camera dolly tracks leftward, keeping the cup centered, maintaining consistent warm lighting and kitchen details for 5.21 seconds.",
+            "overlay_type": "step",
+            "overlay_text": "एक‑एक कदम",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.8,
+              "dialogue_gap_seconds": 0.18,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 5.2083,
+              "target_frames": 125,
+              "segments": [
+                {
+                  "segment_id": "beat_04_line_01",
+                  "speaker_id": "story_b593dfae_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 2.88,
+                  "duration_seconds": 2.8
+                },
+                {
+                  "segment_id": "beat_04_line_02",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 3.06,
+                  "end_seconds": 5.06,
+                  "duration_seconds": 2
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 125,
+            "editorial_shots": [
+              {
+                "shot_number": 7,
+                "beat_index": 4,
+                "shot_in_beat": 1,
+                "story_role": "escalation",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "track_left",
+                "start_seconds": 0,
+                "end_seconds": 2.6042,
+                "duration_seconds": 2.6042,
+                "zoom": 1.08,
+                "crop_x": 0.38,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 8,
+                "beat_index": 4,
+                "shot_in_beat": 2,
+                "story_role": "escalation",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "track_right",
+                "start_seconds": 2.6042,
+                "end_seconds": 5.2083,
+                "duration_seconds": 2.6042,
+                "zoom": 1.08,
+                "crop_x": 0.62,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ],
+            "scene_index": 4
+          },
+          {
+            "narrative_role": "turn",
+            "state_change": "अमन अनजाने में रिशा की चाय पी लेता है, वह समझती है कि उसने सुना नहीं",
+            "causal_link": "उसकी अनजानी हरकत रिश्ते की चुप्पी को उजागर करती है",
+            "speech_segments": [
+              {
+                "segment_id": "beat_05_line_01",
+                "speaker_id": "story_b593dfae_supporting",
+                "text": "ओह, यह मेरी चाय लग रही है",
+                "emotion": "हैरानी, हल्की हँसी",
+                "source_speaker_id": "supporting",
+                "voice_profile_id": "hi_male_adult_charon",
+                "gemini_voice": "Charon",
+                "voice_direction": "Adult masculine Hindi voice; composed, conversational and measured.",
+                "duration_seconds": 2.72
+              },
+              {
+                "segment_id": "beat_05_line_02",
+                "speaker_id": "story_b593dfae_protagonist",
+                "text": "मैं नहीं सुन पाई कि तुमने मेरा कप ले लिया",
+                "emotion": "हल्की निराशा",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 3.48
+              }
+            ],
+            "voiceover": "ओह, यह मेरी चाय लग रही है मैं नहीं सुन पाई कि तुमने मेरा कप ले लिया",
+            "voice_direction": "अमन की हँसी में हल्की अजीबता, रिश्ते की उलझन",
+            "screen_text": "गलती का एहसास",
+            "visual_query": "cup swap, surprised faces",
+            "visual_direction": "अहसास के क्षण को उजागर करना",
+            "video_prompt": "Medium shot of Aman bringing the tea cup to his lips, eyebrows raised in surprised delight, mouth moving for his line. Quick cut to Risha’s face, brief frown and slight disappointment, mouth subtly forming her words. The empty cup on the table now holds Aman’s tea, steam curling upward. Background remains softly blurred; lighting warm, emphasizing facial expressions and the swapped cup. Camera holds each reaction for a beat, then a gentle push‑in to heighten intimacy over the 6.54‑second span.",
+            "overlay_type": "keyword",
+            "overlay_text": "गलती",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 6.2,
+              "dialogue_gap_seconds": 0.18,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 6.5417,
+              "target_frames": 157,
+              "segments": [
+                {
+                  "segment_id": "beat_05_line_01",
+                  "speaker_id": "story_b593dfae_supporting",
+                  "start_seconds": 0.08,
+                  "end_seconds": 2.8,
+                  "duration_seconds": 2.72
+                },
+                {
+                  "segment_id": "beat_05_line_02",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 2.98,
+                  "end_seconds": 6.46,
+                  "duration_seconds": 3.48
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 157,
+            "editorial_shots": [
+              {
+                "shot_number": 9,
+                "beat_index": 5,
+                "shot_in_beat": 1,
+                "story_role": "turn",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "reveal_push",
+                "start_seconds": 0,
+                "end_seconds": 2.1806,
+                "duration_seconds": 2.1806,
+                "zoom": 1.2,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 10,
+                "beat_index": 5,
+                "shot_in_beat": 2,
+                "story_role": "turn",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "clue_insert",
+                "start_seconds": 2.1806,
+                "end_seconds": 4.3611,
+                "duration_seconds": 2.1806,
+                "zoom": 1.18,
+                "crop_x": 0.58,
+                "crop_y": 0.58,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 11,
+                "beat_index": 5,
+                "shot_in_beat": 3,
+                "story_role": "turn",
+                "coverage": "detail",
+                "source": "depth_parallax",
+                "camera_move": "reveal_push",
+                "start_seconds": 4.3611,
+                "end_seconds": 6.5417,
+                "duration_seconds": 2.1806,
+                "zoom": 1.2,
+                "crop_x": 0.5,
+                "crop_y": 0.5,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ],
+            "scene_index": 5
+          },
+          {
+            "narrative_role": "payoff",
+            "state_change": "खाली कप में अमन का हाथ, रिशा अभी भी वही चुप्पी सुनती है",
+            "causal_link": "पहले की चुप्पी और अनसुनी बातें अब कप के खालीपन में परिलक्षित होती हैं",
+            "speech_segments": [
+              {
+                "segment_id": "beat_06_line_01",
+                "speaker_id": "story_b593dfae_protagonist",
+                "text": "अब भी वही चुप्पी, और मेरा खाली कप",
+                "emotion": "गहरी शांति, थोड़ी उदासी",
+                "source_speaker_id": "protagonist",
+                "voice_profile_id": "hi_female_adult_aoede",
+                "gemini_voice": "Aoede",
+                "voice_direction": "Adult feminine Hindi voice; warm, conversational and expressive.",
+                "duration_seconds": 4.44
+              }
+            ],
+            "voiceover": "अब भी वही चुप्पी, और मेरा खाली कप",
+            "voice_direction": "धीमी, समेटते हुए",
+            "screen_text": "खाली कप, चुप्पी",
+            "visual_query": "empty cup, lingering silence",
+            "visual_direction": "अंतिम भावनात्मक प्रतिबिंब देना",
+            "video_prompt": "Close‑up of an empty tea cup on the wooden table, faint steam lingering above. Aman’s adult hand rests lightly on the rim, fingers relaxed, no mouth movement. In soft focus behind, Risha’s profile appears, silhouetted by morning light, her expression calm yet slightly sad. Camera remains still, capturing the quiet stillness, warm natural lighting, and subtle shadows that echo the lingering silence for the final 4.71 seconds.",
+            "overlay_type": "contrast",
+            "overlay_text": "चुप्पी",
+            "voice_timing": {
+              "fps": 24,
+              "speech_duration_seconds": 4.44,
+              "dialogue_gap_seconds": 0,
+              "head_handle_seconds": 0.08,
+              "tail_handle_seconds": 0.08,
+              "target_duration_seconds": 4.7083,
+              "target_frames": 113,
+              "segments": [
+                {
+                  "segment_id": "beat_06_line_01",
+                  "speaker_id": "story_b593dfae_protagonist",
+                  "start_seconds": 0.08,
+                  "end_seconds": 4.52,
+                  "duration_seconds": 4.44
+                }
+              ],
+              "timing_source": "measured_tts_wav_before_gpu",
+              "dialogue_truncated": false
+            },
+            "target_frames": 113,
+            "editorial_shots": [
+              {
+                "shot_number": 12,
+                "beat_index": 6,
+                "shot_in_beat": 1,
+                "story_role": "payoff",
+                "coverage": "establishing",
+                "source": "depth_parallax",
+                "camera_move": "slow_pull_frame",
+                "start_seconds": 0,
+                "end_seconds": 2.3542,
+                "duration_seconds": 2.3542,
+                "zoom": 1.04,
+                "crop_x": 0.5,
+                "crop_y": 0.52,
+                "style_profile_id": "warm_indian_melodrama"
+              },
+              {
+                "shot_number": 13,
+                "beat_index": 6,
+                "shot_in_beat": 2,
+                "story_role": "payoff",
+                "coverage": "reaction",
+                "source": "depth_parallax",
+                "camera_move": "emotional_hold",
+                "start_seconds": 2.3542,
+                "end_seconds": 4.7083,
+                "duration_seconds": 2.3542,
+                "zoom": 1.12,
+                "crop_x": 0.5,
+                "crop_y": 0.48,
+                "style_profile_id": "warm_indian_melodrama"
+              }
+            ],
+            "scene_index": 6
+          }
+        ],
+        "caption": "जब चाय की चुप्पी भी शब्द बन जाती है, तो समझना मुश्किल नहीं।",
+        "hashtags": [
+          "#BinaShorKe",
+          "#छोटीचुप्पी",
+          "#रिश्तोंकीबात"
+        ],
+        "cover_text": "चुप्पी के किनारे",
+        "posting_note": "टेस्ट कर रहे हैं कि दैनिक छोटे‑छोटे अनसुनने से दर्शकों की पहचान और शेयरिंग बढ़ेगी",
+        "screenplay_schema_version": 2,
+        "planned_publish_at": "2026-11-24T13:07:00+05:30",
+        "planned_publish_label": "Tue 24 Nov, 01:07 PM IST",
+        "duration_policy": {
+          "story_type": "emotional",
+          "target_seconds": 35,
+          "min_seconds": 30,
+          "max_seconds": 45,
+          "min_words": 75,
+          "max_words": 105,
+          "min_shots": 10,
+          "max_shots": 14,
+          "word_count": 77,
+          "duration_source": "measured_tts_wav_after_voice_generation",
+          "duration_is_adaptive": true
+        },
+        "editorial_review": {
+          "scores": {
+            "hook_clarity": 4,
+            "specificity": 4,
+            "human_specificity": 5,
+            "emotional_resonance": 4,
+            "story_progression": 4,
+            "payoff": 5,
+            "readability": 4,
+            "originality": 4,
+            "creative_contribution_beyond_stock": 4,
+            "visual_match": 5,
+            "illustrated_visual_quality": 5,
+            "motion_feasibility": 5,
+            "continuity_coherence": 5,
+            "voiceover_rhythm": 4,
+            "caption_quality": 3,
+            "share_value": 5,
+            "platform_safety": 5
+          },
+          "average_score": 4.41,
+          "approved": true,
+          "revision_notes": [
+            "**Human Specificity & Emotional Resonance**: The detail of *‘टपकती चाय की बूंदें’* (mentioned in `human_detail` but unused in beats) should be visually anchored in **Beat 01**—e.g., steam curling from the cup as Risha lifts it, with a close-up of condensation forming on the rim. This would ground the ‘unseen’ chup (silence) in tactile reality. The **‘दाल का पानी उबलना भूल जाना’* moment is excellent—it’s a *specific* failure of attention, not a generic ‘distraction.’ Keep this as the emotional anchor.",
+            "**Payoff & Story Progression**: The **‘खाली कप’** ending is *perfect*—it loops back to the **‘चाय की चुप्पी’* hook and reveals the *cost* (the unspoken disconnect) without preaching. However, **Beat 05’s dialogue exchange** could be tighter: *‘मैं नहीं सुन पाई’* feels slightly *too* explanatory. Instead, let Risha’s **physical reaction** (e.g., her hand *not* reaching for the cup, or her eyes flicking to the clock) convey the unspoken. The **‘गलती’* moment should feel *organic*—like a real person’s misstep, not a plot device.",
+            "**Visual & Motion Feasibility**: The **video prompts** are *exceptionally* detailed and physically plausible (e.g., depth of field, lighting, tactile textures). However, **Beat 04’s ‘सफाई और चाय’* shot could use a *subtle* motion cue—e.g., the **dolly movement** tracking leftward while the towel and cup are in focus. This reinforces the *drifting apart* without over-explaining. **Beat 06’s final close-up** of the empty cup is *flawless*—hold it for **1.5–2 seconds** to let the silence breathe.",
+            "**Share Recipient & Platform Safety**: The **‘पुराने कॉलेज मित्र’* share recipient is *spot-on*—it’s a **concrete, relatable** relationship (college friends often ignore small cues). The **#छोटीचुप्पी** hashtag is *strong*, but avoid **#BinaShorKe** (too literal; it risks sounding like a brand name). Instead, use **#अनसुनीचुप्पी** or **#क्यातुमनेसुना** for sharability.",
+            "**Caption Quality**: The current caption (*‘जब चाय की चुप्पी भी शब्द बन जाती है...’* ) is *almost* there but leans into **moralizing**. Revise to: *‘क्या तुमने सुना था कि मैं चुप थी?’*—this is **specific**, **unanswerable**, and leaves the viewer *feeling* the question, not hearing a lesson.",
+            "**Voiceover Rhythm**: The **‘voiceover’** lines should *only* appear in **Beat 01** (the hook) and **Beat 06** (payoff). The rest should be **dialogue-only** to maintain tension. The **‘धीमी, स्थिर लहजा’* for Beat 01 is great—use it sparingly.",
+            "**Originality**: The **‘रिपोर्ट की धुन’* contradiction** (Risha *wants* to be heard but is *unavailable*) is *fresh*. Avoid recycling it in other stories—this is a **unique** emotional conflict. The **‘चुप्पी के किनारे’* title is *strong*—it’s **metaphorical but grounded** in the visual (the kitchen’s edges)."
+          ],
+          "main_risk": "The story risks becoming *too* abstract if the **‘chup (silence)’** isn’t *visually* reinforced in every beat. For example, **Beat 02’s ‘दाल का पानी’* should show Risha’s *physical* detachment (e.g., her hand *not* checking the pot, or the stove’s flame *ignored*). The emotional payoff hinges on *specific* observations, not just dialogue.",
+          "department_notes": {},
+          "passes": 1
+        },
+        "originality_safeguards": {
+          "original_script_and_story_arc": true,
+          "custom_story_specific_overlays_required": true,
+          "recent_title_theme_similarity_check": "passed",
+          "source_clip_reuse_check": "active",
+          "not_a_Meta_eligibility_guarantee": true
+        },
+        "reel_id": "reel_01_170831",
+        "story_instance_id": "reel_01_170831",
+        "voice_first_plan": {
+          "status": "voice_measured_before_video",
+          "audio_model": "gemini-3.8-flash-lite-tts",
+          "cache_key_version": 2,
+          "scene_count": 6,
+          "dialogue_truncated": false,
+          "video_duration_source": "measured_voice_audio"
+        },
+        "voice_aware_storyboard": {
+          "status": "generated_after_voice_lock",
+          "timing_basis": "measured_tts_wav_before_gpu",
+          "source_scene_count": 6,
+          "dialogue_rewritten": false,
+          "target_frames_changed": false
+        },
+        "duration_lock": {
+          "story_type": "emotional",
+          "target_seconds": 35,
+          "measured_seconds": 32.083,
+          "minimum_seconds": 30,
+          "maximum_seconds": 45,
+          "duration_source": "sum_of_measured_beat_wav_timelines",
+          "dialogue_truncated": false
+        },
+        "editorial_shot_plan": {
+          "schema_version": 1,
+          "visual_pipeline": "primary_25d_motion_comic_v2",
+          "visual_style_profile": {
+            "profile_id": "warm_indian_melodrama",
+            "palette": "warm tungsten amber, muted earth, monsoon teal shadows, restrained skin tones",
+            "lighting": "motivated window light and warm practical lamps, soft falloff, lived-in interiors",
+            "camera_grammar": "gentle push-ins, intimate reaction close-ups, slow lateral drifts, held emotional payoff",
+            "surface_language": "semi-painterly Indian graphic-novel illustration, tactile brush grain, restrained ink contours"
+          },
+          "primary_2_5d_share_target": 1,
+          "hero_video_share_target": 0,
+          "visual_generation_mode": "image_first_flux_stills",
+          "image_generation_count": 6,
+          "story_type": "emotional",
+          "measured_duration_seconds": 32.083,
+          "source_beat_count": 6,
+          "editorial_shot_count": 13,
+          "hero_video_shot_count": 0,
+          "hero_video_share_actual": 0,
+          "depth_parallax_share_actual": 1,
+          "depth_parallax_shot_count": 13,
+          "gpu_generation_count": 6,
+          "gpu_generation_saving_claim": false,
+          "shots": [
+            {
+              "shot_number": 1,
+              "beat_index": 1,
+              "shot_in_beat": 1,
+              "story_role": "hook",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "punch_in",
+              "start_seconds": 0,
+              "end_seconds": 1.7709,
+              "duration_seconds": 1.7709,
+              "zoom": 1.16,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 2,
+              "beat_index": 1,
+              "shot_in_beat": 2,
+              "story_role": "hook",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "reveal_left",
+              "start_seconds": 1.7709,
+              "end_seconds": 3.5417,
+              "duration_seconds": 1.7709,
+              "zoom": 1.1,
+              "crop_x": 0.38,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 3,
+              "beat_index": 2,
+              "shot_in_beat": 1,
+              "story_role": "context",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "gentle_push",
+              "start_seconds": 0,
+              "end_seconds": 3.0208,
+              "duration_seconds": 3.0208,
+              "zoom": 1.08,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 4,
+              "beat_index": 2,
+              "shot_in_beat": 2,
+              "story_role": "context",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "wide_drift_right",
+              "start_seconds": 3.0208,
+              "end_seconds": 6.0417,
+              "duration_seconds": 3.0208,
+              "zoom": 1.04,
+              "crop_x": 0.62,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 5,
+              "beat_index": 3,
+              "shot_in_beat": 1,
+              "story_role": "conflict",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "reaction_close",
+              "start_seconds": 0,
+              "end_seconds": 3.0208,
+              "duration_seconds": 3.0208,
+              "zoom": 1.18,
+              "crop_x": 0.52,
+              "crop_y": 0.48,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 6,
+              "beat_index": 3,
+              "shot_in_beat": 2,
+              "story_role": "conflict",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "slow_push",
+              "start_seconds": 3.0208,
+              "end_seconds": 6.0417,
+              "duration_seconds": 3.0208,
+              "zoom": 1.12,
+              "crop_x": 0.5,
+              "crop_y": 0.52,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 7,
+              "beat_index": 4,
+              "shot_in_beat": 1,
+              "story_role": "escalation",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "track_left",
+              "start_seconds": 0,
+              "end_seconds": 2.6042,
+              "duration_seconds": 2.6042,
+              "zoom": 1.08,
+              "crop_x": 0.38,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 8,
+              "beat_index": 4,
+              "shot_in_beat": 2,
+              "story_role": "escalation",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "track_right",
+              "start_seconds": 2.6042,
+              "end_seconds": 5.2083,
+              "duration_seconds": 2.6042,
+              "zoom": 1.08,
+              "crop_x": 0.62,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 9,
+              "beat_index": 5,
+              "shot_in_beat": 1,
+              "story_role": "turn",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "reveal_push",
+              "start_seconds": 0,
+              "end_seconds": 2.1806,
+              "duration_seconds": 2.1806,
+              "zoom": 1.2,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 10,
+              "beat_index": 5,
+              "shot_in_beat": 2,
+              "story_role": "turn",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "clue_insert",
+              "start_seconds": 2.1806,
+              "end_seconds": 4.3611,
+              "duration_seconds": 2.1806,
+              "zoom": 1.18,
+              "crop_x": 0.58,
+              "crop_y": 0.58,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 11,
+              "beat_index": 5,
+              "shot_in_beat": 3,
+              "story_role": "turn",
+              "coverage": "detail",
+              "source": "depth_parallax",
+              "camera_move": "reveal_push",
+              "start_seconds": 4.3611,
+              "end_seconds": 6.5417,
+              "duration_seconds": 2.1806,
+              "zoom": 1.2,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 12,
+              "beat_index": 6,
+              "shot_in_beat": 1,
+              "story_role": "payoff",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "slow_pull_frame",
+              "start_seconds": 0,
+              "end_seconds": 2.3542,
+              "duration_seconds": 2.3542,
+              "zoom": 1.04,
+              "crop_x": 0.5,
+              "crop_y": 0.52,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 13,
+              "beat_index": 6,
+              "shot_in_beat": 2,
+              "story_role": "payoff",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "emotional_hold",
+              "start_seconds": 2.3542,
+              "end_seconds": 4.7083,
+              "duration_seconds": 2.3542,
+              "zoom": 1.12,
+              "crop_x": 0.5,
+              "crop_y": 0.48,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ],
+          "duration_source": "measured_tts_wav_before_gpu"
+        },
+        "visual_pipeline": "primary_25d_motion_comic_v2",
+        "visual_style_profile": {
+          "profile_id": "warm_indian_melodrama",
+          "palette": "warm tungsten amber, muted earth, monsoon teal shadows, restrained skin tones",
+          "lighting": "motivated window light and warm practical lamps, soft falloff, lived-in interiors",
+          "camera_grammar": "gentle push-ins, intimate reaction close-ups, slow lateral drifts, held emotional payoff",
+          "surface_language": "semi-painterly Indian graphic-novel illustration, tactile brush grain, restrained ink contours"
+        }
+      },
+      "beats": [
+        {
+          "video_prompt": "Medium close‑up of the warm kitchen interior, natural window light spilling onto a wooden table. Adult female Risha in a white kurta, long black hair, light makeup, barefoot, lifts a steaming tea cup; subtle jaw and lip movement syncs to her line. Behind her, a classic wall clock ticks, slightly blurred hands moving. Steam curls upward, soft shadows fall on the table. Camera is slightly low, focused on Risha’s face and cup, with shallow depth of field keeping background muted. No other movement, maintaining a quiet, tense atmosphere for the 3.54‑second duration.",
+          "narrative_role": "hook",
+          "state_change": "रिशा किचन में अकेले चाय बना रही, घड़ी की टिक‑टिक सुन रही",
+          "causal_link": "सिर्फ सुबह की शांति, कोई बाहरी शोर नहीं",
+          "visual_direction": "समय की धारा को दृश्यमान बनाना",
+          "scene_index": 1,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 3.28,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 3.5417,
+            "target_frames": 85,
+            "segments": [
+              {
+                "segment_id": "beat_01_line_01",
+                "speaker_id": "story_b593dfae_protagonist",
+                "start_seconds": 0.08,
+                "end_seconds": 3.36,
+                "duration_seconds": 3.28
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 85,
+          "editorial_shots": [
+            {
+              "shot_number": 1,
+              "beat_index": 1,
+              "shot_in_beat": 1,
+              "story_role": "hook",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "punch_in",
+              "start_seconds": 0,
+              "end_seconds": 1.7709,
+              "duration_seconds": 1.7709,
+              "zoom": 1.16,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 2,
+              "beat_index": 1,
+              "shot_in_beat": 2,
+              "story_role": "hook",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "reveal_left",
+              "start_seconds": 1.7709,
+              "end_seconds": 3.5417,
+              "duration_seconds": 1.7709,
+              "zoom": 1.1,
+              "crop_x": 0.38,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ]
+        },
+        {
+          "video_prompt": "Over‑the‑shoulder shot of adult Risha typing on a laptop, eyes focused, slight furrowed brow indicating mild anxiety. She wears the same white kurta and barefoot stance. In the foreground, laptop screen glows, illuminating her face. To the right, a pot of dal simmers on a gas stove, steam rising; her hand briefly rests on the pot rim, feeling warmth, then returns to typing. Camera tracks gently from laptop to pot, maintaining consistent lighting and kitchen décor, capturing her subtle mouth movement as she speaks, lasting 6.04 seconds.",
+          "narrative_role": "context",
+          "state_change": "रिशा रिपोर्ट लिख रही है, दाल का पानी उबलना भूल जाती है",
+          "causal_link": "काम की फोकस ने उसे छोटी‑छोटी चीज़ों से दूर कर दिया",
+          "visual_direction": "काम और रसोई के टकराव को दिखाना",
+          "scene_index": 2,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 5.72,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 6.0417,
+            "target_frames": 145,
+            "segments": [
+              {
+                "segment_id": "beat_02_line_01",
+                "speaker_id": "story_b593dfae_protagonist",
+                "start_seconds": 0.08,
+                "end_seconds": 5.8,
+                "duration_seconds": 5.72
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 145,
+          "editorial_shots": [
+            {
+              "shot_number": 3,
+              "beat_index": 2,
+              "shot_in_beat": 1,
+              "story_role": "context",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "gentle_push",
+              "start_seconds": 0,
+              "end_seconds": 3.0208,
+              "duration_seconds": 3.0208,
+              "zoom": 1.08,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 4,
+              "beat_index": 2,
+              "shot_in_beat": 2,
+              "story_role": "context",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "wide_drift_right",
+              "start_seconds": 3.0208,
+              "end_seconds": 6.0417,
+              "duration_seconds": 3.0208,
+              "zoom": 1.04,
+              "crop_x": 0.62,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ]
+        },
+        {
+          "video_prompt": "Two‑shot of adult Risha and adult Aman in the kitchen. Aman, with short beard, blue shirt, sandals, holds a mobile phone, gesturing toward the stove. Risha, still in white kurta, nods, eyes flicking to the clock, slight mouth movement for her reply. Both exhibit natural micro‑expressions: Aman’s calm smile, Risha’s hesitant smile. Camera positioned at eye level, slightly angled to capture both bodies, with shallow depth separating them from blurred background. Lighting remains warm, natural, emphasizing the silent tension for 6.04 seconds.",
+          "narrative_role": "conflict",
+          "state_change": "अमन आता है, मीट का ऑर्डर ले लेता है, रिशा चुप रहती है",
+          "causal_link": "अमन की मदद की पेशकश से रिशा को अपने काम में और गहराई मिलती है",
+          "visual_direction": "संवाद के बाद चुप्पी का निर्माण",
+          "scene_index": 3,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 5.6,
+            "dialogue_gap_seconds": 0.18,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 6.0417,
+            "target_frames": 145,
+            "segments": [
+              {
+                "segment_id": "beat_03_line_01",
+                "speaker_id": "story_b593dfae_supporting",
+                "start_seconds": 0.08,
+                "end_seconds": 3.08,
+                "duration_seconds": 3
+              },
+              {
+                "segment_id": "beat_03_line_02",
+                "speaker_id": "story_b593dfae_protagonist",
+                "start_seconds": 3.26,
+                "end_seconds": 5.86,
+                "duration_seconds": 2.6
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 145,
+          "editorial_shots": [
+            {
+              "shot_number": 5,
+              "beat_index": 3,
+              "shot_in_beat": 1,
+              "story_role": "conflict",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "reaction_close",
+              "start_seconds": 0,
+              "end_seconds": 3.0208,
+              "duration_seconds": 3.0208,
+              "zoom": 1.18,
+              "crop_x": 0.52,
+              "crop_y": 0.48,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 6,
+              "beat_index": 3,
+              "shot_in_beat": 2,
+              "story_role": "conflict",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "slow_push",
+              "start_seconds": 3.0208,
+              "end_seconds": 6.0417,
+              "duration_seconds": 3.0208,
+              "zoom": 1.12,
+              "crop_x": 0.5,
+              "crop_y": 0.52,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ]
+        },
+        {
+          "video_prompt": "Close‑up of Aman’s hands pulling a clean kitchen towel across the wooden table, fabric texture crisp, his shoulders relaxed. He says his line with subtle mouth motion, then the focus shifts to Risha’s hand gently lifting her tea cup, condensation glistening on the rim. Risha’s face shows soft, reluctant expression, slight mouth movement for her dialogue. Camera dolly tracks leftward, keeping the cup centered, maintaining consistent warm lighting and kitchen details for 5.21 seconds.",
+          "narrative_role": "escalation",
+          "state_change": "अमन चादरें झाड़ता है, रिशा धीरे‑धीरे चाय का कप उठाती है",
+          "causal_link": "अमन की हल्की हरकत रिश्ते की दूरी को बढ़ा देती है",
+          "visual_direction": "शारीरिक दूरी को दृश्यमान बनाना",
+          "scene_index": 4,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 4.8,
+            "dialogue_gap_seconds": 0.18,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 5.2083,
+            "target_frames": 125,
+            "segments": [
+              {
+                "segment_id": "beat_04_line_01",
+                "speaker_id": "story_b593dfae_supporting",
+                "start_seconds": 0.08,
+                "end_seconds": 2.88,
+                "duration_seconds": 2.8
+              },
+              {
+                "segment_id": "beat_04_line_02",
+                "speaker_id": "story_b593dfae_protagonist",
+                "start_seconds": 3.06,
+                "end_seconds": 5.06,
+                "duration_seconds": 2
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 125,
+          "editorial_shots": [
+            {
+              "shot_number": 7,
+              "beat_index": 4,
+              "shot_in_beat": 1,
+              "story_role": "escalation",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "track_left",
+              "start_seconds": 0,
+              "end_seconds": 2.6042,
+              "duration_seconds": 2.6042,
+              "zoom": 1.08,
+              "crop_x": 0.38,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 8,
+              "beat_index": 4,
+              "shot_in_beat": 2,
+              "story_role": "escalation",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "track_right",
+              "start_seconds": 2.6042,
+              "end_seconds": 5.2083,
+              "duration_seconds": 2.6042,
+              "zoom": 1.08,
+              "crop_x": 0.62,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ]
+        },
+        {
+          "video_prompt": "Medium shot of Aman bringing the tea cup to his lips, eyebrows raised in surprised delight, mouth moving for his line. Quick cut to Risha’s face, brief frown and slight disappointment, mouth subtly forming her words. The empty cup on the table now holds Aman’s tea, steam curling upward. Background remains softly blurred; lighting warm, emphasizing facial expressions and the swapped cup. Camera holds each reaction for a beat, then a gentle push‑in to heighten intimacy over the 6.54‑second span.",
+          "narrative_role": "turn",
+          "state_change": "अमन अनजाने में रिशा की चाय पी लेता है, वह समझती है कि उसने सुना नहीं",
+          "causal_link": "उसकी अनजानी हरकत रिश्ते की चुप्पी को उजागर करती है",
+          "visual_direction": "अहसास के क्षण को उजागर करना",
+          "scene_index": 5,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 6.2,
+            "dialogue_gap_seconds": 0.18,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 6.5417,
+            "target_frames": 157,
+            "segments": [
+              {
+                "segment_id": "beat_05_line_01",
+                "speaker_id": "story_b593dfae_supporting",
+                "start_seconds": 0.08,
+                "end_seconds": 2.8,
+                "duration_seconds": 2.72
+              },
+              {
+                "segment_id": "beat_05_line_02",
+                "speaker_id": "story_b593dfae_protagonist",
+                "start_seconds": 2.98,
+                "end_seconds": 6.46,
+                "duration_seconds": 3.48
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 157,
+          "editorial_shots": [
+            {
+              "shot_number": 9,
+              "beat_index": 5,
+              "shot_in_beat": 1,
+              "story_role": "turn",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "reveal_push",
+              "start_seconds": 0,
+              "end_seconds": 2.1806,
+              "duration_seconds": 2.1806,
+              "zoom": 1.2,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 10,
+              "beat_index": 5,
+              "shot_in_beat": 2,
+              "story_role": "turn",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "clue_insert",
+              "start_seconds": 2.1806,
+              "end_seconds": 4.3611,
+              "duration_seconds": 2.1806,
+              "zoom": 1.18,
+              "crop_x": 0.58,
+              "crop_y": 0.58,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 11,
+              "beat_index": 5,
+              "shot_in_beat": 3,
+              "story_role": "turn",
+              "coverage": "detail",
+              "source": "depth_parallax",
+              "camera_move": "reveal_push",
+              "start_seconds": 4.3611,
+              "end_seconds": 6.5417,
+              "duration_seconds": 2.1806,
+              "zoom": 1.2,
+              "crop_x": 0.5,
+              "crop_y": 0.5,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ]
+        },
+        {
+          "video_prompt": "Close‑up of an empty tea cup on the wooden table, faint steam lingering above. Aman’s adult hand rests lightly on the rim, fingers relaxed, no mouth movement. In soft focus behind, Risha’s profile appears, silhouetted by morning light, her expression calm yet slightly sad. Camera remains still, capturing the quiet stillness, warm natural lighting, and subtle shadows that echo the lingering silence for the final 4.71 seconds.",
+          "narrative_role": "payoff",
+          "state_change": "खाली कप में अमन का हाथ, रिशा अभी भी वही चुप्पी सुनती है",
+          "causal_link": "पहले की चुप्पी और अनसुनी बातें अब कप के खालीपन में परिलक्षित होती हैं",
+          "visual_direction": "अंतिम भावनात्मक प्रतिबिंब देना",
+          "scene_index": 6,
+          "voice_timing": {
+            "fps": 24,
+            "speech_duration_seconds": 4.44,
+            "dialogue_gap_seconds": 0,
+            "head_handle_seconds": 0.08,
+            "tail_handle_seconds": 0.08,
+            "target_duration_seconds": 4.7083,
+            "target_frames": 113,
+            "segments": [
+              {
+                "segment_id": "beat_06_line_01",
+                "speaker_id": "story_b593dfae_protagonist",
+                "start_seconds": 0.08,
+                "end_seconds": 4.52,
+                "duration_seconds": 4.44
+              }
+            ],
+            "timing_source": "measured_tts_wav_before_gpu",
+            "dialogue_truncated": false
+          },
+          "target_frames": 113,
+          "editorial_shots": [
+            {
+              "shot_number": 12,
+              "beat_index": 6,
+              "shot_in_beat": 1,
+              "story_role": "payoff",
+              "coverage": "establishing",
+              "source": "depth_parallax",
+              "camera_move": "slow_pull_frame",
+              "start_seconds": 0,
+              "end_seconds": 2.3542,
+              "duration_seconds": 2.3542,
+              "zoom": 1.04,
+              "crop_x": 0.5,
+              "crop_y": 0.52,
+              "style_profile_id": "warm_indian_melodrama"
+            },
+            {
+              "shot_number": 13,
+              "beat_index": 6,
+              "shot_in_beat": 2,
+              "story_role": "payoff",
+              "coverage": "reaction",
+              "source": "depth_parallax",
+              "camera_move": "emotional_hold",
+              "start_seconds": 2.3542,
+              "end_seconds": 4.7083,
+              "duration_seconds": 2.3542,
+              "zoom": 1.12,
+              "crop_x": 0.5,
+              "crop_y": 0.48,
+              "style_profile_id": "warm_indian_melodrama"
+            }
+          ]
+        }
+      ],
+      "delivery_status": "planned",
+      "output_directory": "output/20261124_0038_1_reel-1"
+    }
+  ],
+  "policy": {
+    "paid_fallback": false,
+    "auto_facebook_publish": false,
+    "max_reels": 1
+  },
+  "dispatched_at_ist": "2026-11-23T17:13:13+05:30",
+  "dispatch_output": "Kernel version 6 successfully pushed.  Please check progress at https://www.kaggle.com/code/arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker\n\n",
+  "active_finalizing_reel_id": "reel_01_170831",
+  "finalize_failed_at_ist": "2026-11-26T09:39:55+05:30",
+  "retry_finalization_count": 1,
+  "retry_requested_at_ist": "2026-11-26T09:35:49+05:30",
+  "finalize_error": null,
+  "qa_rejected_at_ist": "2026-11-26T09:38:39+05:30",
+  "qa_rejection_reason": "RuntimeError: Rendered-frame QA detected a potentially critical visual defect; the Reel was not added to the publish kit. Check QA frames and rerun.",
+  "state_reconciliation": {
+    "source": "bsk-publish-kit-121",
+    "source_run_id": 45752908189,
+    "reconciled_at_ist": "2026-11-28T09:23:31+05:30",
+    "superseded_branch_finalize_error": "RuntimeError: Voice cache mismatch for beat_02_line_01: planned 5.720s, finalizer has 5.210s. Refusing to render out of sync."
+  },
+  "archive_metadata": {
+    "archived_at_ist": "2026-11-28T12:38:07+05:30",
+    "archive_reason": "terminal_qa_rejection_after_completed_gpu_render",
+    "final_qa_rejection_reason": "RuntimeError: Rendered-frame QA detected a potentially critical visual defect; the Reel was not added to the publish kit. Check QA frames and rerun.",
+    "kaggle_kernel_id": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker",
+    "verified_kaggle_status": "COMPLETE",
+    "verified_kaggle_output": "arunkumar12051990/bina-shor-ke-private-cinematic-scene-worker has status \"KernelWorkerStatus.COMPLETE\"\n\n"
+  }
+}
